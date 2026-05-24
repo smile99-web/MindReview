@@ -1,0 +1,73 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: mindreview-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mindreview
+      POSTGRES_PASSWORD: mindreview
+      POSTGRES_DB: mindreview
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mindreview"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mindreview
+
+  auth:
+    build: ./backend
+    container_name: mindreview-auth
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      - DATABASE_URL=postgresql://mindreview:mindreview@db:5432/mindreview
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-mindreview-dev-secret-change-me}
+      - AUTH_CORS_ORIGINS=${AUTH_CORS_ORIGINS:-http://localhost:3300,http://localhost:3000}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - mindreview
+
+  app:
+    build: .
+    container_name: mindreview-app
+    restart: unless-stopped
+    ports:
+      - "3300:3000"
+    environment:
+      - DATABASE_URL=postgresql://mindreview:mindreview@db:5432/mindreview
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-mindreview-dev-secret-change-me}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-me}
+      - NEXTAUTH_URL=http://localhost:3300
+      - NEXT_PUBLIC_AUTH_API=http://localhost:8001
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
+      - DOUBAO_TTS_APP_ID=${DOUBAO_TTS_APP_ID}
+      - DOUBAO_TTS_ACCESS_TOKEN=${DOUBAO_TTS_ACCESS_TOKEN}
+      - DOUBAO_TTS_CLUSTER=${DOUBAO_TTS_CLUSTER:-volcano_tts}
+      - DOUBAO_TTS_VOICE_TYPE=${DOUBAO_TTS_VOICE_TYPE:-zh_female_qingxin}
+      - SEEDREAM_API_KEY=${SEEDREAM_API_KEY}
+      - SEEDREAM_ENDPOINT=${SEEDREAM_ENDPOINT:-https://ark.cn-beijing.volces.com/api/v3}
+      - SEEDREAM_MODEL=${SEEDREAM_MODEL:-doubao-seedream-5-0}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "npx prisma migrate deploy && node server.js"
+    networks:
+      - mindreview
+
+volumes:
+  pgdata:
+
+networks:
+  mindreview:
+    driver: bridge

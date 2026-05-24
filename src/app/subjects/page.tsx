@@ -1,0 +1,99 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { DecomposeForm } from '@/components/knowledge/DecomposeForm';
+import { SUBJECT_CONFIG } from '@/types';
+import type { SubjectName } from '@/types';
+
+export default function SubjectsPage() {
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showDecompose, setShowDecompose] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/subjects')
+      .then(res => res.json())
+      .then(data => setSubjects(data))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleDecomposed = (result: any) => {
+    setShowDecompose(false);
+    window.location.reload();
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-[28px] font-bold text-slate-800 tracking-tight">学科列表</h1>
+          <p className="text-slate-500 mt-1.5 text-[15px]">选择学科查看知识点和思维导图</p>
+        </div>
+        <Button onClick={() => setShowDecompose(!showDecompose)}>
+          {showDecompose ? '收起' : '🪄 AI拆解教材'}
+        </Button>
+      </div>
+
+      {showDecompose && (
+        <div className="mb-8">
+          <DecomposeForm onDecomposed={handleDecomposed} />
+        </div>
+      )}
+
+      {loading ? (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          {[1, 2, 3, 4, 5].map(i => (
+            <div key={i} className="h-44 bg-slate-100 rounded-2xl animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          {subjects.map((subject) => {
+            const config = SUBJECT_CONFIG[subject.name as SubjectName];
+            return (
+              <Link key={subject.id} href={`/subjects/${subject.id}`}>
+                <Card hover className="h-full">
+                  <div className="text-center py-2">
+                    <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200/50 mb-4 text-3xl">
+                      {subject.icon || config?.icon || '📖'}
+                    </div>
+                    <h3 className="font-semibold text-slate-800 mb-1.5">{subject.name}</h3>
+                    <div className="flex items-center justify-center gap-3 text-xs text-slate-400">
+                      <span>{subject._count?.chapters || 0} 章节</span>
+                      <span className="w-1 h-1 rounded-full bg-slate-300" />
+                      <span>{subject._count?.knowledgeNodes || 0} 知识点</span>
+                    </div>
+                  </div>
+                </Card>
+              </Link>
+            );
+          })}
+
+          {subjects.length === 0 && (
+            <>
+              {['语文', '数学', '物理', '化学', '历史', '道法'].map(name => {
+                const config = SUBJECT_CONFIG[name as SubjectName];
+                return (
+                  <Card key={name} className="h-full opacity-40">
+                    <div className="text-center py-2">
+                      <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-100 mb-4 text-3xl">
+                        {config?.icon || '📖'}
+                      </div>
+                      <h3 className="font-semibold text-slate-800 mb-1.5">{name}</h3>
+                      <p className="text-xs text-slate-400">0 知识点</p>
+                      <p className="text-xs text-slate-300 mt-2">请先拆解教材</p>
+                    </div>
+                  </Card>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
