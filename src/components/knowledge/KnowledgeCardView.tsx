@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { getDifficultyLabel } from '@/lib/utils';
 import { ICAP_LABELS } from '@/types';
 import type { IcapLevel } from '@/types';
+import { RepresentationView } from './RepresentationView';
 
 interface KnowledgeCardViewProps {
   node: {
@@ -24,6 +25,8 @@ interface KnowledgeCardViewProps {
     typicalQuestions: string[];
     prerequisites: string[];
     knowledgeCards: any[];
+    representationType?: string | null;
+    representationData?: any;
   };
   onTTS?: (text: string) => void;
   onGenerateImage?: (prompt: string) => void;
@@ -160,6 +163,11 @@ export function KnowledgeCardView({ node, onTTS, onGenerateImage }: KnowledgeCar
             ))}
           </ul>
         </Card>
+      )}
+
+      {/* 表征可视化 */}
+      {(node.representationType || node.representationData) && (
+        <RepresentationView node={node as any} />
       )}
 
       {/* 关联知识卡片 */}

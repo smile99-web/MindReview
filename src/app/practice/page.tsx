@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { MasteryBar } from '@/components/ui/MasteryBar';
+import { IcapPipeline } from '@/components/practice/IcapPipeline';
 
 export default function PracticePage() {
   const [nodes, setNodes] = useState<any[]>([]);
@@ -14,6 +15,9 @@ export default function PracticePage() {
   const [questions, setQuestions] = useState<any[]>([]);
   const [generating, setGenerating] = useState(false);
   const [activeIcap, setActiveIcap] = useState('Active');
+  const [showPipeline, setShowPipeline] = useState(false);
+  const [pipelineNodeId, setPipelineNodeId] = useState<string | null>(null);
+  const [pipelineNodeTitle, setPipelineNodeTitle] = useState('');
 
   useEffect(() => {
     fetch('/api/knowledge?limit=20')
@@ -66,21 +70,32 @@ export default function PracticePage() {
             <h3 className="font-semibold text-slate-800 mb-4 text-[15px]">选择知识点</h3>
             <div className="space-y-1 max-h-[600px] overflow-y-auto">
               {nodes.map((node: any) => (
-                <button
-                  key={node.id}
-                  onClick={() => handleGenerateQuestions(node.id, activeIcap)}
-                  className={`w-full text-left p-3 rounded-xl transition-all duration-200 ${
-                    selectedNode === node.id
-                      ? 'bg-indigo-50/80 border border-indigo-200/60 shadow-sm'
-                      : 'hover:bg-slate-50 border border-transparent'
-                  }`}
-                >
-                  <div className="text-sm font-medium text-slate-800 truncate">{node.title}</div>
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <Badge variant="info" size="sm">{node.subject?.name}</Badge>
-                    <MasteryBar level={node.masteryLevel} showLabel={false} />
-                  </div>
-                </button>
+                <div key={node.id}>
+                  <button
+                    onClick={() => handleGenerateQuestions(node.id, activeIcap)}
+                    className={`w-full text-left p-3 rounded-xl transition-all duration-200 ${
+                      selectedNode === node.id
+                        ? 'bg-indigo-50/80 border border-indigo-200/60 shadow-sm'
+                        : 'hover:bg-slate-50 border border-transparent'
+                    }`}
+                  >
+                    <div className="text-sm font-medium text-slate-800 truncate">{node.title}</div>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <Badge variant="info" size="sm">{node.subject?.name}</Badge>
+                      <MasteryBar level={node.masteryLevel} showLabel={false} />
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPipelineNodeId(node.id);
+                      setPipelineNodeTitle(node.title);
+                      setShowPipeline(true);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs text-purple-500 hover:text-purple-600 hover:bg-purple-50/50 rounded-lg transition-colors mt-0.5"
+                  >
+                    完整ICAP训练 →
+                  </button>
+                </div>
               ))}
             </div>
           </Card>
@@ -211,6 +226,20 @@ export default function PracticePage() {
           )}
         </div>
       </div>
+
+      {/* ICAP Pipeline Modal */}
+      {showPipeline && pipelineNodeId && (
+        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4">
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <IcapPipeline
+              knowledgeNodeId={pipelineNodeId}
+              knowledgeNodeTitle={pipelineNodeTitle}
+              onComplete={() => setShowPipeline(false)}
+              onClose={() => setShowPipeline(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

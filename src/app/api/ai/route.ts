@@ -2,6 +2,42 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { generateQuestions, analyzeMistake, generateSummary } from '@/lib/llm-client';
 
+// GET /api/ai?action=list-logs — 查询 AI 生成日志
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = req.nextUrl;
+    const action = searchParams.get('action');
+
+    if (action === 'list-logs') {
+      const generatorType = searchParams.get('generatorType') || 'all';
+      const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+      const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
+
+      const where: Record<string, string> = {};
+      if (generatorType !== 'all') {
+        where.generatorType = generatorType;
+      }
+
+      const [logs, total] = await Promise.all([
+        prisma.aiGenerationLog.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.aiGenerationLog.count({ where }),
+      ]);
+
+      return NextResponse.json({ logs, total, page, limit });
+    }
+
+    return NextResponse.json({ error: '未知操作' }, { status: 400 });
+  } catch (error: any) {
+    console.error('[AI API GET] Error:', error);
+    return NextResponse.json({ error: error.message || '服务器内部错误' }, { status: 500 });
+  }
+}
+
 // POST /api/ai/questions — 生成题目
 export async function POST(req: NextRequest) {
   try {

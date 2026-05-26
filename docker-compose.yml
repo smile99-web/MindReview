@@ -47,14 +47,13 @@ services:
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-me}
       - NEXTAUTH_URL=http://localhost:3300
       - NEXT_PUBLIC_AUTH_API=http://localhost:8001
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
-      - DOUBAO_TTS_APP_ID=${DOUBAO_TTS_APP_ID}
-      - DOUBAO_TTS_ACCESS_TOKEN=${DOUBAO_TTS_ACCESS_TOKEN}
-      - DOUBAO_TTS_CLUSTER=${DOUBAO_TTS_CLUSTER:-volcano_tts}
-      - DOUBAO_TTS_VOICE_TYPE=${DOUBAO_TTS_VOICE_TYPE:-zh_female_qingxin}
-      - SEEDREAM_API_KEY=${SEEDREAM_API_KEY}
+      - DOUBAO_TTS_API_KEY=${DOUBAO_TTS_API_KEY:-}
+      - DOUBAO_TTS_RESOURCE_ID=${DOUBAO_TTS_RESOURCE_ID:-seed-tts-2.0}
+      - DOUBAO_TTS_VOICE_TYPE=${DOUBAO_TTS_VOICE_TYPE:-zh_female_vv_uranus_bigtts}
+      - SEEDREAM_API_KEY=${SEEDREAM_API_KEY:-}
       - SEEDREAM_ENDPOINT=${SEEDREAM_ENDPOINT:-https://ark.cn-beijing.volces.com/api/v3}
       - SEEDREAM_MODEL=${SEEDREAM_MODEL:-doubao-seedream-5-0}
     depends_on:
@@ -64,6 +63,12 @@ services:
       sh -c "npx prisma migrate deploy && node server.js"
     networks:
       - mindreview
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/subjects', function(r){process.exit(r.statusCode===200?0:1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
   pgdata:

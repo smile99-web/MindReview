@@ -11,11 +11,6 @@ interface User {
   avatarUrl: string | null;
 }
 
-interface AuthTokens {
-  access_token: string;
-  refresh_token: string;
-}
-
 interface TokenPayload {
   sub: string;
   username: string;
@@ -39,12 +34,16 @@ function getRefreshToken(): string | null {
   return localStorage.getItem(REFRESH_KEY);
 }
 
-function setTokens(access: string, refresh: string) {
-  localStorage.setItem(ACCESS_KEY, access);
-  localStorage.setItem(REFRESH_KEY, refresh);
+function setAuthCookies(access: string) {
   const secure = window.location.protocol === "https:" ? "; Secure" : "";
   document.cookie = `${ACCESS_COOKIE}=${encodeURIComponent(access)}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
   document.cookie = `auth_status=1; path=/; max-age=${7 * 24 * 3600}; SameSite=Lax${secure}`;
+}
+
+function setTokens(access: string, refresh: string) {
+  localStorage.setItem(ACCESS_KEY, access);
+  localStorage.setItem(REFRESH_KEY, refresh);
+  setAuthCookies(access);
 }
 
 function clearTokens() {
@@ -81,8 +80,9 @@ function isTokenExpired(token: string): boolean {
 }
 
 export async function getValidToken(): Promise<string | null> {
-  let access = getAccessToken();
+  const access = getAccessToken();
   if (access && !isTokenExpired(access)) {
+    setAuthCookies(access);
     return access;
   }
 
@@ -109,11 +109,36 @@ export async function getValidToken(): Promise<string | null> {
   }
 }
 
-function parseError(err: any, fallback: string): string {
+export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const token = await getValidToken();
+  const headers = new Headers(init.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return fetch(input, { ...init, headers });
+}
+
+function parseError(err: unknown, fallback: string): string {
   if (!err) return fallback;
-  const detail = err.detail;
+  const detail = typeof err === "object" && err !== null && "detail" in err
+    ? (err as { detail?: unknown }).detail
+    : undefined;
   if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) return detail.map((d: any) => d.msg || d.message || JSON.stringify(d)).join("; ");
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === "object" && item !== null) {
+          const record = item as { msg?: unknown; message?: unknown };
+          return typeof record.msg === "string"
+            ? record.msg
+            : typeof record.message === "string"
+              ? record.message
+              : JSON.stringify(item);
+        }
+        return String(item);
+      })
+      .join("; ");
+  }
   return fallback;
 }
 

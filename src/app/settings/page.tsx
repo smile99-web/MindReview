@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { authFetch } from "@/lib/auth";
 
 type ServiceName = "llm" | "tts" | "image";
 
@@ -11,11 +12,11 @@ interface KeyState {
   saved: boolean;
   testing: boolean;
   result: { ok: boolean; error?: string; message?: string; latencyMs?: number } | null;
+  maskedKey: string;
   key: string;
   baseUrl: string;
   model: string;
-  appId: string;      // TTS only
-  cluster: string;    // TTS only
+  cluster: string;    // TTS Resource ID
   voiceType: string;  // TTS only
 }
 
@@ -31,18 +32,18 @@ interface SavedKey {
 const DEFAULT_KEYS: Record<ServiceName, KeyState> = {
   llm: {
     saved: false, testing: false, result: null,
-    key: "", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash",
-    appId: "", cluster: "", voiceType: "",
+    maskedKey: "", key: "", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash",
+    cluster: "", voiceType: "",
   },
   tts: {
     saved: false, testing: false, result: null,
-    key: "", baseUrl: "", model: "",
-    appId: "", cluster: "volcano_tts", voiceType: "zh_female_qingxin",
+    maskedKey: "", key: "", baseUrl: "", model: "",
+    cluster: "seed-tts-2.0", voiceType: "zh_female_vv_uranus_bigtts",
   },
   image: {
     saved: false, testing: false, result: null,
-    key: "", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seedream-5-0-260128",
-    appId: "", cluster: "", voiceType: "",
+    maskedKey: "", key: "", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seedream-5-0-260128",
+    cluster: "", voiceType: "",
   },
 };
 
@@ -61,7 +62,7 @@ const SERVICE_INFO: Record<ServiceName, { title: string; icon: string; desc: str
     desc: "知识卡片语音朗读",
     docUrl: "https://www.volcengine.com/docs/6561",
     docLabel: "火山引擎 TTS 文档",
-    fields: ["key", "appId", "cluster", "voiceType"],
+    fields: ["key", "cluster", "voiceType"],
   },
   image: {
     title: "Doubao Seedream",
@@ -77,17 +78,60 @@ export default function SettingsPage() {
   const [keys, setKeys] = useState<Record<ServiceName, KeyState>>(DEFAULT_KEYS);
   const [savedKeys, setSavedKeys] = useState<SavedKey[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const applySavedKeys = useCallback((data: SavedKey[]) => {
+    setSavedKeys(data);
+    setKeys((prev) => {
+      const next = { ...prev };
+      for (const saved of data) {
+        if (saved.service !== "llm" && saved.service !== "tts" && saved.service !== "image") continue;
+        const svc = saved.service;
+        next[svc] = {
+          ...next[svc],
+          saved: true,
+          maskedKey: saved.key,
+          baseUrl: svc === "tts" ? next[svc].baseUrl : saved.baseUrl || next[svc].baseUrl,
+          model: svc === "tts" ? next[svc].model : saved.model || next[svc].model,
+          cluster: svc === "tts" ? saved.baseUrl || next[svc].cluster : next[svc].cluster,
+          voiceType: svc === "tts" ? saved.model || next[svc].voiceType : next[svc].voiceType,
+        };
+      }
+      return next;
+    });
+  }, []);
 
   // 加载已保存的 keys
   useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((data: SavedKey[]) => {
-        if (Array.isArray(data)) setSavedKeys(data);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+    let cancelled = false;
+
+    async function loadSettings() {
+      try {
+        const res = await authFetch("/api/settings");
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(res.status === 401 ? "登录已过期，请重新登录" : data?.error || "加载设置失败");
+        }
+        if (!Array.isArray(data)) {
+          throw new Error("设置数据格式异常");
+        }
+        if (!cancelled) {
+          setLoadError(null);
+          applySavedKeys(data);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "加载设置失败";
+        if (!cancelled) setLoadError(message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [applySavedKeys]);
 
   const updateField = (svc: ServiceName, field: string, value: string) => {
     setKeys((prev) => ({
@@ -100,22 +144,41 @@ export default function SettingsPage() {
   const saveKey = async (svc: ServiceName) => {
     const k = keys[svc];
     try {
-      await fetch("/api/settings", {
+      const res = await authFetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           service: svc,
           key: k.key,
-          baseUrl: k.baseUrl || undefined,
-          model: k.model || undefined,
+          baseUrl: svc === "tts" ? k.cluster || undefined : k.baseUrl || undefined,
+          model: svc === "tts" ? k.voiceType || undefined : k.model || undefined,
         }),
       });
-      setKeys((prev) => ({ ...prev, [svc]: { ...prev[svc], saved: true } }));
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(res.status === 401 ? "登录已过期，请重新登录后再保存" : data?.error || "保存失败");
+      }
+
+      setKeys((prev) => ({
+        ...prev,
+        [svc]: {
+          ...prev[svc],
+          key: "",
+          saved: true,
+          maskedKey: typeof data?.masked === "string" ? data.masked : prev[svc].maskedKey,
+          result: { ok: true, message: "保存成功" },
+        },
+      }));
       // Refresh saved list
-      const res = await fetch("/api/settings");
-      setSavedKeys(await res.json());
-    } catch {
-      // ignore
+      const refreshRes = await authFetch("/api/settings");
+      const saved = await refreshRes.json().catch(() => null);
+      if (Array.isArray(saved)) applySavedKeys(saved);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "保存失败";
+      setKeys((prev) => ({
+        ...prev,
+        [svc]: { ...prev[svc], result: { ok: false, error: message } },
+      }));
     }
   };
 
@@ -135,12 +198,12 @@ export default function SettingsPage() {
       if (k.baseUrl) body.baseUrl = k.baseUrl;
       if (k.model) body.model = k.model;
       if (svc === "tts") {
-        if (k.appId) body.appId = k.appId;
         if (k.cluster) body.cluster = k.cluster;
+        if (k.cluster) body.resourceId = k.cluster;
         if (k.voiceType) body.voiceType = k.voiceType;
       }
 
-      const res = await fetch(testEndpoints[svc], {
+      const res = await authFetch(testEndpoints[svc], {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -151,10 +214,11 @@ export default function SettingsPage() {
         ...prev,
         [svc]: { ...prev[svc], testing: false, result: data, saved: true },
       }));
-    } catch (err: any) {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Connection test failed";
       setKeys((prev) => ({
         ...prev,
-        [svc]: { ...prev[svc], testing: false, result: { ok: false, error: err.message } },
+        [svc]: { ...prev[svc], testing: false, result: { ok: false, error: message } },
       }));
     }
   };
@@ -163,6 +227,11 @@ export default function SettingsPage() {
     <div className="max-w-3xl mx-auto px-6 py-8">
       <h1 className="text-[28px] font-bold text-slate-800 tracking-tight mb-2">设置</h1>
       <p className="text-slate-500 text-[15px] mb-8">配置 AI 服务 API Key，每个服务可单独测试连接</p>
+      {loadError && (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {loadError}
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-4">
@@ -173,6 +242,7 @@ export default function SettingsPage() {
           {(Object.entries(SERVICE_INFO) as [ServiceName, typeof SERVICE_INFO["llm"]][]).map(([svc, info]) => {
             const k = keys[svc];
             const saved = savedKeys.find((s) => s.service === svc);
+            const hasSavedKey = Boolean(saved || k.saved);
 
             return (
               <Card key={svc}>
@@ -203,43 +273,38 @@ export default function SettingsPage() {
                   {/* API Key */}
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">
-                      API Key {!saved && <span className="text-red-400">*</span>}
-                      {saved && <span className="text-emerald-500 ml-1">已保存 ✓</span>}
+                      API Key {!hasSavedKey && <span className="text-red-400">*</span>}
+                      {hasSavedKey && <span className="text-emerald-500 ml-1">已保存 ✓</span>}
                     </label>
                     <div className="flex gap-2">
                       <input
                         type="password"
                         value={k.key}
                         onChange={(e) => updateField(svc, "key", e.target.value)}
-                        placeholder={saved ? "已保存，可直接测试 · 输入新 Key 可更新" : "输入 API Key..."}
+                        placeholder={hasSavedKey ? "已保存，可直接测试 · 输入新 Key 可更新" : "输入 API Key..."}
                         className="flex-1 rounded-xl border border-slate-200/80 px-3.5 py-2.5 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors placeholder:text-slate-400 font-mono"
                       />
                       <Button size="sm" variant="secondary" onClick={() => saveKey(svc)} disabled={!k.key}>
                         保存
                       </Button>
                     </div>
+                    {hasSavedKey && k.maskedKey && (
+                      <p className="mt-1 text-xs text-slate-400 font-mono">
+                        当前已保存：{k.maskedKey}
+                      </p>
+                    )}
                   </div>
 
                   {/* TTS 专用字段 */}
                   {svc === "tts" && (
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs font-medium text-slate-600 mb-1">App ID</label>
-                        <input
-                          type="text"
-                          value={k.appId}
-                          onChange={(e) => updateField(svc, "appId", e.target.value)}
-                          placeholder="App ID"
-                          className="w-full rounded-xl border border-slate-200/80 px-3 py-2 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors font-mono placeholder:text-slate-300"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-600 mb-1">Cluster</label>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">Resource ID</label>
                         <input
                           type="text"
                           value={k.cluster}
                           onChange={(e) => updateField(svc, "cluster", e.target.value)}
-                          placeholder="volcano_tts"
+                          placeholder="seed-tts-2.0"
                           className="w-full rounded-xl border border-slate-200/80 px-3 py-2 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors font-mono placeholder:text-slate-300"
                         />
                       </div>
@@ -251,6 +316,7 @@ export default function SettingsPage() {
                           className="w-full rounded-xl border border-slate-200/80 px-3 py-2 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors"
                         >
                           <optgroup label="精品音色 (2.0)">
+                            <option value="zh_female_vv_uranus_bigtts">豆包通用女声</option>
                             <option value="BV701_streaming">擎苍 (男声·推荐)</option>
                             <option value="BV700_streaming">灿灿 (男声)</option>
                             <option value="BV001_streaming">通用女声</option>
@@ -312,7 +378,7 @@ export default function SettingsPage() {
                     size="sm"
                     onClick={() => testConnection(svc)}
                     loading={k.testing}
-                    disabled={!k.key && !saved}
+                    disabled={!k.key && !hasSavedKey}
                   >
                     测试连接
                   </Button>
@@ -328,7 +394,7 @@ export default function SettingsPage() {
                       <span>{k.result.ok ? "✓" : "✗"}</span>
                       <span>
                         {k.result.ok
-                          ? `连接成功${k.result.latencyMs ? ` (${k.result.latencyMs}ms)` : ""}`
+                          ? k.result.message || `连接成功${k.result.latencyMs ? ` (${k.result.latencyMs}ms)` : ""}`
                           : k.result.error || "连接失败"}
                       </span>
                     </div>

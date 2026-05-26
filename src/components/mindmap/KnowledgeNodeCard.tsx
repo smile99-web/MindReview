@@ -56,6 +56,19 @@ export const KnowledgeNodeCard = memo(({ data, selected }: KnowledgeNodeCardProp
         </p>
       )}
 
+      {/* Mastery bar */}
+      <div className="mb-2">
+        <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{
+              width: `${masteryLevel}%`,
+              backgroundColor: masteryLevel >= 70 ? '#10b981' : masteryLevel >= 40 ? '#f59e0b' : '#ef4444',
+            }}
+          />
+        </div>
+      </div>
+
       {/* Tags */}
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className="text-[11px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-medium">

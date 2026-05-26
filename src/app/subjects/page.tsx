@@ -5,23 +5,34 @@ import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DecomposeForm } from '@/components/knowledge/DecomposeForm';
+import { authFetch } from '@/lib/auth';
 import { SUBJECT_CONFIG } from '@/types';
 import type { SubjectName } from '@/types';
 
+interface SubjectItem {
+  id: string;
+  name: string;
+  icon?: string | null;
+  _count?: {
+    chapters?: number;
+    knowledgeNodes?: number;
+  };
+}
+
 export default function SubjectsPage() {
-  const [subjects, setSubjects] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<SubjectItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDecompose, setShowDecompose] = useState(false);
 
   useEffect(() => {
-    fetch('/api/subjects')
-      .then(res => res.json())
-      .then(data => setSubjects(data))
+    authFetch('/api/subjects')
+      .then((res) => res.json())
+      .then((data) => setSubjects(Array.isArray(data) ? data : []))
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
 
-  const handleDecomposed = (result: any) => {
+  const handleDecomposed = () => {
     setShowDecompose(false);
     window.location.reload();
   };

@@ -21,28 +21,18 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [subjRes, nodesRes, reviewRes] = await Promise.all([
-          fetch('/api/subjects'),
-          fetch('/api/knowledge?limit=8'),
-          fetch('/api/review?mode=standard'),
-        ]);
+        const res = await fetch('/api/dashboard');
+        const data = await res.json();
 
-        const subjectsData = await subjRes.json();
-        const nodesData = await nodesRes.json();
-        const reviewData = await reviewRes.json();
-
-        setSubjects(subjectsData);
-        setRecentNodes(nodesData.nodes || []);
-        setDueTasks(reviewData.tasks || []);
-
-        const mistakesRes = await fetch('/api/mistakes');
-        const mistakesData = await mistakesRes.json();
+        setSubjects(data.subjects || []);
+        setRecentNodes(data.recentNodes || []);
+        setDueTasks(data.dueTasks || []);
 
         setStats({
-          totalNodes: nodesData.total || 0,
-          reviewedToday: (reviewData.tasks || []).filter((t: any) => t.completed).length,
-          pendingTasks: (reviewData.tasks || []).filter((t: any) => !t.completed).length,
-          totalMistakes: Array.isArray(mistakesData) ? mistakesData.length : 0,
+          totalNodes: data.stats?.totalNodes || 0,
+          reviewedToday: data.stats?.reviewedToday || 0,
+          pendingTasks: data.stats?.pendingTasks || 0,
+          totalMistakes: data.stats?.totalMistakes || 0,
         });
       } catch (err) {
         console.error('Dashboard load error:', err);

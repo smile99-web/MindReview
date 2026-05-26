@@ -1,39 +1,43 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ComponentProps } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
 import { ReviewTaskCard } from '@/components/review/ReviewTaskCard';
+import { CognitiveLoadManager } from '@/components/review/CognitiveLoadManager';
 import { REVIEW_MODE_CONFIG } from '@/types';
 import type { ReviewMode } from '@/types';
 
+type ReviewTask = ComponentProps<typeof ReviewTaskCard>['task'];
+
 export default function ReviewPage() {
-  const [tasks, setTasks] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<ReviewTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<ReviewMode>('standard');
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
+  const [recentErrors, setRecentErrors] = useState(0);
+  const [sessionStartTime] = useState(() => Date.now());
 
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/review?mode=${mode}`);
       const data = await res.json();
       setTasks(data.tasks || []);
-      setSessionId(data.sessionId);
-      setCompletedCount((data.tasks || []).filter((t: any) => t.completed).length);
+      setCompletedCount((data.tasks || []).filter((task: ReviewTask) => task.completed).length);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [mode]);
 
   useEffect(() => {
-    loadTasks();
-  }, [mode]);
+    queueMicrotask(() => {
+      void loadTasks();
+    });
+  }, [loadTasks]);
 
   const handleComplete = async (taskId: string, quality: number, knowledgeNodeId: string) => {
     try {
@@ -48,6 +52,8 @@ export default function ReviewPage() {
         }),
       });
       setCompletedCount(prev => prev + 1);
+      if (quality < 3) setRecentErrors(prev => prev + 1);
+      else setRecentErrors(prev => Math.max(0, prev - 1));
     } catch (err) {
       console.error(err);
     }
@@ -70,9 +76,21 @@ export default function ReviewPage() {
         </Button>
       </div>
 
+      {/* 认知负荷管理 */}
+      <CognitiveLoadManager
+        mode={mode}
+        onModeChange={setMode}
+        onBreak={() => alert('建议休息5分钟再继续！')}
+        completedCount={completedCount}
+        totalCount={tasks.length}
+        sessionStartTime={sessionStartTime}
+        recentErrors={recentErrors}
+        averageMastery={tasks.reduce((sum, task) => sum + (task.knowledgeNode?.masteryLevel || 0), 0) / Math.max(1, tasks.length)}
+      />
+
       {/* 模式选择 */}
       <div className="flex gap-2 mb-6">
-        {(Object.entries(REVIEW_MODE_CONFIG) as [ReviewMode, any][]).map(([key, config]) => (
+        {(Object.entries(REVIEW_MODE_CONFIG) as [ReviewMode, (typeof REVIEW_MODE_CONFIG)[ReviewMode]][]).map(([key, config]) => (
           <button
             key={key}
             onClick={() => setMode(key)}
@@ -157,7 +175,7 @@ export default function ReviewPage() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {tasks.map((task: any) => (
+          {tasks.map((task) => (
             <ReviewTaskCard
               key={task.id}
               task={task}

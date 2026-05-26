@@ -86,6 +86,7 @@ model KnowledgeNode {
   forgetRisk        Float     @default(0)  // 遗忘风险 0-1
   representationType String?  // formula/image/step/timeline/causal/mindmap etc.
   representationData Json?    // 表征数据
+  embedding         Unsupported("vector(1536)")?  // pgvector 语义搜索嵌入
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 

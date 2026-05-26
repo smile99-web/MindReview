@@ -1,32 +1,71 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { formatDateTime } from '@/lib/utils';
+import type { BadgeVariant } from '@/components/ui/Badge';
+
+const PAGE_SIZE = 20;
+
+interface AiLog {
+  id: string;
+  generatorType: string;
+  model: string;
+  status: string;
+  prompt?: string | null;
+  createdAt: string | Date;
+  durationMs?: number | null;
+  tokensUsed?: number | null;
+}
 
 export default function AILogsPage() {
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<AiLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch('/api/ai?action=list-logs');
-        if (!res.ok) {
-          setLogs([]);
-        }
-      } catch {
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const fetchLogs = useCallback(async (currentFilter: string, currentPage: number) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        action: 'list-logs',
+        generatorType: currentFilter,
+        page: String(currentPage),
+        limit: String(PAGE_SIZE),
+      });
+      const res = await fetch(`/api/ai?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data.logs || []);
+        setTotal(data.total || 0);
+      } else {
         setLogs([]);
-      } finally {
-        setLoading(false);
+        setTotal(0);
       }
+    } catch {
+      setLogs([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
     }
-    load();
   }, []);
 
-  const statusColors: Record<string, string> = {
+  useEffect(() => {
+    queueMicrotask(() => {
+      void fetchLogs(filter, page);
+    });
+  }, [filter, page, fetchLogs]);
+
+  const handleFilterChange = (newFilter: string) => {
+    setFilter(newFilter);
+    setPage(1);
+  };
+
+  const statusColors: Record<string, BadgeVariant> = {
     success: 'success',
     failed: 'danger',
     pending: 'warning',
@@ -40,7 +79,12 @@ export default function AILogsPage() {
     { key: 'image', label: '图片', icon: '🎨' },
   ];
 
-  if (loading) {
+  const getTypeIcon = (type: string) => {
+    const opt = filterOptions.find(f => f.key === type);
+    return opt?.icon || '📋';
+  };
+
+  if (loading && logs.length === 0) {
     return (
       <div className="max-w-4xl mx-auto px-6 py-8">
         <div className="h-8 w-32 bg-slate-200 rounded animate-pulse mb-4" />
@@ -63,7 +107,7 @@ export default function AILogsPage() {
         {filterOptions.map(f => (
           <button
             key={f.key}
-            onClick={() => setFilter(f.key)}
+            onClick={() => handleFilterChange(f.key)}
             className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
               filter === f.key
                 ? 'bg-white text-indigo-600 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.02)] border border-indigo-200/60'
@@ -75,7 +119,12 @@ export default function AILogsPage() {
         ))}
       </div>
 
-      {logs.length === 0 ? (
+      {/* 日志列表 */}
+      {loading ? (
+        <div className="space-y-3">
+          {[1, 2, 3].map(i => <div key={i} className="h-16 bg-slate-100 rounded-2xl animate-pulse" />)}
+        </div>
+      ) : logs.length === 0 ? (
         <Card>
           <div className="text-center py-14">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-100 text-2xl mb-4">
@@ -87,41 +136,61 @@ export default function AILogsPage() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {logs
-            .filter((log: any) => filter === 'all' || log.generatorType === filter)
-            .map((log: any) => (
-              <Card key={log.id} padding="sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-lg">
-                      {log.generatorType === 'llm' ? '🤖' : log.generatorType === 'tts' ? '🔊' : '🎨'}
-                    </span>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-slate-800">
-                          {log.generatorType.toUpperCase()} · {log.model}
-                        </span>
-                        <Badge
-                          variant={(statusColors[log.status] || 'default') as any}
-                          size="sm"
-                        >
-                          {log.status}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        {log.prompt?.slice(0, 80)}
-                        {log.prompt?.length > 80 ? '...' : ''}
-                      </p>
+          {logs.map((log) => (
+            <Card key={log.id} padding="sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-lg">{getTypeIcon(log.generatorType)}</span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-slate-800">
+                        {log.generatorType.toUpperCase()} · {log.model}
+                      </span>
+                      <Badge
+                        variant={statusColors[log.status] || 'default'}
+                        size="sm"
+                      >
+                        {log.status}
+                      </Badge>
                     </div>
-                  </div>
-                  <div className="text-right text-xs text-slate-400">
-                    <div>{formatDateTime(log.createdAt)}</div>
-                    {log.durationMs && <div>{log.durationMs}ms</div>}
-                    {log.tokensUsed && <div>{log.tokensUsed} tokens</div>}
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {(log.prompt ?? '').slice(0, 80)}
+                      {(log.prompt?.length ?? 0) > 80 ? '...' : ''}
+                    </p>
                   </div>
                 </div>
-              </Card>
-            ))}
+                <div className="text-right text-xs text-slate-400">
+                  <div>{formatDateTime(log.createdAt)}</div>
+                  {log.durationMs && <div>{log.durationMs}ms</div>}
+                  {log.tokensUsed && <div>{log.tokensUsed} tokens</div>}
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* 分页 */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-3 mt-8">
+          <button
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            className="px-4 py-2 rounded-xl text-sm font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            上一页
+          </button>
+          <span className="text-sm text-slate-500">
+            {page} / {totalPages}
+            <span className="text-slate-400 ml-1">({total} 条)</span>
+          </span>
+          <button
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+            className="px-4 py-2 rounded-xl text-sm font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            下一页
+          </button>
         </div>
       )}
     </div>
