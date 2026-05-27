@@ -8,6 +8,13 @@ import { prisma } from '@/lib/prisma';
 
 const EMBEDDING_DIM = 1536;
 
+interface SearchableNode {
+  id: string;
+  title: string;
+  summary: string | null;
+  subject: { name: string } | null;
+}
+
 function hashWord(word: string): number {
   let h = 0;
   for (let i = 0; i < word.length; i++) {
@@ -123,7 +130,7 @@ export async function searchSimilarNodes(
   });
 
   const scored = nodes
-    .map(node => {
+    .map((node: SearchableNode) => {
       let score = 0;
       // Boost text matches
       const lowerQuery = query.toLowerCase();
@@ -139,8 +146,8 @@ export async function searchSimilarNodes(
         score,
       };
     })
-    .filter(n => n.score > 0)
-    .sort((a, b) => b.score - a.score)
+    .filter((n: { score: number }) => n.score > 0)
+    .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
     .slice(0, limit);
 
   return scored;

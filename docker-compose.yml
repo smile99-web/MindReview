@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: mindreview
       POSTGRES_DB: mindreview
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -64,7 +64,7 @@ services:
     networks:
       - mindreview
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/subjects', function(r){process.exit(r.statusCode===200?0:1)})"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', function(r){process.exit(r.statusCode===200?0:1)})"]
       interval: 30s
       timeout: 10s
       retries: 3

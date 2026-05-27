@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
         take: limit,
       });
 
-      results = textResults.map(n => ({
+      results = textResults.map((n: { id: string; title: string; summary: string | null; subject: { name: string } | null }) => ({
         id: n.id,
         title: n.title,
         summary: n.summary || '',

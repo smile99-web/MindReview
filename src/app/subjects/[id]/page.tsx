@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { MasteryBar } from '@/components/ui/MasteryBar';
 import { DecomposeForm } from '@/components/knowledge/DecomposeForm';
+import { TextbookGenerateForm } from '@/components/knowledge/TextbookGenerateForm';
 import { SUBJECT_CONFIG } from '@/types';
 import type { SubjectName } from '@/types';
 
@@ -21,6 +22,7 @@ export default function SubjectDetailPage() {
   const [nodes, setNodes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDecompose, setShowDecompose] = useState(false);
+  const [showTextbookGenerate, setShowTextbookGenerate] = useState(false);
   const [activeTab, setActiveTab] = useState<'chapters' | 'nodes'>('chapters');
 
   useEffect(() => {
@@ -97,11 +99,37 @@ export default function SubjectDetailPage() {
           <Link href={`/mindmap?subjectId=${id}`}>
             <Button variant="secondary">思维导图</Button>
           </Link>
-          <Button onClick={() => setShowDecompose(!showDecompose)}>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setShowTextbookGenerate(!showTextbookGenerate);
+              setShowDecompose(false);
+            }}
+          >
+            {showTextbookGenerate ? '收起' : '人教版生成'}
+          </Button>
+          <Button
+            onClick={() => {
+              setShowDecompose(!showDecompose);
+              setShowTextbookGenerate(false);
+            }}
+          >
             {showDecompose ? '收起' : 'AI拆解'}
           </Button>
         </div>
       </div>
+
+      {showTextbookGenerate && (
+        <div className="mb-8">
+          <TextbookGenerateForm
+            initialSubject={subject.name as SubjectName}
+            onGenerated={() => {
+              setShowTextbookGenerate(false);
+              window.location.reload();
+            }}
+          />
+        </div>
+      )}
 
       {showDecompose && (
         <div className="mb-8">

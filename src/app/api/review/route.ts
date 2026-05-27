@@ -2,6 +2,29 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { sm2, calcCurrentForgetRisk } from '@/lib/sm2';
 
+interface ReviewTaskRow {
+  id: string;
+  taskType: string;
+  completed: boolean;
+  score: number | null;
+}
+
+interface ReviewDueNode {
+  id: string;
+  title: string;
+  summary: string | null;
+  difficulty: number;
+  icapLevel: string;
+  masteryLevel: number;
+  repetitions: number;
+  easeFactor: number;
+  intervalDays: number;
+  lastReviewAt: Date | null;
+  nextReviewAt: Date | null;
+  reviewTasks: ReviewTaskRow[];
+  currentForgetRisk?: number;
+}
+
 // GET /api/review — 获取待复习知识点
 export async function GET(req: NextRequest) {
   try {
@@ -41,7 +64,7 @@ export async function GET(req: NextRequest) {
     });
 
     // 2. 计算遗忘风险
-    const nodesWithRisk = dueNodes.map((node) => ({
+    const nodesWithRisk = dueNodes.map((node: ReviewDueNode) => ({
       ...node,
       currentForgetRisk: calcCurrentForgetRisk({
         easeFactor: node.easeFactor,
@@ -54,7 +77,7 @@ export async function GET(req: NextRequest) {
     // 3. 创建或复用 ReviewTask
     const tasks = [];
     for (const node of nodesWithRisk) {
-      let task = node.reviewTasks[0];
+      let task: ReviewTaskRow | undefined = node.reviewTasks[0];
 
       if (!task) {
         // 确定任务类型
@@ -63,7 +86,7 @@ export async function GET(req: NextRequest) {
         else if (node.repetitions >= 3 && node.easeFactor >= 2.5) taskType = 'constructive';
         else if (node.repetitions >= 5 && node.easeFactor >= 2.8) taskType = 'interactive';
 
-        task = await prisma.reviewTask.create({
+        const createdTask = await prisma.reviewTask.create({
           data: {
             userId,
             knowledgeNodeId: node.id,
@@ -71,6 +94,12 @@ export async function GET(req: NextRequest) {
             dueDate: now,
           },
         });
+        task = {
+          id: createdTask.id,
+          taskType: createdTask.taskType,
+          completed: createdTask.completed,
+          score: createdTask.score,
+        };
       }
 
       tasks.push({

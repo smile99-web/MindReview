@@ -3,6 +3,15 @@ import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secrets";
 import { assertSafeExternalBaseUrl } from "@/lib/url-security";
 
+function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return "Image test failed";
+  const cause = (err as Error & { cause?: { code?: string; message?: string } }).cause;
+  if (cause?.code || cause?.message) {
+    return `${err.message}: ${[cause.code, cause.message].filter(Boolean).join(" - ")}`;
+  }
+  return err.message;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { key, baseUrl, model } = await req.json();
@@ -18,17 +27,18 @@ export async function POST(req: NextRequest) {
       : saved?.baseUrl || process.env.SEEDREAM_ENDPOINT || "https://ark.cn-beijing.volces.com/api/v3";
     const safeBase = assertSafeExternalBaseUrl(base);
     const modelName = model || saved?.model || process.env.SEEDREAM_MODEL || "doubao-seedream-5-0-260128";
+    const imageEndpoint = `${safeBase.replace(/\/$/, "")}/images/generations`;
 
     const start = Date.now();
-    const res = await fetch(`${safeBase}/images/generations`, {
+    const res = await fetch(imageEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: modelName,
         prompt: "A simple cute orange cat on a clean background",
-        size: "1K",
-        output_format: "png",
-        watermark: false,
+        n: 1,
+        size: "1024x1024",
+        response_format: "url",
       }),
     });
 
@@ -41,7 +51,7 @@ export async function POST(req: NextRequest) {
         ok: true,
         model: modelName,
         imageUrl: data.data[0]?.url ? "(generated, temporary URL hidden)" : "(generated)",
-        size: data.data[0]?.size || "1K",
+        size: data.data[0]?.size || "1024x1024",
         latencyMs: elapsed,
       });
     }
@@ -54,7 +64,7 @@ export async function POST(req: NextRequest) {
       latencyMs: elapsed,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Image test failed";
+    const message = describeError(err);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

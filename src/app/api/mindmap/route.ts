@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     });
 
     // 获取所有边
-    const nodeIds = nodes.map(n => n.id);
+    const nodeIds = nodes.map((n: { id: string }) => n.id);
     const edges = await prisma.knowledgeEdge.findMany({
       where: {
         OR: [

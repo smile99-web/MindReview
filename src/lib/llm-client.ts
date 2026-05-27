@@ -1,4 +1,7 @@
 import OpenAI from 'openai';
+import { prisma } from '@/lib/prisma';
+import { decryptSecret } from '@/lib/secrets';
+import { assertSafeExternalBaseUrl } from '@/lib/url-security';
 
 export type LlmRole = 'system' | 'user' | 'assistant';
 
@@ -14,19 +17,32 @@ export interface LlmCallOptions {
   jsonMode?: boolean;
 }
 
-const client = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY || 'sk-placeholder',
-  baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
-});
-
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+
+async function getLlmSettings() {
+  const saved = await prisma.apiKey.findUnique({ where: { service: 'llm' } }).catch(() => null);
+  const savedKey = saved?.isActive && saved.key ? decryptSecret(saved.key) : '';
+  const apiKey = savedKey || process.env.DEEPSEEK_API_KEY || 'sk-placeholder';
+  const baseURL = assertSafeExternalBaseUrl(
+    saved?.baseUrl || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+  );
+  const model = saved?.model || process.env.DEEPSEEK_MODEL || MODEL;
+
+  return { apiKey, baseURL, model };
+}
 
 export async function llmCall(options: LlmCallOptions): Promise<string> {
   const { messages, temperature = 0.7, maxTokens = 4096, jsonMode = false } = options;
 
   try {
+    const settings = await getLlmSettings();
+    const client = new OpenAI({
+      apiKey: settings.apiKey,
+      baseURL: settings.baseURL,
+    });
+
     const response = await client.chat.completions.create({
-      model: MODEL,
+      model: settings.model,
       messages: messages.map(m => ({
         role: m.role,
         content: m.content,
@@ -50,6 +66,7 @@ export async function llmCallWithLog(
 ): Promise<string> {
   const startTime = Date.now();
   const prompt = options.messages.map(m => `[${m.role}] ${m.content}`).join('\n');
+  const settings = await getLlmSettings();
 
   try {
     const response = await llmCall(options);
@@ -59,7 +76,7 @@ export async function llmCallWithLog(
       await prisma.aiGenerationLog.create({
         data: {
           generatorType: options.generatorType || 'llm',
-          model: MODEL,
+          model: settings.model,
           prompt: prompt.slice(0, 4000),
           response: response.slice(0, 4000),
           status: 'success',
@@ -76,7 +93,7 @@ export async function llmCallWithLog(
       await prisma.aiGenerationLog.create({
         data: {
           generatorType: options.generatorType || 'llm',
-          model: MODEL,
+          model: settings.model,
           prompt: prompt.slice(0, 4000),
           status: 'failed',
           errorMessage: error.message,

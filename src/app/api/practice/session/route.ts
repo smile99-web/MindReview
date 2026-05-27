@@ -82,7 +82,9 @@ export async function POST(req: NextRequest) {
     });
 
     if (!forceNew && existingIncomplete.length > 0) {
-      const existingLevels = new Set(existingIncomplete.map((t) => t.taskType));
+      const existingLevels = new Set(
+        existingIncomplete.map((t: { taskType: string }) => t.taskType),
+      );
       const allPresent = ICAP_TASK_TYPES.every((level) => existingLevels.has(level));
 
       if (allPresent) {

@@ -22,7 +22,7 @@ export async function GET() {
     });
 
     return NextResponse.json(
-      keys.map((key) => ({
+      keys.map((key: { key: string | null }) => ({
         ...key,
         key: key.key ? maskSecret(key.key) : "",
       }))
@@ -38,14 +38,19 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const service = typeof body.service === "string" ? body.service : "";
     const key = typeof body.key === "string" ? body.key.trim() : "";
-    const model = typeof body.model === "string" ? body.model.trim() : undefined;
-    const baseUrl = typeof body.baseUrl === "string" && body.baseUrl.trim()
-      ? assertSafeExternalBaseUrl(body.baseUrl.trim())
-      : undefined;
+    const rawModel = typeof body.model === "string" ? body.model.trim() : "";
+    const rawBaseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
 
     if (!SERVICES.has(service) || !key) {
       return NextResponse.json({ error: "service and key are required" }, { status: 400 });
     }
+
+    const model = rawModel || undefined;
+    const baseUrl = rawBaseUrl
+      ? service === "tts"
+        ? rawBaseUrl
+        : assertSafeExternalBaseUrl(rawBaseUrl)
+      : undefined;
 
     const encryptedKey = encryptSecret(key);
     const result = await prisma.apiKey.upsert({

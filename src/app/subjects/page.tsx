@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DecomposeForm } from '@/components/knowledge/DecomposeForm';
+import { TextbookGenerateForm } from '@/components/knowledge/TextbookGenerateForm';
 import { authFetch } from '@/lib/auth';
 import { SUBJECT_CONFIG } from '@/types';
 import type { SubjectName } from '@/types';
@@ -23,6 +24,7 @@ export default function SubjectsPage() {
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDecompose, setShowDecompose] = useState(false);
+  const [showTextbookGenerate, setShowTextbookGenerate] = useState(false);
 
   useEffect(() => {
     authFetch('/api/subjects')
@@ -37,6 +39,11 @@ export default function SubjectsPage() {
     window.location.reload();
   };
 
+  const handleGenerated = () => {
+    setShowTextbookGenerate(false);
+    window.location.reload();
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
       <div className="flex items-center justify-between mb-8">
@@ -44,10 +51,32 @@ export default function SubjectsPage() {
           <h1 className="text-[28px] font-bold text-slate-800 tracking-tight">学科列表</h1>
           <p className="text-slate-500 mt-1.5 text-[15px]">选择学科查看知识点和思维导图</p>
         </div>
-        <Button onClick={() => setShowDecompose(!showDecompose)}>
-          {showDecompose ? '收起' : '🪄 AI拆解教材'}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setShowTextbookGenerate(!showTextbookGenerate);
+              setShowDecompose(false);
+            }}
+          >
+            {showTextbookGenerate ? '收起' : '人教版生成'}
+          </Button>
+          <Button
+            onClick={() => {
+              setShowDecompose(!showDecompose);
+              setShowTextbookGenerate(false);
+            }}
+          >
+            {showDecompose ? '收起' : 'AI拆解教材'}
+          </Button>
+        </div>
       </div>
+
+      {showTextbookGenerate && (
+        <div className="mb-8">
+          <TextbookGenerateForm onGenerated={handleGenerated} />
+        </div>
+      )}
 
       {showDecompose && (
         <div className="mb-8">

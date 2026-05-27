@@ -307,6 +307,9 @@ export default function SettingsPage() {
                           placeholder="seed-tts-2.0"
                           className="w-full rounded-xl border border-slate-200/80 px-3 py-2 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors font-mono placeholder:text-slate-300"
                         />
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          不需要填写 OpenSpeech 接口 URL
+                        </p>
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">音色</label>

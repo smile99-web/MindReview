@@ -1,3 +1,7 @@
+import { prisma } from '@/lib/prisma';
+import { decryptSecret } from '@/lib/secrets';
+import { assertSafeExternalBaseUrl } from '@/lib/url-security';
+
 interface ImageGenerateOptions {
   prompt: string;
   imageType: 'knowledge' | 'experiment' | 'timeline' | 'force' | 'reaction' | 'portrait';
@@ -16,14 +20,26 @@ const API_KEY = process.env.SEEDREAM_API_KEY || '';
 const ENDPOINT = process.env.SEEDREAM_ENDPOINT || 'https://ark.cn-beijing.volces.com/api/v3';
 const MODEL = process.env.SEEDREAM_MODEL || 'doubao-seedream-5-0';
 
+async function getImageSettings() {
+  const saved = await prisma.apiKey.findUnique({ where: { service: 'image' } }).catch(() => null);
+  const savedKey = saved?.isActive && saved.key ? decryptSecret(saved.key) : '';
+
+  return {
+    apiKey: savedKey || API_KEY,
+    endpoint: assertSafeExternalBaseUrl(saved?.baseUrl || ENDPOINT),
+    model: saved?.model || MODEL,
+  };
+}
+
 /**
  * Doubao Seedream 图片生成 Client
  * 用于生成知识配图、实验示意图、历史事件图等
  */
 export async function generateImage(options: ImageGenerateOptions): Promise<ImageGenerateResponse> {
   const { prompt, imageType, size = '1024x1024', style } = options;
+  const settings = await getImageSettings();
 
-  if (!API_KEY) {
+  if (!settings.apiKey) {
     console.warn('[ImageGen] Missing SEEDREAM_API_KEY, returning placeholder');
     return {
       imageUrl: '',
@@ -36,14 +52,14 @@ export async function generateImage(options: ImageGenerateOptions): Promise<Imag
   try {
     const enhancedPrompt = enhancePrompt(prompt, imageType, style);
 
-    const response = await fetch(`${ENDPOINT}/images/generations`, {
+    const response = await fetch(`${settings.endpoint}/images/generations`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`,
+        'Authorization': `Bearer ${settings.apiKey}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: settings.model,
         prompt: enhancedPrompt,
         n: 1,
         size,
