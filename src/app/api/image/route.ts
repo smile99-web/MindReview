@@ -79,10 +79,12 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const imageType = searchParams.get('imageType');
     const status = searchParams.get('status');
+    const contentRefId = searchParams.get('contentRefId');
 
     const where: any = {};
     if (imageType) where.imageType = imageType;
     if (status) where.status = status;
+    if (contentRefId) where.contentRefId = contentRefId;
 
     const images = await prisma.imageAsset.findMany({
       where,

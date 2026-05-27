@@ -111,10 +111,13 @@ export async function getValidToken(): Promise<string | null> {
 
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const token = await getValidToken();
-  const headers = new Headers(init.headers);
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+  if (!token) {
+    clearTokens();
+    window.location.href = "/";
+    throw new Error("Session expired");
   }
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
   return fetch(input, { ...init, headers });
 }
 

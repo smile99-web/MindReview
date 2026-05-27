@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { MasteryBar } from '@/components/ui/MasteryBar';
 import { DecomposeForm } from '@/components/knowledge/DecomposeForm';
 import { TextbookGenerateForm } from '@/components/knowledge/TextbookGenerateForm';
+import { authFetch } from '@/lib/auth';
 import { SUBJECT_CONFIG } from '@/types';
 import type { SubjectName } from '@/types';
 
@@ -24,6 +25,9 @@ export default function SubjectDetailPage() {
   const [showDecompose, setShowDecompose] = useState(false);
   const [showTextbookGenerate, setShowTextbookGenerate] = useState(false);
   const [activeTab, setActiveTab] = useState<'chapters' | 'nodes'>('chapters');
+  const [deletingChapter, setDeletingChapter] = useState<string | null>(null);
+  const [deletingNode, setDeletingNode] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'chapter' | 'node'; id: string; title: string } | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -47,6 +51,36 @@ export default function SubjectDetailPage() {
     }
     load();
   }, [id]);
+
+  const handleDeleteChapter = async (chId: string) => {
+    setDeletingChapter(chId);
+    try {
+      const res = await authFetch(`/api/chapters/${chId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setChapters((prev) => prev.filter((c) => c.id !== chId));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDeletingChapter(null);
+      setConfirmDelete(null);
+    }
+  };
+
+  const handleDeleteNode = async (nodeId: string) => {
+    setDeletingNode(nodeId);
+    try {
+      const res = await authFetch(`/api/knowledge/${nodeId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setNodes((prev) => prev.filter((n) => n.id !== nodeId));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDeletingNode(null);
+      setConfirmDelete(null);
+    }
+  };
 
   const config = subject ? SUBJECT_CONFIG[subject.name as SubjectName] : null;
 
@@ -163,10 +197,10 @@ export default function SubjectDetailPage() {
       {activeTab === 'chapters' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {chapters.map((ch: any) => (
-            <Link key={ch.id} href={`/chapters/${ch.id}`}>
-              <Card hover>
-                <div className="flex items-start gap-3">
-                  <span className="text-2xl">📂</span>
+            <Card key={ch.id} hover>
+              <div className="flex items-start gap-3">
+                <Link href={`/chapters/${ch.id}`} className="flex items-start gap-3 flex-1 min-w-0">
+                  <span className="text-2xl shrink-0">📂</span>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-slate-800 truncate">{ch.title}</h3>
                     <p className="text-sm text-slate-500 mt-1">
@@ -178,9 +212,18 @@ export default function SubjectDetailPage() {
                       </p>
                     )}
                   </div>
-                </div>
-              </Card>
-            </Link>
+                </Link>
+                <button
+                  className="shrink-0 p-1 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  title="删除章节"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmDelete({ type: 'chapter', id: ch.id, title: ch.title }); }}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            </Card>
           ))}
           {chapters.length === 0 && (
             <div className="col-span-full text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200/80">
@@ -192,9 +235,9 @@ export default function SubjectDetailPage() {
       ) : (
         <div className="space-y-2">
           {nodes.map((node: any) => (
-            <Link key={node.id} href={`/cards/${node.id}`}>
-              <Card hover padding="sm">
-                <div className="flex items-center justify-between">
+            <Card key={node.id} hover padding="sm">
+              <div className="flex items-center justify-between">
+                <Link href={`/cards/${node.id}`} className="flex-1 min-w-0 flex items-center justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <h4 className="font-medium text-slate-800 truncate">{node.title}</h4>
@@ -210,9 +253,18 @@ export default function SubjectDetailPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                     </svg>
                   </div>
-                </div>
-              </Card>
-            </Link>
+                </Link>
+                <button
+                  className="shrink-0 ml-3 p-1 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  title="删除知识点"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmDelete({ type: 'node', id: node.id, title: node.title }); }}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            </Card>
           ))}
           {nodes.length === 0 && (
             <div className="text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200/80">
@@ -220,6 +272,50 @@ export default function SubjectDetailPage() {
               <p className="text-slate-400 font-medium">暂无知识点</p>
             </div>
           )}
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setConfirmDelete(null)}>
+          <div className="bg-white rounded-2xl shadow-xl p-6 mx-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-red-100 text-red-600">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-800 text-[15px]">
+                  确认删除{confirmDelete.type === 'chapter' ? '章节' : '知识点'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[220px]">{confirmDelete.title}</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 mb-5">
+              {confirmDelete.type === 'chapter'
+                ? '删除后关联的知识点将解除绑定，子章节将提升为顶级章节。此操作不可撤销。'
+                : '删除后相关的练习记录和错题将被保留。此操作不可撤销。'}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(null)}>
+                取消
+              </Button>
+              <Button
+                size="sm"
+                className="bg-red-500 hover:bg-red-600 text-white"
+                loading={confirmDelete.type === 'chapter' ? deletingChapter !== null : deletingNode !== null}
+                onClick={() => {
+                  if (confirmDelete.type === 'chapter') {
+                    handleDeleteChapter(confirmDelete.id);
+                  } else {
+                    handleDeleteNode(confirmDelete.id);
+                  }
+                }}
+              >
+                确认删除
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

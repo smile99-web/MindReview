@@ -20,6 +20,8 @@ export default function KnowledgeCardPage() {
   const [questions, setQuestions] = useState<any[]>([]);
   const [generatingQuestions, setGeneratingQuestions] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [generatingImage, setGeneratingImage] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -35,7 +37,21 @@ export default function KnowledgeCardPage() {
         setLoading(false);
       }
     }
+
+    async function loadImage() {
+      try {
+        const res = await fetch(`/api/image?contentRefId=${id}&status=success&limit=1`);
+        const images = await res.json();
+        if (Array.isArray(images) && images.length > 0 && images[0].imageUrl) {
+          setImageUrl(images[0].imageUrl);
+        }
+      } catch {
+        // no existing image
+      }
+    }
+
     load();
+    loadImage();
   }, [id]);
 
   const handleGenerateQuestions = async () => {
@@ -64,6 +80,8 @@ export default function KnowledgeCardPage() {
   };
 
   const handleGenerateImage = async (prompt: string) => {
+    setGeneratingImage(true);
+    setImageError(null);
     try {
       const res = await fetch('/api/image', {
         method: 'POST',
@@ -77,9 +95,14 @@ export default function KnowledgeCardPage() {
       const data = await res.json();
       if (data.imageUrl) {
         setImageUrl(data.imageUrl);
+      } else if (data.error || data.errorMessage) {
+        setImageError(data.error || data.errorMessage);
       }
     } catch (err) {
+      setImageError('图片生成失败，请重试');
       console.error('Image generation failed:', err);
+    } finally {
+      setGeneratingImage(false);
     }
   };
 
@@ -165,11 +188,35 @@ export default function KnowledgeCardPage() {
           <KnowledgeCardView
             node={node}
             onGenerateImage={handleGenerateImage}
+            generatingImage={generatingImage}
           />
           {imageUrl && (
             <Card className="mt-4">
-              <h3 className="font-semibold text-slate-800 mb-4 text-[15px]">AI生成配图</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-800 text-[15px]">AI生成配图</h3>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  loading={generatingImage}
+                  disabled={generatingImage}
+                  onClick={() => handleGenerateImage(
+                    `中学${node.subject?.name || ''}知识点：${node.title}，${node.summary}`
+                  )}
+                >
+                  重新生成
+                </Button>
+              </div>
               <img src={imageUrl} alt={node.title} className="w-full rounded-xl" />
+            </Card>
+          )}
+          {imageError && (
+            <Card className="mt-4 border-red-200 bg-red-50/50">
+              <div className="flex items-center gap-2 text-sm text-red-700">
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                </svg>
+                {imageError}
+              </div>
             </Card>
           )}
         </div>

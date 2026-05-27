@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
         model: modelName,
         prompt: "A simple cute orange cat on a clean background",
         n: 1,
-        size: "1024x1024",
+        size: "1920x1920",
         response_format: "url",
       }),
     });

@@ -30,9 +30,10 @@ interface KnowledgeCardViewProps {
   };
   onTTS?: (text: string) => void;
   onGenerateImage?: (prompt: string) => void;
+  generatingImage?: boolean;
 }
 
-export function KnowledgeCardView({ node, onTTS, onGenerateImage }: KnowledgeCardViewProps) {
+export function KnowledgeCardView({ node, onTTS, onGenerateImage, generatingImage = false }: KnowledgeCardViewProps) {
   const [ttsPlaying, setTtsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
@@ -108,13 +109,29 @@ export function KnowledgeCardView({ node, onTTS, onGenerateImage }: KnowledgeCar
           </div>
         )}
 
-        <div className="flex gap-2">
-          <Button size="sm" variant="secondary" onClick={handleTTS} loading={ttsPlaying}>
-            朗读
-          </Button>
-          <Button size="sm" variant="secondary" onClick={handleGenerateImage}>
-            生成配图
-          </Button>
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={handleTTS} loading={ttsPlaying}>
+              朗读
+            </Button>
+            <Button size="sm" variant="secondary" onClick={handleGenerateImage} loading={generatingImage} disabled={generatingImage}>
+              生成配图
+            </Button>
+          </div>
+          {generatingImage && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs text-indigo-600">
+                <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+                  <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75" />
+                </svg>
+                AI 正在生成配图...
+              </div>
+              <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-indigo-400 via-purple-400 to-indigo-400 rounded-full animate-progress" />
+              </div>
+            </div>
+          )}
         </div>
       </Card>
 

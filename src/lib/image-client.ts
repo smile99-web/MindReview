@@ -36,7 +36,7 @@ async function getImageSettings() {
  * 用于生成知识配图、实验示意图、历史事件图等
  */
 export async function generateImage(options: ImageGenerateOptions): Promise<ImageGenerateResponse> {
-  const { prompt, imageType, size = '1024x1024', style } = options;
+  const { prompt, imageType, size = '1920x1920', style } = options;
   const settings = await getImageSettings();
 
   if (!settings.apiKey) {
