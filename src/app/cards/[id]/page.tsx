@@ -22,6 +22,10 @@ export default function KnowledgeCardPage() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [schemas, setSchemas] = useState<any[]>([]);
+  const [schemasLoading, setSchemasLoading] = useState(false);
+  const [selectedSchemaIds, setSelectedSchemaIds] = useState<Set<string>>(new Set());
+  const [buildingSchema, setBuildingSchema] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -52,6 +56,19 @@ export default function KnowledgeCardPage() {
 
     load();
     loadImage();
+  }, [id]);
+
+  useEffect(() => {
+    async function loadSchemas() {
+      setSchemasLoading(true);
+      try {
+        const res = await fetch(`/api/schema/suggest?knowledgeNodeId=${id}`);
+        const data = await res.json();
+        setSchemas(data.suggestions || []);
+      } catch { /* ignore */ }
+      setSchemasLoading(false);
+    }
+    loadSchemas();
   }, [id]);
 
   const handleGenerateQuestions = async () => {
@@ -219,6 +236,72 @@ export default function KnowledgeCardPage() {
               </div>
             </Card>
           )}
+
+          {/* 相关图式 */}
+          <div className="mt-6">
+            <h3 className="font-semibold text-slate-800 mb-3 text-[15px]">相关图式</h3>
+            {schemasLoading ? (
+              <div className="h-20 bg-slate-100 rounded-2xl animate-pulse" />
+            ) : schemas.length === 0 ? (
+              <p className="text-sm text-slate-400">暂无推荐的图式关联</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  {schemas.map((s: any) => {
+                    const isSelected = selectedSchemaIds.has(s.id);
+                    return (
+                      <Card
+                        key={s.id}
+                        hover
+                        padding="sm"
+                        className={isSelected ? 'ring-2 ring-indigo-300 border-indigo-300' : ''}
+                        onClick={() => {
+                          const next = new Set(selectedSchemaIds);
+                          if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
+                          setSelectedSchemaIds(next);
+                        }}
+                      >
+                        <h4 className="font-medium text-slate-800 text-sm truncate">{s.title || s.name}</h4>
+                        {s.summary && <p className="text-xs text-slate-500 mt-1 line-clamp-2">{s.summary}</p>}
+                        {s.nodesCount !== undefined && (
+                          <div className="flex items-center gap-1 mt-2">
+                            <Badge variant="info" size="sm">{s.nodesCount} 节点</Badge>
+                          </div>
+                        )}
+                      </Card>
+                    );
+                  })}
+                </div>
+                <Button
+                  className="mt-3"
+                  size="sm"
+                  disabled={selectedSchemaIds.size === 0}
+                  loading={buildingSchema}
+                  onClick={async () => {
+                    setBuildingSchema(true);
+                    try {
+                      await fetch('/api/schema/build', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          knowledgeNodeIds: Array.from(selectedSchemaIds),
+                          userId: 'default-user',
+                        }),
+                      });
+                      setSelectedSchemaIds(new Set());
+                      // reload schemas
+                      const res = await fetch(`/api/schema/suggest?knowledgeNodeId=${id}`);
+                      const data = await res.json();
+                      setSchemas(data.suggestions || []);
+                    } catch { /* ignore */ }
+                    setBuildingSchema(false);
+                  }}
+                >
+                  构建图式
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       )}
 

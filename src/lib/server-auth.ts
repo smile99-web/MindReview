@@ -26,6 +26,17 @@ function getBearerToken(req: NextRequest): string | undefined {
   return req.cookies.get(ACCESS_COOKIE)?.value;
 }
 
+/**
+ * Extract userId from the JWT Bearer token in the request's Authorization header
+ * (or the access_token cookie). Returns null if no valid token is present.
+ *
+ * This is the canonical server-side way to get the authenticated userId.
+ * Prefer this over reading userId from query params or request bodies.
+ */
+export function extractUserIdFromRequest(req: NextRequest): string | null {
+  return getAuthenticatedUserId(req);
+}
+
 export function getAuthenticatedUserId(req: NextRequest): string | null {
   const token = getBearerToken(req);
   if (!token) return null;

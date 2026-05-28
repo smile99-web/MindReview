@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { analyzeMistake } from '@/lib/llm-client';
 import { generateQuestions } from '@/lib/llm-client';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
 
 // GET /api/mistakes — 获取错题列表
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId') || 'default-user';
+    const userId = await resolveUserIdFromRequest(req);
     const resolved = searchParams.get('resolved');
 
     const where: any = { userId };
@@ -34,13 +35,14 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
-      userId = 'default-user',
+      userId: rawUserId,
       subjectId,
       knowledgeNodeId,
       questionText,
       wrongAnswer,
       correctAnswer,
     } = body;
+    const userId = await resolveUserIdFromRequest(req);
 
     if (!questionText || !correctAnswer) {
       return NextResponse.json({ error: '缺少题目或正确答案' }, { status: 400 });

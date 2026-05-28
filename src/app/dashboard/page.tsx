@@ -2,11 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { MasteryBar } from '@/components/ui/MasteryBar';
+import LearnerProfileCard from '@/components/learner/LearnerProfileCard';
+import { useUserId } from '@/components/auth/AuthProvider';
+import type { ActionableStep } from '@/lib/learner-model';
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const userId = useUserId() || '';
   const [stats, setStats] = useState({
     totalNodes: 0,
     reviewedToday: 0,
@@ -16,7 +22,9 @@ export default function DashboardPage() {
   const [subjects, setSubjects] = useState<any[]>([]);
   const [recentNodes, setRecentNodes] = useState<any[]>([]);
   const [dueTasks, setDueTasks] = useState<any[]>([]);
+  const [actionableSteps, setActionableSteps] = useState<ActionableStep[]>([]);
   const [loading, setLoading] = useState(true);
+  const [profileLoaded, setProfileLoaded] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -42,6 +50,38 @@ export default function DashboardPage() {
     }
     load();
   }, []);
+
+  // Fetch actionable steps from learner profile
+  useEffect(() => {
+    async function loadSteps() {
+      if (!userId) return;
+      try {
+        const res = await fetch(`/api/learner/profile?userId=${encodeURIComponent(userId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setActionableSteps((data.actionableSteps as ActionableStep[]) || []);
+      } catch {
+        // silent — recommendations are optional
+      }
+    }
+    loadSteps();
+  }, [userId]);
+
+  const stepIcons: Record<ActionableStep['type'], string> = {
+    review_weakness: '🔍',
+    build_schema: '🧠',
+    practice_icap: '✏️',
+    start_path: '▶️',
+    fix_mistakes: '🎯',
+  };
+
+  const stepTypeLabels: Record<ActionableStep['type'], string> = {
+    review_weakness: '弱项复习',
+    build_schema: '构建框架',
+    practice_icap: 'ICAP练习',
+    start_path: '学习路径',
+    fix_mistakes: '错题纠错',
+  };
 
   const statCards = [
     {
@@ -125,6 +165,48 @@ export default function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {/* 学习画像 */}
+      <div className="mb-8">
+        <LearnerProfileCard userId={userId} compact />
+      </div>
+
+      {/* 今日推荐 — actionable quick-action buttons */}
+      {actionableSteps.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-slate-800 tracking-tight mb-4">
+            今日推荐
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {actionableSteps.slice(0, 4).map((step) => (
+              <button
+                key={step.id}
+                onClick={() => router.push(step.targetUrl)}
+                className="group text-left p-4 rounded-2xl border border-slate-200/70 bg-white hover:border-indigo-200 hover:shadow-md hover:shadow-indigo-500/5 transition-all duration-200"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl">{stepIcons[step.type]}</span>
+                  <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">
+                    {stepTypeLabels[step.type]}
+                  </span>
+                </div>
+                <div className="text-sm font-semibold text-slate-800 group-hover:text-indigo-700 transition-colors truncate">
+                  {step.title}
+                </div>
+                <div className="text-xs text-slate-500 mt-1 line-clamp-2">
+                  {step.description}
+                </div>
+                <div className="flex items-center gap-1 mt-2.5 text-xs font-medium text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                  前往
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                  </svg>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* 学科概览 */}

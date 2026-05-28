@@ -113,3 +113,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   return useContext(AuthContext);
 }
+
+/**
+ * Returns the current authenticated user's ID, or null if not logged in.
+ * Use this instead of hardcoding 'default-user' or reading from localStorage.
+ */
+export function useUserId(): string | null {
+  const { user } = useAuth();
+  return user?.id ?? null;
+}
+
+/**
+ * Returns a fetch wrapper that automatically attaches the Authorization header
+ * and X-User-Id header to every request.
+ *
+ * Usage: const authFetch = useAuthFetch();
+ *        authFetch('/api/dashboard')  // token + userId attached automatically
+ */
+export function useAuthFetch() {
+  const { getToken } = useAuth();
+  const userId = useUserId();
+
+  return useCallback(
+    async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const token = await getToken();
+      const headers = new Headers(init.headers);
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+      if (userId) {
+        headers.set('X-User-Id', userId);
+      }
+      return fetch(input, { ...init, headers });
+    },
+    [getToken, userId],
+  );
+}

@@ -46,9 +46,20 @@ function cleanText(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
+function sanitizeJsonString(str: string): string {
+  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (ch) => {
+    if (ch === '\n') return '\\n';
+    if (ch === '\r') return '\\r';
+    if (ch === '\t') return '\\t';
+    if (ch === '\b') return '\\b';
+    if (ch === '\f') return '\\f';
+    return '\\u' + ('000' + ch.charCodeAt(0).toString(16)).slice(-4);
+  });
+}
+
 function parseJsonObject(raw: string): { editionNote?: unknown; chapters?: unknown } {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const source = fenced?.[1] || raw;
+  let source = fenced?.[1] || raw;
   const start = source.indexOf('{');
   const end = source.lastIndexOf('}');
 
@@ -56,7 +67,9 @@ function parseJsonObject(raw: string): { editionNote?: unknown; chapters?: unkno
     throw new Error('AI返回内容不是JSON对象');
   }
 
-  return JSON.parse(source.slice(start, end + 1));
+  source = source.slice(start, end + 1);
+  source = sanitizeJsonString(source);
+  return JSON.parse(source);
 }
 
 function buildPrompt(subject: SubjectName, grade: string, volume: string) {

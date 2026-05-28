@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { sm2, calcCurrentForgetRisk } from '@/lib/sm2';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
 
 interface ReviewTaskRow {
   id: string;
@@ -29,12 +30,7 @@ interface ReviewDueNode {
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    let userId = searchParams.get('userId') || 'default-user';
-    // 如果不是真实用户 ID，查找第一个用户作为默认
-    if (userId === 'default-user') {
-      const defaultUser = await prisma.user.findFirst({ select: { id: true } });
-      if (defaultUser) userId = defaultUser.id;
-    }
+    const userId = await resolveUserIdFromRequest(req);
     const mode = searchParams.get('mode') || 'standard';
     const maxTasks = mode === 'basic' ? 5 : mode === 'challenge' ? 12 : 8;
 
@@ -149,11 +145,7 @@ export async function POST(req: NextRequest) {
       durationSeconds,
     } = body;
 
-    let uid = userId || 'default-user';
-    if (uid === 'default-user') {
-      const defaultUser = await prisma.user.findFirst({ select: { id: true } });
-      if (defaultUser) uid = defaultUser.id;
-    }
+    const uid = await resolveUserIdFromRequest(req);
 
     // 1. 获取知识点当前 SM-2 状态
     const node = await prisma.knowledgeNode.findUnique({

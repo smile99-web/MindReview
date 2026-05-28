@@ -49,7 +49,8 @@ export type RelationType =
   | 'formula'
   | 'experiment'
   | 'mistake'
-  | 'questionType';
+  | 'questionType'
+  | 'schema_member';
 
 export const RELATION_LABELS: Record<RelationType, string> = {
   contains: '包含',
@@ -60,6 +61,7 @@ export const RELATION_LABELS: Record<RelationType, string> = {
   experiment: '实验验证',
   mistake: '易错关联',
   questionType: '题型关联',
+  schema_member: '图式成员',
 };
 
 export const RELATION_COLORS: Record<RelationType, string> = {
@@ -71,6 +73,7 @@ export const RELATION_COLORS: Record<RelationType, string> = {
   experiment: '#10b981',
   mistake: '#f97316',
   questionType: '#3b82f6',
+  schema_member: '#d97706',
 };
 
 // ========== ICAP Level ==========

@@ -106,6 +106,17 @@ export async function llmCallWithLog(
   }
 }
 
+function sanitizeJsonString(str: string): string {
+  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (ch) => {
+    if (ch === '\n') return '\\n';
+    if (ch === '\r') return '\\r';
+    if (ch === '\t') return '\\t';
+    if (ch === '\b') return '\\b';
+    if (ch === '\f') return '\\f';
+    return '\\u' + ('000' + ch.charCodeAt(0).toString(16)).slice(-4);
+  });
+}
+
 // ========== 知识点拆解 ==========
 export async function decomposeKnowledge(
   subject: string,
@@ -151,7 +162,7 @@ export async function decomposeKnowledge(
     jsonMode: true,
   });
 
-  return JSON.parse(result);
+  return JSON.parse(sanitizeJsonString(result));
 }
 
 // ========== 题目生成 ==========
@@ -183,7 +194,7 @@ ICAP层级：${icapLevel}
     jsonMode: true,
   });
 
-  return JSON.parse(result);
+  return JSON.parse(sanitizeJsonString(result));
 }
 
 // ========== 错因分析 ==========
@@ -213,7 +224,7 @@ export async function analyzeMistake(
     jsonMode: true,
   });
 
-  return JSON.parse(result);
+  return JSON.parse(sanitizeJsonString(result));
 }
 
 // ========== 复习总结 ==========

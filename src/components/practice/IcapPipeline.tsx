@@ -58,6 +58,13 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   const [activeAnswers, setActiveAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState<Record<string, boolean>>({});
   const [node, setNode] = useState<KnowledgeNodeDetail | null>(null);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [aiFeedback, setAiFeedback] = useState('');
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [tutorChatMessages, setTutorChatMessages] = useState<Array<{ role: string; content: string }>>([]);
+  const [tutorChatInput, setTutorChatInput] = useState('');
+  const [tutorChatLoading, setTutorChatLoading] = useState(false);
+  const [tutorSessionId, setTutorSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/knowledge/${knowledgeNodeId}`)
@@ -65,6 +72,23 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
       .then(setNode)
       .catch(() => {});
   }, [knowledgeNodeId]);
+
+  // Load persisted chat history when entering interactive stage
+  useEffect(() => {
+    if (stage === 3 && !tutorSessionId) {
+      const sessionId = `icap_tutor_${knowledgeNodeId}`;
+      setTutorSessionId(sessionId);
+      fetch(`/api/tutor/history?sessionId=${encodeURIComponent(sessionId)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.messages && Array.isArray(data.messages)) {
+            setTutorChatMessages(data.messages.map((m: { role: string; content: string }) =>
+              ({ role: m.role, content: m.content })));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [stage, knowledgeNodeId, tutorSessionId]);
 
   const recordStageTime = useCallback((stageKey: keyof IcapResults) => {
     const durationMs = Date.now() - startTime;
@@ -112,13 +136,60 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
     } catch { /* ignore */ }
   };
 
-  const handleSubmitSummary = () => {
+  const handleSubmitSummary = async () => {
     recordStageTime('constructive');
     setResults(prev => ({
       ...prev,
       constructive: { ...prev.constructive, response: userSummary },
     }));
-    goToStage(3);
+    setFeedbackSubmitted(true);
+    setFeedbackLoading(true);
+    try {
+      const res = await fetch('/api/tutor/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          knowledgeNodeId,
+          message: `我刚才对这个知识点做了总结，请评价我的理解质量并指出可改进之处：${userSummary}`,
+          userId: 'default-user',
+        }),
+      });
+      const data = await res.json();
+      setAiFeedback(data.reply || '未收到反馈');
+    } catch {
+      setAiFeedback('反馈请求失败，请重试');
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+
+  const handleTutorChatSend = async () => {
+    if (!tutorChatInput.trim()) return;
+    setTutorChatLoading(true);
+    const msg = tutorChatInput.trim();
+    const newMessages = [...tutorChatMessages, { role: 'user', content: msg }];
+    setTutorChatMessages(newMessages);
+    setTutorChatInput('');
+    try {
+      const res = await fetch('/api/tutor/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: tutorSessionId,
+          knowledgeNodeId,
+          message: msg,
+          userId: 'default-user',
+          history: tutorChatMessages,
+        }),
+      });
+      const data = await res.json();
+      setTutorChatMessages([...newMessages, { role: 'assistant', content: data.reply || '' }]);
+      setResults(prev => ({
+        ...prev,
+        interactive: { ...prev.interactive, responses: prev.interactive.responses + 1 },
+      }));
+    } catch { /* ignore */ }
+    setTutorChatLoading(false);
   };
 
   const allDone = stage === 3 && results.interactive.completed;
@@ -284,49 +355,88 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
             <p className="text-sm text-amber-800 font-medium">请用自己的话总结这个知识点</p>
             <p className="text-xs text-amber-600/80 mt-1">可以包括：核心概念、关键公式、解题思路、与其他知识的联系</p>
           </div>
-          <textarea
-            className="w-full min-h-[120px] px-4 py-3 rounded-xl border border-slate-200 text-sm resize-none focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
-            placeholder="我理解的这个知识点是..."
-            value={userSummary}
-            onChange={e => setUserSummary(e.target.value)}
-          />
-          <div className="flex justify-between">
-            <Button variant="ghost" onClick={() => goToStage(1)}>返回上一步</Button>
-            <Button onClick={handleSubmitSummary} disabled={!userSummary.trim()}>提交总结</Button>
-          </div>
+          {!feedbackSubmitted ? (
+            <>
+              <textarea
+                className="w-full min-h-[120px] px-4 py-3 rounded-xl border border-slate-200 text-sm resize-none focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+                placeholder="我理解的这个知识点是..."
+                value={userSummary}
+                onChange={e => setUserSummary(e.target.value)}
+              />
+              <div className="flex justify-between">
+                <Button variant="ghost" onClick={() => goToStage(1)}>返回上一步</Button>
+                <Button onClick={handleSubmitSummary} disabled={!userSummary.trim()}>提交总结</Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="bg-white rounded-xl p-4 border border-slate-200/60">
+                <p className="text-xs text-slate-400 mb-1">你的总结</p>
+                <p className="text-sm text-slate-700 whitespace-pre-wrap">{userSummary}</p>
+              </div>
+              {feedbackLoading ? (
+                <div className="flex items-center gap-2 text-sm text-indigo-500 py-4">
+                  <div className="animate-spin h-4 w-4 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full" />
+                  AI正在评价你的总结...
+                </div>
+              ) : (
+                <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-xl p-4 border border-emerald-100/60">
+                  <p className="text-xs text-emerald-600 font-medium mb-1">AI反馈</p>
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{aiFeedback}</p>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <Button variant="ghost" disabled={feedbackLoading} onClick={() => { setFeedbackSubmitted(false); setAiFeedback(''); }}>
+                  重新提交
+                </Button>
+                <Button onClick={() => goToStage(3)} disabled={feedbackLoading}>下一步</Button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
       {/* Stage 3: Interactive */}
       {stage === 3 && (
         <div className="space-y-4">
-          <div className="bg-purple-50 rounded-xl p-5 border border-purple-100/60 text-center">
-            <p className="text-purple-800 font-medium">AI互动深化环节</p>
-            <p className="text-sm text-purple-600/80 mt-1">
-              AI会根据你的回答生成追问和变式题，帮助你深入理解。
+          <div className="bg-purple-50 rounded-xl p-4 border border-purple-100/60">
+            <p className="text-purple-800 font-medium text-sm">AI互动深化环节</p>
+            <p className="text-xs text-purple-600/80 mt-1">
+              与AI对话，它会围绕{knowledgeNodeTitle}追问并生成变式题，帮助你深入理解。
             </p>
-            <div className="mt-4 space-y-3">
-              <div className="bg-white rounded-lg p-3 text-left text-sm border border-purple-100/60">
-                <p className="text-slate-700 font-medium">追问1: 你能举一个生活中用到{knowledgeNodeTitle}的例子吗？</p>
+          </div>
+
+          <div className="space-y-3 max-h-[280px] overflow-y-auto min-h-[120px]">
+            {tutorChatMessages.length === 0 && (
+              <div className="text-center py-6">
+                <p className="text-sm text-slate-400">开始与AI对话，探讨{knowledgeNodeTitle}</p>
               </div>
-              <div className="bg-white rounded-lg p-3 text-left text-sm border border-purple-100/60">
-                <p className="text-slate-700 font-medium">追问2: 如果条件变了，这个结论还成立吗？为什么？</p>
+            )}
+            {tutorChatMessages.map((msg, i) => (
+              <div key={i} className={`p-3 rounded-xl text-sm ${msg.role === 'user' ? 'bg-indigo-50 ml-6' : 'bg-slate-50 mr-6'}`}>
+                <p className="text-xs text-slate-400 mb-0.5">{msg.role === 'user' ? '你' : 'AI'}</p>
+                <p className="text-slate-700 whitespace-pre-wrap">{msg.content}</p>
               </div>
-            </div>
+            ))}
+            {tutorChatLoading && (
+              <div className="flex items-center gap-2 text-xs text-slate-400 p-2">
+                <div className="animate-spin h-3 w-3 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full" />
+                AI思考中...
+              </div>
+            )}
           </div>
 
           <div className="flex gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setResults(prev => ({
-                  ...prev,
-                  interactive: { ...prev.interactive, responses: prev.interactive.responses + 1 },
-                }));
-              }}
-            >
-              已思考完毕
+            <input
+              type="text"
+              className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200"
+              placeholder="输入你的回答或提问..."
+              value={tutorChatInput}
+              onChange={e => setTutorChatInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleTutorChatSend()}
+            />
+            <Button size="sm" onClick={handleTutorChatSend} loading={tutorChatLoading} disabled={!tutorChatInput.trim()}>
+              发送
             </Button>
           </div>
 

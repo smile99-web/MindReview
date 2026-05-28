@@ -8,11 +8,23 @@ export async function GET(req: NextRequest) {
     const subjectId = searchParams.get('subjectId');
     const chapterId = searchParams.get('chapterId');
     const rootId = searchParams.get('rootId');
+    const includeSchemas = searchParams.get('includeSchemas') === 'true';
 
-    const where: any = {};
-    if (subjectId) where.subjectId = subjectId;
-    if (chapterId) where.chapterId = chapterId;
-    if (rootId) where.parentId = rootId;
+    const baseWhere: any = {};
+    if (subjectId) baseWhere.subjectId = subjectId;
+    if (chapterId) baseWhere.chapterId = chapterId;
+    if (rootId) baseWhere.parentId = rootId;
+
+    // When includeSchemas is true, also include schema nodes
+    const nodeFilters = Object.keys(baseWhere).length > 0
+      ? [{ ...baseWhere }]
+      : [];
+    if (includeSchemas) {
+      nodeFilters.push({ representationType: 'schema' });
+    }
+    const where = nodeFilters.length > 1
+      ? { OR: nodeFilters }
+      : (nodeFilters.length === 1 ? nodeFilters[0] : {});
 
     const nodes = await prisma.knowledgeNode.findMany({
       where,

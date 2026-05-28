@@ -7,16 +7,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install
 
-# === dev: development image with full source ===
-FROM base AS dev
-RUN apk add --no-cache libc6-compat
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm install
-COPY . .
-RUN npx prisma generate
-CMD ["npm", "run", "dev"]
-
 # === builder: prisma generate + next build ===
 FROM base AS builder
 WORKDIR /app
@@ -33,6 +23,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Install pg_isready for entrypoint health-check
+RUN apk add --no-cache postgresql-client
+
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
@@ -41,13 +34,13 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-# The standalone output has its own node_modules.
-# We need to add prisma CLI + generated client on top.
+# Copy full node_modules so Prisma CLI can run migrations with its dependency tree.
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules ./node_modules
 
-# Install prisma CLI globally for migrate deploy
-RUN npm install -g prisma@^6
+# Copy entrypoint
+COPY scripts/docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 RUN chown -R nextjs:nodejs /app
 
@@ -57,4 +50,4 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["sh", "-c", "prisma migrate deploy && node server.js"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

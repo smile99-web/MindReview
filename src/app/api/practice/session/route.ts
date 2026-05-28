@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,7 +34,7 @@ const ICAP_PASCAL: Record<string, string> = {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { userId, knowledgeNodeId, forceNew = false } = body;
+    const { knowledgeNodeId, forceNew = false } = body;
 
     // --- validation ---
     if (!knowledgeNodeId) {
@@ -65,11 +66,7 @@ export async function POST(req: NextRequest) {
     }
 
     // --- resolve user ---
-    let uid = userId || 'default-user';
-    if (uid === 'default-user') {
-      const defaultUser = await prisma.user.findFirst({ select: { id: true } });
-      if (defaultUser) uid = defaultUser.id;
-    }
+    const uid = await resolveUserIdFromRequest(req);
 
     // --- check for existing active session ---
     const existingIncomplete = await prisma.reviewTask.findMany({

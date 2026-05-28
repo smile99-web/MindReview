@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getAuthenticatedUserId } from '@/lib/server-auth';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
 
 export async function GET(req: NextRequest) {
   try {
-    const userId = getAuthenticatedUserId(req);
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const userId = await resolveUserIdFromRequest(req);
 
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());

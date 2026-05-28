@@ -5,6 +5,7 @@ interface CardProps {
   className?: string;
   padding?: 'none' | 'sm' | 'md' | 'lg';
   hover?: boolean;
+  onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 const paddingMap = {
@@ -14,7 +15,7 @@ const paddingMap = {
   lg: 'p-6',
 };
 
-export function Card({ children, className, padding = 'md', hover = false }: CardProps) {
+export function Card({ children, className, padding = 'md', hover = false, onClick }: CardProps) {
   return (
     <div
       className={cn(
@@ -23,6 +24,7 @@ export function Card({ children, className, padding = 'md', hover = false }: Car
         paddingMap[padding],
         className,
       )}
+      onClick={onClick}
     >
       {children}
     </div>

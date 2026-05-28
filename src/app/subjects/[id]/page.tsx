@@ -28,6 +28,9 @@ export default function SubjectDetailPage() {
   const [deletingChapter, setDeletingChapter] = useState<string | null>(null);
   const [deletingNode, setDeletingNode] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'chapter' | 'node'; id: string; title: string } | null>(null);
+  const [learningPath, setLearningPath] = useState<any>(null);
+  const [pathLoading, setPathLoading] = useState(false);
+  const [showPath, setShowPath] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -83,6 +86,21 @@ export default function SubjectDetailPage() {
   };
 
   const config = subject ? SUBJECT_CONFIG[subject.name as SubjectName] : null;
+
+  const handleGeneratePath = async () => {
+    setPathLoading(true);
+    setShowPath(true);
+    try {
+      const res = await fetch('/api/path/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subjectId: id, userId: 'default-user' }),
+      });
+      const data = await res.json();
+      setLearningPath(data.path);
+    } catch { /* ignore */ }
+    setPathLoading(false);
+  };
 
   if (loading) {
     return (
@@ -150,6 +168,13 @@ export default function SubjectDetailPage() {
           >
             {showDecompose ? '收起' : 'AI拆解'}
           </Button>
+          <Button
+            variant="secondary"
+            onClick={handleGeneratePath}
+            loading={pathLoading}
+          >
+            生成学习路径
+          </Button>
         </div>
       </div>
 
@@ -173,6 +198,57 @@ export default function SubjectDetailPage() {
               window.location.reload();
             }}
           />
+        </div>
+      )}
+
+      {showPath && (
+        <div className="mb-8">
+          <Card>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-slate-800">学习路径</h3>
+              <button onClick={() => setShowPath(false)} className="text-sm text-slate-400 hover:text-slate-600">收起</button>
+            </div>
+            {pathLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3, 4].map(i => <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse" />)}
+              </div>
+            ) : learningPath ? (
+              <div className="space-y-0">
+                {learningPath.path?.steps?.map((step: any, i: number) => (
+                  <div key={i} className="flex gap-3">
+                    <div className="flex flex-col items-center flex-shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-bold">
+                        {i + 1}
+                      </div>
+                      {i < (learningPath.path?.steps?.length || 0) - 1 && (
+                        <div className="w-0.5 flex-1 bg-indigo-100 min-h-[16px]" />
+                      )}
+                    </div>
+                    <div className="pb-5 flex-1 min-w-0">
+                      <Link href={`/cards/${step.nodeId}`} className="font-medium text-slate-800 text-sm hover:text-indigo-600 transition-colors">
+                        {step.title}
+                      </Link>
+                      {step.summary && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{step.summary}</p>}
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <Badge variant="info" size="sm">{step.icapLevel}</Badge>
+                        {step.estimatedMinutes && <span className="text-xs text-slate-400">{step.estimatedMinutes}分钟</span>}
+                        <span className="text-xs text-slate-400">难度 {step.difficulty}</span>
+                        <div className="w-16">
+                          <MasteryBar level={step.masteryLevel} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <div className="flex gap-3 text-xs text-slate-400 pt-2 border-t border-slate-100">
+                  <span>共 {learningPath.path?.totalSteps || 0} 步</span>
+                  <span>预估 {learningPath.path?.totalEstimatedMinutes || 0} 分钟</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400 text-center py-8">暂无学习路径数据</p>
+            )}
+          </Card>
         </div>
       )}
 

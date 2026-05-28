@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { suggestMode, shouldTakeBreak } from '@/lib/cognitive-load';
+import { useDensity } from '@/components/ui/DensityProvider';
+import type { DensityLevel } from '@/lib/ui-density';
 import type { ReviewMode } from '@/types';
 
 interface CognitiveLoadManagerProps {
@@ -25,8 +27,22 @@ export function CognitiveLoadManager({
   recentErrors = 0,
   averageMastery = 50,
 }: CognitiveLoadManagerProps) {
+  const { setCognitiveLoad, densityLevel } = useDensity();
   const [sessionMinutes, setSessionMinutes] = useState(0);
   const [showBreakReminder, setShowBreakReminder] = useState(false);
+
+  // Compute cognitive load from recent errors, average mastery, and session duration.
+  const cognitiveLoad = useMemo(() => {
+    const errorFactor = recentErrors >= 5 ? 5 : recentErrors >= 3 ? 4 : recentErrors >= 2 ? 3 : recentErrors >= 1 ? 2 : 1;
+    const masteryFactor = averageMastery < 30 ? 2 : averageMastery < 50 ? 1 : 0;
+    const sessionFactor = sessionMinutes >= 45 ? 1 : sessionMinutes >= 30 ? 0.5 : 0;
+    return Math.min(5, Math.max(1, Math.round(errorFactor + masteryFactor * 0.5 + sessionFactor * 0.5)));
+  }, [recentErrors, averageMastery, sessionMinutes]);
+
+  // Sync cognitive load to the density context.
+  useEffect(() => {
+    setCognitiveLoad(cognitiveLoad);
+  }, [cognitiveLoad, setCognitiveLoad]);
 
   useEffect(() => {
     if (!sessionStartTime) return;
@@ -42,6 +58,18 @@ export function CognitiveLoadManager({
   }, [sessionStartTime, recentErrors]);
 
   const suggestedMode = suggestMode(recentErrors, averageMastery);
+
+  const densityLabel: Record<DensityLevel, string> = {
+    sparse: '精简',
+    comfortable: '舒适',
+    compact: '紧凑',
+  };
+
+  const densityColor: Record<DensityLevel, string> = {
+    sparse: 'text-amber-600 bg-amber-50 border-amber-200',
+    comfortable: 'text-emerald-600 bg-emerald-50 border-emerald-200',
+    compact: 'text-blue-600 bg-blue-50 border-blue-200',
+  };
 
   const modeOptions: Array<{ key: ReviewMode; label: string }> = [
     { key: 'basic', label: '基础' },
@@ -59,6 +87,22 @@ export function CognitiveLoadManager({
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             {sessionMinutes}分钟
+          </div>
+
+          {/* Density indicator */}
+          <div className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-medium border ${densityColor[densityLevel]}`}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              {densityLevel === 'sparse' && (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              )}
+              {densityLevel === 'comfortable' && (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h8.25M3.75 12h12M3.75 17.25h7.5" />
+              )}
+              {densityLevel === 'compact' && (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h4.5M3.75 9.75h10.5M3.75 12.75h16.5M3.75 15.75h10.5M3.75 18.75h4.5" />
+              )}
+            </svg>
+            {densityLabel[densityLevel]}
           </div>
 
           {/* Progress */}

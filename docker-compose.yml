@@ -1,9 +1,6 @@
 x-app-env: &app-env
   DATABASE_URL: postgresql://mindreview:mindreview@db:5432/mindreview
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:-mindreview-dev-secret-change-me}
-  NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me}
-  NEXTAUTH_URL: http://localhost:3300
-  NEXT_PUBLIC_AUTH_API: http://localhost:8001
   DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
   DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
   DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
@@ -19,13 +16,12 @@ services:
     image: pgvector/pgvector:pg16
     container_name: mindreview-db
     restart: unless-stopped
-    env_file: .env
     environment:
       POSTGRES_USER: mindreview
       POSTGRES_PASSWORD: mindreview
       POSTGRES_DB: mindreview
     ports:
-      - "5434:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -33,30 +29,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - mindreview
-
-  auth:
-    build: ./backend
-    container_name: mindreview-auth
-    restart: unless-stopped
-    env_file: .env
-    ports:
-      - "8001:8000"
-    environment:
-      <<: *app-env
-      AUTH_CORS_ORIGINS: ${AUTH_CORS_ORIGINS:-http://localhost:3300,http://localhost:3000}
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - mindreview
 
   app:
     build: .
     container_name: mindreview-app
     restart: unless-stopped
-    env_file: .env
     ports:
       - "3300:3000"
     environment:
@@ -64,50 +41,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: >
-      sh -c "npx prisma migrate deploy && node server.js"
-    networks:
-      - mindreview
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', function(r){process.exit(r.statusCode===200?0:1)})"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-
-  app-dev:
-    build:
-      context: .
-      target: dev
-    container_name: mindreview-app-dev
-    profiles: ["dev"]
-    restart: unless-stopped
-    env_file: .env
-    ports:
-      - "3300:3000"
-    environment:
-      <<: *app-env
-    depends_on:
-      db:
-        condition: service_healthy
-      auth:
-        condition: service_started
-    volumes:
-      - ./src:/app/src
-      - ./prisma:/app/prisma
-      - ./public:/app/public
-      - ./next.config.ts:/app/next.config.ts
-      - ./tsconfig.json:/app/tsconfig.json
-      - ./postcss.config.mjs:/app/postcss.config.mjs
-      - ./eslint.config.mjs:/app/eslint.config.mjs
-    command: >
-      sh -c "npx prisma generate && npm run dev"
-    networks:
-      - mindreview
+    command:
+      - "/app/docker-entrypoint.sh"
 
 volumes:
   pgdata:
-
-networks:
-  mindreview:
-    driver: bridge

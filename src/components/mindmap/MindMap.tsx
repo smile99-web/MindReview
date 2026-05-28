@@ -28,22 +28,42 @@ const nodeTypes = {
   knowledgeNode: KnowledgeNodeCard,
 };
 
+const SCHEMA_MEMBER_COLOR = RELATION_COLORS['schema_member'] || '#d97706';
+
 export function MindMap({ nodes: dataNodes, edges: dataEdges, onNodeClick, className }: MindMapProps) {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [hoveredSchemaNode, setHoveredSchemaNode] = useState<string | null>(null);
+
+  // Compute connected member node IDs for the hovered schema node
+  const highlightedMemberIds = useMemo(() => {
+    if (!hoveredSchemaNode || !dataEdges) return new Set<string>();
+    const memberIds = new Set<string>();
+    dataEdges.forEach((edge: any) => {
+      if (edge.relationType !== 'schema_member') return;
+      if (edge.fromId === hoveredSchemaNode) memberIds.add(edge.toId);
+      if (edge.toId === hoveredSchemaNode) memberIds.add(edge.fromId);
+    });
+    return memberIds;
+  }, [hoveredSchemaNode, dataEdges]);
 
   // 转换为 ReactFlow 格式
   const initialNodes: Node[] = useMemo(() => {
     if (!dataNodes || dataNodes.length === 0) return [];
 
-    // 简单的网格布局
+    // 简单的网格布局 — schema nodes get extra spacing
     const cols = Math.ceil(Math.sqrt(dataNodes.length));
+    const isSchema = (node: any) => node.representationType === 'schema';
+    const spacingX = 280;
+    const spacingY = 160;
+
     return dataNodes.map((node, i) => {
       const row = Math.floor(i / cols);
       const col = i % cols;
+      const schema = isSchema(node);
       return {
         id: node.id,
         type: 'knowledgeNode',
-        position: { x: col * 280 + 40, y: row * 160 + 40 },
+        position: { x: col * spacingX + 40, y: row * spacingY + 40 },
         data: {
           label: node.title,
           subject: node.subject?.name || '',
@@ -51,6 +71,8 @@ export function MindMap({ nodes: dataNodes, edges: dataEdges, onNodeClick, class
           masteryLevel: node.masteryLevel,
           icapLevel: node.icapLevel,
           summary: node.summary,
+          representationType: node.representationType,
+          isHighlighted: highlightedMemberIds.has(node.id),
           onClick: () => {
             setSelectedNode(node.id);
             onNodeClick?.(node.id);
@@ -60,27 +82,40 @@ export function MindMap({ nodes: dataNodes, edges: dataEdges, onNodeClick, class
         targetPosition: Position.Left,
       };
     });
-  }, [dataNodes]);
+  }, [dataNodes, highlightedMemberIds, onNodeClick]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!dataEdges) return [];
-    return dataEdges.map((edge) => ({
-      id: edge.id,
-      source: edge.fromId,
-      target: edge.toId,
-      label: RELATION_LABELS[edge.relationType as RelationType] || edge.relationType,
-      style: {
-        stroke: RELATION_COLORS[edge.relationType as RelationType] || '#94a3b8',
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: RELATION_COLORS[edge.relationType as RelationType] || '#94a3b8',
-      },
-      labelStyle: { fontSize: 11, fill: '#64748b' },
-      labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
-      animated: edge.relationType === 'prerequisite' || edge.relationType === 'cause',
-    }));
-  }, [dataEdges]);
+    return dataEdges.map((edge) => {
+      const isSchemaMember = edge.relationType === 'schema_member';
+      const color = RELATION_COLORS[edge.relationType as RelationType] || '#94a3b8';
+      const isHighlighted =
+        !!hoveredSchemaNode &&
+        isSchemaMember &&
+        (edge.fromId === hoveredSchemaNode || edge.toId === hoveredSchemaNode);
+
+      return {
+        id: edge.id,
+        source: edge.fromId,
+        target: edge.toId,
+        label: RELATION_LABELS[edge.relationType as RelationType] || edge.relationType,
+        style: {
+          stroke: color,
+          strokeWidth: isHighlighted ? 3 : 1.5,
+          strokeDasharray: isSchemaMember ? '6 4' : undefined,
+          opacity: hoveredSchemaNode && !isHighlighted ? 0.25 : 1,
+          transition: 'opacity 0.25s, strokeWidth 0.25s',
+        },
+        markerEnd: {
+          type: isSchemaMember ? MarkerType.Arrow : MarkerType.ArrowClosed,
+          color,
+        },
+        labelStyle: { fontSize: 11, fill: '#64748b' },
+        labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
+        animated: edge.relationType === 'prerequisite' || edge.relationType === 'cause',
+      };
+    });
+  }, [dataEdges, hoveredSchemaNode]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -97,6 +132,20 @@ export function MindMap({ nodes: dataNodes, edges: dataEdges, onNodeClick, class
     },
     [onNodeClick],
   );
+
+  const onNodeMouseEnter = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      const nodeData = dataNodes?.find((n: any) => n.id === node.id);
+      if (nodeData?.representationType === 'schema') {
+        setHoveredSchemaNode(node.id);
+      }
+    },
+    [dataNodes],
+  );
+
+  const onNodeMouseLeave = useCallback(() => {
+    setHoveredSchemaNode(null);
+  }, []);
 
   if (!dataNodes || dataNodes.length === 0) {
     return (
@@ -117,6 +166,8 @@ export function MindMap({ nodes: dataNodes, edges: dataEdges, onNodeClick, class
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClickHandler}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.3 }}
@@ -131,7 +182,9 @@ export function MindMap({ nodes: dataNodes, edges: dataEdges, onNodeClick, class
         <MiniMap
           nodeStrokeColor="#6366f1"
           nodeColor={(n: any) => {
-            const level = (n.data as any)?.masteryLevel || 0;
+            const data = n.data as any;
+            if (data?.representationType === 'schema') return '#d97706';
+            const level = data?.masteryLevel || 0;
             if (level >= 80) return '#10b981';
             if (level >= 60) return '#f59e0b';
             return '#ef4444';

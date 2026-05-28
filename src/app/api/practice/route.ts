@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { generateQuestions } from '@/lib/llm-client';
 import { sm2 } from '@/lib/sm2';
+import { resolveUserId, resolveUserIdFromRequest } from '@/lib/user-context';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -345,7 +346,7 @@ async function handleGenerateQuestion(body: any) {
 }
 
 async function handleSubmitAnswer(body: any) {
-  const { questionId, userAnswer, userId, durationSeconds, selfQuality } = body;
+  const { questionId, userAnswer, durationSeconds, selfQuality } = body;
 
   // --- validation ---
   if (!questionId) {
@@ -392,11 +393,7 @@ async function handleSubmitAnswer(body: any) {
   const quality = qualityFromCorrectness(isCorrect, selfQuality);
 
   // --- resolve user ---
-  let uid = userId || 'default-user';
-  if (uid === 'default-user') {
-    const defaultUser = await prisma.user.findFirst({ select: { id: true } });
-    if (defaultUser) uid = defaultUser.id;
-  }
+  const uid = await resolveUserId(body.userId);
 
   // --- SM-2 scheduling ---
   const sm2Result = sm2(quality, {
