@@ -1,6 +1,8 @@
 'use client';
 
 import { Button } from '@/components/ui/Button';
+import { LatexRenderer } from '@/components/ui/LatexRenderer';
+import { LatexText } from '@/components/ui/LatexText';
 
 interface FormulaVariable {
   symbol: string;
@@ -115,9 +117,11 @@ export function FormulaView({
 
       {formula && (
         <div className="bg-white rounded-lg border border-blue-200/40 p-4 mb-4 text-center">
-          <span className="text-lg font-mono font-bold text-slate-800 tracking-wide">
-            {formula}
-          </span>
+          <LatexRenderer
+            latex={formula}
+            displayMode
+            showRawOnError
+          />
         </div>
       )}
 
@@ -160,7 +164,7 @@ export function FormulaView({
                 <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs font-bold shrink-0 mt-0.5">
                   {i + 1}
                 </span>
-                <span className="text-slate-700">{step}</span>
+                <LatexText text={step} className="text-slate-700" />
               </li>
             ))}
           </ol>

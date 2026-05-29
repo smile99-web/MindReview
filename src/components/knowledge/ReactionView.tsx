@@ -1,6 +1,8 @@
 'use client';
 
 import { Button } from '@/components/ui/Button';
+import { LatexRenderer } from '@/components/ui/LatexRenderer';
+import { LatexText } from '@/components/ui/LatexText';
 
 export interface ReactionViewData {
   /** Chemical equation (e.g. "2H₂ + O₂ → 2H₂O") */
@@ -137,7 +139,7 @@ export function ReactionView({
       {/* Chemical equation — prominent display */}
       {equation && (
         <div className="bg-white rounded-lg border border-green-200/40 p-4 mb-4 text-center">
-          <span className="text-base font-mono font-bold text-slate-800">{equation}</span>
+          <LatexRenderer latex={equation} displayMode showRawOnError />
           {/* Conditions and catalyst */}
           {(conditions || catalyst) && (
             <div className="mt-2 flex items-center justify-center gap-3 flex-wrap">
@@ -202,7 +204,7 @@ export function ReactionView({
                   <span className="flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600 text-xs font-bold shrink-0 mt-0.5">
                     {i + 1}
                   </span>
-                  <span className="text-slate-700">{step}</span>
+                  <LatexText text={step} className="text-slate-700" />
                 </li>
               ))}
             </ol>

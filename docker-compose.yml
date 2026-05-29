@@ -21,7 +21,7 @@ services:
       POSTGRES_PASSWORD: mindreview
       POSTGRES_DB: mindreview
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -41,8 +41,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command:
-      - "/app/docker-entrypoint.sh"
 
 volumes:
   pgdata:

@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/Button';
+import { LatexText } from '@/components/ui/LatexText';
 
 interface TimelineEvent {
   date: string;
@@ -132,12 +133,14 @@ export function TimelineView({
                     </span>
                   )}
                 </div>
-                <h5 className="text-sm font-medium text-slate-800">{event.title}</h5>
+                <h5 className="text-sm font-medium text-slate-800">
+                  <LatexText text={event.title} />
+                </h5>
                 {/* Description from engine (description field) or significance */}
                 {(event.description || event.significance) && (
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    {event.description || event.significance}
-                  </p>
+                  <div className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    <LatexText text={event.description || event.significance || ''} />
+                  </div>
                 )}
               </div>
             </div>

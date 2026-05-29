@@ -8,6 +8,7 @@ import { getDifficultyLabel } from '@/lib/utils';
 import { ICAP_LABELS, SUBJECT_CONFIG } from '@/types';
 import type { IcapLevel, SubjectName } from '@/types';
 import { RepresentationView } from './RepresentationView';
+import { LatexText } from '@/components/ui/LatexText';
 
 // 所有可用的表征类型（用于下拉选择）
 const ALL_REPRESENTATION_TYPES = [
@@ -195,9 +196,9 @@ export function KnowledgeCardView({
         <h2 className="text-xl font-bold text-slate-800 tracking-tight mb-3">
           {node.title}
         </h2>
-        <p className="text-slate-600 leading-relaxed text-[15px] mb-4">
-          {node.summary}
-        </p>
+        <div className="text-slate-600 leading-relaxed text-[15px] mb-4">
+          <LatexText text={node.summary || ''} />
+        </div>
 
         {/* 关键词 */}
         {node.keywords && node.keywords.length > 0 && (
@@ -333,7 +334,7 @@ export function KnowledgeCardView({
                 className="text-sm text-slate-600 flex items-start gap-2.5"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                {pre}
+                <LatexText text={pre} />
               </li>
             ))}
           </ul>
@@ -363,7 +364,7 @@ export function KnowledgeCardView({
                     d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
                   />
                 </svg>
-                {m}
+                <LatexText text={m} />
               </li>
             ))}
           </ul>
@@ -381,7 +382,7 @@ export function KnowledgeCardView({
                 className="text-sm text-slate-600 flex items-start gap-2.5"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                {q}
+                <LatexText text={q} />
               </li>
             ))}
           </ul>

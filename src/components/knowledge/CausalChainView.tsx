@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/Button';
+import { LatexText } from '@/components/ui/LatexText';
 
 interface CausalNode {
   id?: string;
@@ -122,12 +123,12 @@ export function CausalChainView({
                   </span>
                   <div>
                     <h5 className="text-sm font-medium text-slate-800">
-                      {node.label || node.event}
+                      <LatexText text={node.label || node.event} />
                     </h5>
                     {node.description && (
-                      <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                        {node.description}
-                      </p>
+                      <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                        <LatexText text={node.description} />
+                      </div>
                     )}
                   </div>
                 </div>

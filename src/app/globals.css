@@ -1,5 +1,13 @@
 @import "tailwindcss";
 @import "@xyflow/react/dist/style.css";
+@import "katex/dist/katex.min.css";
+
+/* KaTeX overrides for MindReview design */
+.katex { font-size: 1.1em; }
+.katex-display > .katex { font-size: 1.2em; }
+.katex-display { overflow-x: auto; overflow-y: hidden; }
+.katex-display > .katex-html { padding: 4px 0; }
+
 
 :root {
   --background: #f0f2f5;

@@ -15,6 +15,12 @@ const PROTECTED_PREFIXES = [
 ];
 
 const AUTH_PAGES = ["/auth/login", "/auth/register"];
+
+const PUBLIC_API_PREFIXES = [
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/refresh",
+];
 const ACCESS_COOKIE = "mindreview_access_token";
 const DEV_JWT_SECRET = "mindreview-dev-secret-change-me";
 
@@ -87,7 +93,8 @@ export async function middleware(request: NextRequest) {
   const authCookie = request.cookies.get("auth_status");
   const hasValidAccessToken = await verifyAccessToken(getBearerToken(request));
 
-  if (pathname.startsWith("/api/") && !hasValidAccessToken) {
+  const isPublicApi = PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p));
+  if (pathname.startsWith("/api/") && !isPublicApi && !hasValidAccessToken) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

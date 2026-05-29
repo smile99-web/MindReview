@@ -1,6 +1,6 @@
 import { jwtDecode } from "jwt-decode";
 
-const AUTH_API = process.env.NEXT_PUBLIC_AUTH_API || "http://localhost:8001";
+const AUTH_API = process.env.NEXT_PUBLIC_AUTH_API || "";
 
 interface User {
   id: string;

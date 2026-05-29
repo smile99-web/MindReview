@@ -8,6 +8,7 @@ import { MindMap } from '@/components/mindmap/MindMap';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { LatexText } from '@/components/ui/LatexText';
 
 export default function KnowledgeCardPage() {
   const params = useParams();
@@ -342,7 +343,9 @@ export default function KnowledgeCardPage() {
                     {i + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-slate-800 font-medium mb-4">{q.stem}</p>
+                    <div className="text-slate-800 font-medium mb-4">
+                      <LatexText text={q.stem || ''} />
+                    </div>
 
                     {q.options && Array.isArray(q.options) && q.options.length > 0 && (
                       <div className="space-y-2 mb-4">
@@ -353,7 +356,9 @@ export default function KnowledgeCardPage() {
                           >
                             <input type="radio" name={`q-${i}`} className="text-indigo-600 w-4 h-4" />
                             <span className="text-xs font-semibold text-slate-400 w-5">{opt.label}.</span>
-                            <span className="text-sm text-slate-700">{opt.text}</span>
+                            <span className="text-sm text-slate-700">
+                              <LatexText text={opt.text || ''} />
+                            </span>
                           </label>
                         ))}
                       </div>
@@ -364,13 +369,13 @@ export default function KnowledgeCardPage() {
                         查看答案与解析
                       </summary>
                       <div className="mt-3 p-4 bg-gradient-to-br from-emerald-50/80 to-green-50/80 rounded-xl border border-emerald-100/60">
-                        <p className="text-sm font-semibold text-emerald-800">
-                          答案: {q.answer}
-                        </p>
+                        <div className="text-sm font-semibold text-emerald-800">
+                          答案: <LatexText text={q.answer || ''} />
+                        </div>
                         {q.explanation && (
-                          <p className="text-sm text-emerald-700/80 mt-1.5">
-                            解析: {q.explanation}
-                          </p>
+                          <div className="text-sm text-emerald-700/80 mt-1.5">
+                            解析: <LatexText text={q.explanation} />
+                          </div>
                         )}
                       </div>
                     </details>
