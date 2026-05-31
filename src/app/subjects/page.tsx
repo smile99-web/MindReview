@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DecomposeForm } from '@/components/knowledge/DecomposeForm';
@@ -21,12 +22,14 @@ interface SubjectItem {
 }
 
 export default function SubjectsPage() {
+  const router = useRouter();
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDecompose, setShowDecompose] = useState(false);
   const [showTextbookGenerate, setShowTextbookGenerate] = useState(false);
 
-  useEffect(() => {
+  const fetchSubjects = useCallback(() => {
+    setLoading(true);
     authFetch('/api/subjects')
       .then((res) => res.json())
       .then((data) => setSubjects(Array.isArray(data) ? data : []))
@@ -34,14 +37,22 @@ export default function SubjectsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => { document.title = '学科列表 - 知图复习'; }, []);
+
+  useEffect(() => {
+    fetchSubjects();
+  }, [fetchSubjects]);
+
   const handleDecomposed = () => {
     setShowDecompose(false);
-    window.location.reload();
+    fetchSubjects();
+    router.refresh();
   };
 
   const handleGenerated = () => {
     setShowTextbookGenerate(false);
-    window.location.reload();
+    fetchSubjects();
+    router.refresh();
   };
 
   return (

@@ -42,6 +42,7 @@ function ReviewContent() {
   const [profileApplied, setProfileApplied] = useState(false);
   const [recommendedMode, setRecommendedMode] = useState<string | null>(null);
   const [reviewActionableSteps, setReviewActionableSteps] = useState<ActionableStep[]>([]);
+  const [showBreakPrompt, setShowBreakPrompt] = useState(false);
 
   const { densityLevel, infoChunkSize } = useDensity();
 
@@ -69,10 +70,10 @@ function ReviewContent() {
     }
   }, [mode]);
 
+  useEffect(() => { document.title = '每日复习 - 知图复习'; }, []);
+
   useEffect(() => {
-    queueMicrotask(() => {
-      void loadTasks();
-    });
+    void loadTasks();
   }, [loadTasks]);
 
   // Fetch learner profile and apply recommended settings
@@ -193,7 +194,7 @@ function ReviewContent() {
       <CognitiveLoadManager
         mode={mode}
         onModeChange={setMode}
-        onBreak={() => alert('建议休息5分钟再继续！')}
+        onBreak={() => setShowBreakPrompt(true)}
         completedCount={completedCount}
         totalCount={tasks.length}
         sessionStartTime={sessionStartTime}
@@ -271,6 +272,27 @@ function ReviewContent() {
               className="h-full bg-gradient-to-r from-indigo-500 to-indigo-600 rounded-full transition-all duration-700 ease-out"
               style={{ width: `${progress}%` }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Break prompt overlay */}
+      {showBreakPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setShowBreakPrompt(false)}>
+          <div className="bg-white rounded-2xl shadow-xl p-8 mx-4 max-w-sm w-full text-center" onClick={e => e.stopPropagation()}>
+            <div className="text-5xl mb-4">☕</div>
+            <h3 className="font-semibold text-slate-800 text-lg mb-2">休息一下</h3>
+            <p className="text-sm text-slate-500 mb-6">
+              认知负荷较高，建议休息 5 分钟再继续。短暂的休息能显著提高学习效率。
+            </p>
+            <div className="flex gap-2 justify-center">
+              <Button variant="secondary" onClick={() => setShowBreakPrompt(false)}>
+                继续学习
+              </Button>
+              <Button onClick={() => { setShowBreakPrompt(false); }}>
+                休息 5 分钟
+              </Button>
+            </div>
           </div>
         </div>
       )}

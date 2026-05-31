@@ -42,6 +42,61 @@ export async function PATCH(
     const { id } = await params;
     const body = await req.json();
 
+    // --- input validation ---
+    const requiredStrings = ['title', 'subjectId', 'icapLevel'];
+    const optionalStrings = ['summary', 'chapterId', 'parentId', 'representationType'];
+    const arrayFields = ['keywords', 'prerequisites', 'commonMistakes', 'typicalQuestions'];
+    const numberFields = ['difficulty', 'cognitiveLoad', 'masteryLevel', 'repetitions', 'easeFactor', 'intervalDays', 'forgetRisk'];
+    const dateFields = ['nextReviewAt', 'lastReviewAt'];
+    const jsonFields = ['representationData'];
+
+    for (const [key, value] of Object.entries(body)) {
+      if (requiredStrings.includes(key)) {
+        if (typeof value !== 'string' || value.trim() === '') {
+          return NextResponse.json(
+            { error: `字段 "${key}" 必须是非空字符串` },
+            { status: 400 },
+          );
+        }
+      } else if (optionalStrings.includes(key)) {
+        if (value !== null && value !== undefined && (typeof value !== 'string' || value.trim() === '')) {
+          return NextResponse.json(
+            { error: `字段 "${key}" 必须是字符串` },
+            { status: 400 },
+          );
+        }
+      } else if (arrayFields.includes(key)) {
+        if (!Array.isArray(value)) {
+          return NextResponse.json(
+            { error: `字段 "${key}" 必须是数组` },
+            { status: 400 },
+          );
+        }
+      } else if (numberFields.includes(key)) {
+        if (typeof value !== 'number' || Number.isNaN(value)) {
+          return NextResponse.json(
+            { error: `字段 "${key}" 必须是数字` },
+            { status: 400 },
+          );
+        }
+      } else if (dateFields.includes(key)) {
+        if (value !== null && value !== undefined && typeof value !== 'string') {
+          return NextResponse.json(
+            { error: `字段 "${key}" 必须是日期字符串` },
+            { status: 400 },
+          );
+        }
+      } else if (jsonFields.includes(key)) {
+        if (value !== null && value !== undefined && (typeof value !== 'object' || Array.isArray(value))) {
+          return NextResponse.json(
+            { error: `字段 "${key}" 必须是 JSON 对象` },
+            { status: 400 },
+          );
+        }
+      }
+    }
+    // --- end validation ---
+
     const node = await prisma.knowledgeNode.update({
       where: { id },
       data: body,

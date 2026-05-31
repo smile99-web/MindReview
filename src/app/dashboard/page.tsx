@@ -18,6 +18,7 @@ export default function DashboardPage() {
     reviewedToday: 0,
     pendingTasks: 0,
     totalMistakes: 0,
+    totalReviewCount: 0,
   });
   const [subjects, setSubjects] = useState<any[]>([]);
   const [recentNodes, setRecentNodes] = useState<any[]>([]);
@@ -25,6 +26,17 @@ export default function DashboardPage() {
   const [actionableSteps, setActionableSteps] = useState<ActionableStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [diagnosticRunning, setDiagnosticRunning] = useState(false);
+  const [diagnosticResult, setDiagnosticResult] = useState<{
+    score: number;
+    level: string;
+    strengths: string[];
+    gaps: string[];
+    recommendedStartingPoint: string;
+  } | null>(null);
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
+
+  useEffect(() => { document.title = '仪表盘 - 知图复习'; }, []);
 
   useEffect(() => {
     async function load() {
@@ -41,6 +53,7 @@ export default function DashboardPage() {
           reviewedToday: data.stats?.reviewedToday || 0,
           pendingTasks: data.stats?.pendingTasks || 0,
           totalMistakes: data.stats?.totalMistakes || 0,
+          totalReviewCount: data.stats?.totalReviewCount || 0,
         });
       } catch (err) {
         console.error('Dashboard load error:', err);
@@ -62,10 +75,56 @@ export default function DashboardPage() {
         setActionableSteps((data.actionableSteps as ActionableStep[]) || []);
       } catch {
         // silent — recommendations are optional
+      } finally {
+        setProfileLoaded(true);
       }
     }
     loadSteps();
   }, [userId]);
+
+  // Auto-show diagnostic for new users with zero review history
+  useEffect(() => {
+    if (profileLoaded && stats.totalReviewCount === 0 && !diagnosticResult && !showDiagnostic) {
+      setShowDiagnostic(true);
+    }
+  }, [profileLoaded, stats.totalReviewCount, diagnosticResult, showDiagnostic]);
+
+  const handleRunDiagnostic = async () => {
+    if (!userId || diagnosticRunning) return;
+    setDiagnosticRunning(true);
+    try {
+      const firstSubject = subjects[0];
+      const grade = '初一'; // 默认年级；实际应用中可从用户 profile 获取
+      const res = await fetch('/api/learner/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          grade,
+          subjectId: firstSubject?.id,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || '诊断请求失败');
+      }
+      const data = await res.json();
+      const diag = data.diagnostic;
+      if (diag) {
+        setDiagnosticResult({
+          score: diag.score,
+          level: diag.level,
+          strengths: diag.strengths || [],
+          gaps: diag.gaps || [],
+          recommendedStartingPoint: diag.recommendedStartingPoint || '',
+        });
+      }
+    } catch (err) {
+      console.error('Onboarding diagnostic failed:', err);
+    } finally {
+      setDiagnosticRunning(false);
+    }
+  };
 
   const stepIcons: Record<ActionableStep['type'], string> = {
     review_weakness: '🔍',
@@ -144,6 +203,151 @@ export default function DashboardPage() {
           欢迎回来，今天也要加油哦
         </p>
       </div>
+
+      {/* 新手诊断 — Onboarding Diagnostic */}
+      {showDiagnostic && !diagnosticResult && (
+        <div className="mb-8 p-6 rounded-2xl bg-gradient-to-br from-indigo-50/70 via-purple-50/50 to-blue-50/50 border border-indigo-200/60 shadow-sm">
+          <div className="flex items-start gap-4">
+            <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-2xl shadow-sm">
+              🎯
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-lg font-bold text-slate-800">
+                欢迎！快速评估你的基础水平（2分钟）
+              </h2>
+              <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+                通过10道快速诊断题，了解你的实际预备知识水平，
+                帮你跳过已掌握的内容，精准定位学习起点。
+              </p>
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={handleRunDiagnostic}
+                  disabled={diagnosticRunning || subjects.length === 0}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 text-white text-sm font-semibold hover:from-indigo-600 hover:to-indigo-700 shadow-sm shadow-indigo-500/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {diagnosticRunning ? (
+                    <>
+                      <div className="animate-spin h-4 w-4 border-2 border-white/30 border-t-white rounded-full" />
+                      评估中...
+                    </>
+                  ) : (
+                    <>
+                      开始评估
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                      </svg>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowDiagnostic(false)}
+                  className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-white/80 transition-colors duration-200"
+                >
+                  跳过
+                </button>
+              </div>
+              {subjects.length === 0 && (
+                <p className="text-xs text-amber-600 mt-3">
+                  需要先创建学科和数据才能运行诊断
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 诊断结果 */}
+      {diagnosticResult && (
+        <div className="mb-8 p-6 rounded-2xl bg-white border border-slate-200/70 shadow-sm">
+          <div className="flex items-start gap-4">
+            <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-500 flex items-center justify-center text-2xl shadow-sm">
+              {diagnosticResult.level === 'advanced' ? '🏆' : diagnosticResult.level === 'intermediate' ? '📊' : '🌱'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-lg font-bold text-slate-800">诊断结果</h2>
+              <div className="flex items-center gap-3 mt-2">
+                <span className="text-3xl font-bold text-indigo-600 tabular-nums">
+                  {diagnosticResult.score}分
+                </span>
+                <span className={`text-sm font-semibold px-2.5 py-1 rounded-full ${
+                  diagnosticResult.level === 'advanced'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : diagnosticResult.level === 'intermediate'
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {diagnosticResult.level === 'advanced' ? '进阶水平' : diagnosticResult.level === 'intermediate' ? '中等水平' : '基础起步'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mt-4">
+                <div>
+                  <p className="text-xs font-semibold text-emerald-600 mb-1.5">
+                    优势领域 ({diagnosticResult.strengths.length})
+                  </p>
+                  <ul className="space-y-0.5">
+                    {diagnosticResult.strengths.slice(0, 3).map((s, i) => (
+                      <li key={i} className="text-xs text-slate-600 flex items-center gap-1">
+                        <span className="text-emerald-500">✓</span> {s}
+                      </li>
+                    ))}
+                    {diagnosticResult.strengths.length === 0 && (
+                      <li className="text-xs text-slate-400">继续学习建立优势</li>
+                    )}
+                  </ul>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-amber-600 mb-1.5">
+                    待加强 ({diagnosticResult.gaps.length})
+                  </p>
+                  <ul className="space-y-0.5">
+                    {diagnosticResult.gaps.slice(0, 3).map((g, i) => (
+                      <li key={i} className="text-xs text-slate-600 flex items-center gap-1">
+                        <span className="text-amber-500">!</span> {g}
+                      </li>
+                    ))}
+                    {diagnosticResult.gaps.length === 0 && (
+                      <li className="text-xs text-slate-400">基础扎实，继续保持</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+
+              {diagnosticResult.recommendedStartingPoint && (
+                <div className="mt-4 p-3 rounded-xl bg-indigo-50/60 border border-indigo-100/60">
+                  <p className="text-xs text-indigo-500 font-medium">推荐起点</p>
+                  <p className="text-sm font-semibold text-indigo-700 mt-0.5">
+                    {diagnosticResult.recommendedStartingPoint}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-3 mt-4">
+                {diagnosticResult.recommendedStartingPoint && (
+                  <Link
+                    href="/subjects"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 text-white text-sm font-semibold hover:from-indigo-600 hover:to-indigo-700 shadow-sm shadow-indigo-500/20 transition-all duration-200"
+                  >
+                    开始学习
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                    </svg>
+                  </Link>
+                )}
+                <button
+                  onClick={() => {
+                    setShowDiagnostic(false);
+                    setDiagnosticResult(null);
+                  }}
+                  className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors duration-200"
+                >
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 统计卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">

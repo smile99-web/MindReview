@@ -1,6 +1,8 @@
 'use client';
 
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
+import { BoundaryCallout } from './BoundaryCallout';
 
 // ========== Force vector type (shared by both formats) ==========
 interface ForceVector {
@@ -34,6 +36,8 @@ export interface ForceDiagramData {
   coordinateSystem?: string;
   /** Legacy: array of objects with forces */
   objects?: ForceObject[];
+  /** Boundary/limitation: when this representation breaks down */
+  boundary?: string;
 }
 
 interface ForceDiagramProps {
@@ -46,23 +50,49 @@ interface ForceDiagramProps {
 }
 
 // ========== Direction vectors for SVG rendering ==========
-const directionVectors: Record<string, { dx: number; dy: number; labelOffset: { x: number; y: number } }> = {
-  up: { dx: 0, dy: -1, labelOffset: { x: 0, y: -18 } },
-  down: { dx: 0, dy: 1, labelOffset: { x: 0, y: 16 } },
-  left: { dx: -1, dy: 0, labelOffset: { x: -22, y: 0 } },
-  right: { dx: 1, dy: 0, labelOffset: { x: 22, y: 0 } },
-  upleft: { dx: -0.7, dy: -0.7, labelOffset: { x: -18, y: -18 } },
-  upright: { dx: 0.7, dy: -0.7, labelOffset: { x: 18, y: -18 } },
-  downleft: { dx: -0.7, dy: 0.7, labelOffset: { x: -18, y: 18 } },
-  downright: { dx: 0.7, dy: 0.7, labelOffset: { x: 18, y: 18 } },
+const directionVectors: Record<string, { dx: number; dy: number }> = {
+  up: { dx: 0, dy: -1 },
+  down: { dx: 0, dy: 1 },
+  left: { dx: -1, dy: 0 },
+  right: { dx: 1, dy: 0 },
+  upleft: { dx: -0.7, dy: -0.7 },
+  upright: { dx: 0.7, dy: -0.7 },
+  downleft: { dx: -0.7, dy: 0.7 },
+  downright: { dx: 0.7, dy: 0.7 },
 };
 
 const defaultColors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+const BASE_ARROW_LEN = 55;
+
+// ========== Helpers ==========
+function parseMagnitude(mag: string): number {
+  const match = mag.match(/[\d.]+/);
+  return match ? parseFloat(match[0]) : 1;
+}
+
+function getUnit(mag: string): string {
+  const m = mag.match(/[a-zA-Z一-鿿]+/);
+  return m ? m[0] : '';
+}
 
 // ========== Single force arrow SVG element ==========
-function ForceArrow({ force, index, cx, cy }: { force: ForceVector; index: number; cx: number; cy: number }) {
+function ForceArrow({
+  force,
+  index,
+  cx,
+  cy,
+  scale = 1,
+  onDragStart,
+}: {
+  force: ForceVector;
+  index: number;
+  cx: number;
+  cy: number;
+  scale?: number;
+  onDragStart?: (e: React.MouseEvent) => void;
+}) {
   const vec = directionVectors[force.direction] || directionVectors.down;
-  const arrowLen = 55;
+  const arrowLen = BASE_ARROW_LEN * scale;
   const x2 = cx + vec.dx * arrowLen;
   const y2 = cy + vec.dy * arrowLen;
   const color = force.color || defaultColors[index % defaultColors.length];
@@ -70,18 +100,42 @@ function ForceArrow({ force, index, cx, cy }: { force: ForceVector; index: numbe
   const lx = cx + vec.dx * arrowLen * 0.55;
   const ly = cy + vec.dy * arrowLen * 0.55;
 
+  const currentMag = (parseMagnitude(force.magnitude) * scale).toFixed(1);
+  const unit = getUnit(force.magnitude);
+
   return (
     <g>
-      <line x1={cx} y1={cy} x2={x2} y2={y2} stroke={color} strokeWidth="2" markerEnd={`url(#arrow-${index})`} />
+      <line
+        x1={cx} y1={cy} x2={x2} y2={y2}
+        stroke={color} strokeWidth="2"
+        markerEnd={`url(#arrow-${index})`}
+      />
       <defs>
-        <marker id={`arrow-${index}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <marker
+          id={`arrow-${index}`} viewBox="0 0 10 10"
+          refX="9" refY="5" markerWidth="6" markerHeight="6"
+          orient="auto"
+        >
           <path d="M 0 0 L 10 5 L 0 10 z" fill={color} />
         </marker>
       </defs>
-      {/* Label positioned 55% along the arrow */}
-      <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fill={color} fontSize="11" fontWeight="600">
-        {force.name} {force.magnitude}
+      {/* Label with numerical magnitude */}
+      <text
+        x={lx} y={ly} textAnchor="middle"
+        dominantBaseline="middle" fill={color}
+        fontSize="11" fontWeight="600"
+      >
+        {force.name} {currentMag}{unit}
       </text>
+      {/* Drag handle at arrow tip */}
+      <circle
+        cx={x2} cy={y2} r={7}
+        fill="white" fillOpacity={0.7}
+        stroke={color} strokeWidth="1.5"
+        strokeDasharray="2 2"
+        style={{ cursor: 'grab' }}
+        onMouseDown={onDragStart}
+      />
     </g>
   );
 }
@@ -116,7 +170,92 @@ export function ForceDiagram({
   }
 
   const coordinateSystem = _data.coordinateSystem;
+  const boundary = _data.boundary;
   const hasData = objects.length > 0;
+
+  // ---- Interactive state: drag-to-adjust force magnitudes ----
+  const [magnitudes, setMagnitudes] = useState<Record<string, number>>({});
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const dragSvgRef = useRef<SVGSVGElement | null>(null);
+  // Keep a ref to objects so the document-level drag handler reads current data
+  const objectsRef = useRef(objects);
+  objectsRef.current = objects;
+
+  // Reset magnitudes when the underlying data changes
+  const dataFingerprint = objects
+    .map((o) => o.forces.map((f) => f.magnitude).join(','))
+    .join('|');
+  useEffect(() => {
+    setMagnitudes({});
+    setDraggingKey(null);
+  }, [dataFingerprint]);
+
+  const getScale = useCallback(
+    (objIdx: number, forceIdx: number): number => {
+      const key = `${objIdx}-${forceIdx}`;
+      return magnitudes[key] ?? 1;
+    },
+    [magnitudes],
+  );
+
+  const handleReset = useCallback(() => {
+    setMagnitudes({});
+  }, []);
+
+  const handleDragStart = useCallback(
+    (key: string) => (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDraggingKey(key);
+      const svg = (e.target as Element).closest('svg') as SVGSVGElement | null;
+      if (svg) dragSvgRef.current = svg;
+    },
+    [],
+  );
+
+  // Document-level drag listeners for reliable tracking outside the SVG
+  useEffect(() => {
+    if (!draggingKey) return;
+
+    const handleMove = (e: MouseEvent) => {
+      const svg = dragSvgRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
+      const svgX = ((e.clientX - rect.left) / rect.width) * vb.width;
+      const svgY = ((e.clientY - rect.top) / rect.height) * vb.height;
+      const cx = 100;
+      const cy = 100;
+
+      const [oi, fi] = draggingKey.split('-').map(Number);
+      const objs = objectsRef.current;
+      const force = objs[oi]?.forces?.[fi];
+      if (!force) return;
+
+      const vec = directionVectors[force.direction] || directionVectors.down;
+      // Project mouse displacement onto force direction
+      const proj = (svgX - cx) * vec.dx + (svgY - cy) * vec.dy;
+      const clamped = Math.max(8, Math.min(180, proj));
+      const scale = clamped / BASE_ARROW_LEN;
+
+      setMagnitudes((prev) => ({
+        ...prev,
+        [draggingKey]: Math.round(scale * 100) / 100,
+      }));
+    };
+
+    const handleUp = () => {
+      setDraggingKey(null);
+      dragSvgRef.current = null;
+    };
+
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+    };
+  }, [draggingKey]);
 
   // Loading state
   if (loading) {
@@ -166,10 +305,22 @@ export function ForceDiagram({
     );
   }
 
+  const hasModifications = Object.keys(magnitudes).length > 0;
+
   // Data state: render the SVG force diagram
   return (
     <div className="rounded-xl border border-purple-200/60 bg-gradient-to-br from-purple-50/50 to-indigo-50/50 p-5">
-      <h4 className="text-sm font-semibold text-purple-800 mb-4">{title}</h4>
+      <div className="flex items-center justify-between mb-4">
+        <h4 className="text-sm font-semibold text-purple-800">{title}</h4>
+        {hasModifications && (
+          <button
+            onClick={handleReset}
+            className="text-xs text-purple-600 hover:text-purple-800 underline underline-offset-2 font-medium"
+          >
+            重置力的大小
+          </button>
+        )}
+      </div>
 
       <div className="space-y-6">
         {objects.map((obj, objIdx) => (
@@ -184,7 +335,15 @@ export function ForceDiagram({
                 </text>
                 {/* Force arrows */}
                 {obj.forces.map((force, fi) => (
-                  <ForceArrow key={fi} force={force} index={objIdx * 10 + fi} cx={100} cy={100} />
+                  <ForceArrow
+                    key={fi}
+                    force={force}
+                    index={objIdx * 10 + fi}
+                    cx={100}
+                    cy={100}
+                    scale={getScale(objIdx, fi)}
+                    onDragStart={handleDragStart(`${objIdx}-${fi}`)}
+                  />
                 ))}
               </svg>
             </div>
@@ -192,10 +351,13 @@ export function ForceDiagram({
             <div className="flex flex-wrap gap-3 justify-center mt-3">
               {obj.forces.map((force, fi) => {
                 const color = force.color || defaultColors[fi % defaultColors.length];
+                const scale = getScale(objIdx, fi);
+                const mag = (parseMagnitude(force.magnitude) * scale).toFixed(1);
+                const unit = getUnit(force.magnitude);
                 return (
                   <div key={fi} className="flex items-center gap-1.5 text-xs text-slate-600">
                     <div className="w-3 h-0.5 rounded-full" style={{ backgroundColor: color }} />
-                    {force.name}: {force.magnitude}
+                    {force.name}: {mag}{unit}
                   </div>
                 );
               })}
@@ -213,6 +375,8 @@ export function ForceDiagram({
       )}
 
       {/* Error banner with existing data */}
+      {boundary && <BoundaryCallout boundary={boundary} />}
+
       {error && hasData && (
         <p className="mt-3 text-xs text-red-400 text-center">{error}</p>
       )}

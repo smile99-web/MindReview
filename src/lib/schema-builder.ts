@@ -1,17 +1,6 @@
 import { llmCall } from '@/lib/llm-client';
+import { sanitizeJsonString } from '@/lib/utils';
 import type { PrismaClient } from '@prisma/client';
-
-// ── JSON sanitization (mirrors llm-client.ts private helper) ──
-function sanitizeJsonString(str: string): string {
-  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (ch) => {
-    if (ch === '\n') return '\\n';
-    if (ch === '\r') return '\\r';
-    if (ch === '\t') return '\\t';
-    if (ch === '\b') return '\\b';
-    if (ch === '\f') return '\\f';
-    return '\\u' + ('000' + ch.charCodeAt(0).toString(16)).slice(-4);
-  });
-}
 
 async function llmJson<T>(messages: { role: 'system' | 'user' | 'assistant'; content: string }[]): Promise<T> {
   const raw = await llmCall({ messages, temperature: 0.3, maxTokens: 4096, jsonMode: true });

@@ -18,8 +18,14 @@ function MindMapContent() {
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('思维导图');
   const [showSchemas, setShowSchemas] = useState(false);
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [subjectsLoading, setSubjectsLoading] = useState(false);
 
   const loadData = useCallback(async (includeSchemas: boolean) => {
+    if (!subjectId && !chapterId) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const params = new URLSearchParams();
@@ -45,9 +51,26 @@ function MindMapContent() {
     }
   }, [subjectId, chapterId]);
 
+  useEffect(() => { document.title = '思维导图 - 知图复习'; }, []);
+
   useEffect(() => {
     loadData(showSchemas);
   }, [loadData, showSchemas]);
+
+  // 无参数时加载学科列表
+  useEffect(() => {
+    if (!subjectId && !chapterId) {
+      setSubjectsLoading(true);
+      fetch('/api/subjects')
+        .then(res => res.json())
+        .then(data => setSubjects(Array.isArray(data) ? data : data.subjects || []))
+        .catch(() => {})
+        .finally(() => setSubjectsLoading(false));
+    }
+  }, [subjectId, chapterId]);
+
+  const [crossChapterEnabled, setCrossChapterEnabled] = useState(false);
+  const [relationTypeFilter, setRelationTypeFilter] = useState('');
 
   const handleNodeClick = (nodeId: string) => {
     router.push(`/cards/${nodeId}`);
@@ -65,6 +88,15 @@ function MindMapContent() {
           </p>
         </div>
         <div className="flex gap-2 items-center">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={crossChapterEnabled}
+              onChange={(e) => setCrossChapterEnabled(e.target.checked)}
+              className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-400 cursor-pointer"
+            />
+            <span className="text-sm text-slate-600 font-medium">跨章节</span>
+          </label>
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -106,7 +138,54 @@ function MindMapContent() {
         })}
       </div>
 
-      {loading ? (
+      {/* 无参数时：显示学科选择器 */}
+      {!subjectId && !chapterId && !loading ? (
+        <div>
+          {subjectsLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {[1, 2, 3, 4, 5, 6].map(i => (
+                <div key={i} className="h-32 bg-slate-100 rounded-2xl animate-pulse" />
+              ))}
+            </div>
+          ) : subjects.length > 0 ? (
+            <div>
+              <p className="text-slate-500 text-sm mb-4">选择一个学科查看思维导图：</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {subjects.map((s: any) => (
+                  <button
+                    key={s.id}
+                    onClick={() => router.push(`/mindmap?subjectId=${s.id}`)}
+                    className="group p-6 bg-white rounded-2xl border border-slate-200/70 hover:border-indigo-300 hover:shadow-md hover:shadow-indigo-500/5 transition-all duration-200 text-left"
+                  >
+                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-slate-100 to-slate-200/50 text-2xl mb-3">
+                      {s.icon || '📖'}
+                    </div>
+                    <h3 className="font-semibold text-slate-800 group-hover:text-indigo-700 transition-colors">
+                      {s.name}
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {s._count?.knowledgeNodes || 0} 知识点 · {s._count?.chapters || 0} 章节
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-14">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-100 text-2xl mb-4">
+                📭
+              </div>
+              <p className="text-slate-500 font-medium">暂无学科数据</p>
+              <p className="text-sm text-slate-400 mt-1.5 mb-5">
+                请先去学科页面拆解教材内容
+              </p>
+              <Button variant="secondary" onClick={() => router.push('/subjects')}>
+                前往学科页面
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : loading ? (
         <div className="h-[600px] bg-slate-100 rounded-2xl animate-pulse flex items-center justify-center">
           <p className="text-slate-400">加载中...</p>
         </div>
@@ -115,6 +194,9 @@ function MindMapContent() {
           nodes={data.nodes}
           edges={data.edges}
           onNodeClick={handleNodeClick}
+          crossChapterEnabled={crossChapterEnabled}
+          relationTypeFilter={relationTypeFilter}
+          onRelationTypeFilterChange={setRelationTypeFilter}
           className="w-full h-[600px] bg-white rounded-2xl border border-slate-200/60 shadow-[0_1px_3px_rgba(0,0,0,0.03),0_4px_12px_rgba(0,0,0,0.02)]"
         />
       )}

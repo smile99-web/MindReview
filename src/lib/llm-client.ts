@@ -2,6 +2,8 @@ import OpenAI from 'openai';
 import { prisma } from '@/lib/prisma';
 import { decryptSecret } from '@/lib/secrets';
 import { assertSafeExternalBaseUrl } from '@/lib/url-security';
+import { sanitizeJsonString } from '@/lib/utils';
+import type { WorkedExample, WorkedExampleReasoningStep } from '@/types';
 
 export type LlmRole = 'system' | 'user' | 'assistant';
 
@@ -22,7 +24,10 @@ const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 async function getLlmSettings() {
   const saved = await prisma.apiKey.findUnique({ where: { service: 'llm' } }).catch(() => null);
   const savedKey = saved?.isActive && saved.key ? decryptSecret(saved.key) : '';
-  const apiKey = savedKey || process.env.DEEPSEEK_API_KEY || 'sk-placeholder';
+  const apiKey = savedKey || process.env.DEEPSEEK_API_KEY || '';
+  if (!apiKey) {
+    throw new Error('DEEPSEEK_API_KEY not configured. Please add your API key in Settings.');
+  }
   const baseURL = assertSafeExternalBaseUrl(
     saved?.baseUrl || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
   );
@@ -106,16 +111,6 @@ export async function llmCallWithLog(
   }
 }
 
-function sanitizeJsonString(str: string): string {
-  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (ch) => {
-    if (ch === '\n') return '\\n';
-    if (ch === '\r') return '\\r';
-    if (ch === '\t') return '\\t';
-    if (ch === '\b') return '\\b';
-    if (ch === '\f') return '\\f';
-    return '\\u' + ('000' + ch.charCodeAt(0).toString(16)).slice(-4);
-  });
-}
 
 // ========== 知识点拆解 ==========
 export async function decomposeKnowledge(
@@ -249,4 +244,93 @@ export async function generateSummary(
   });
 
   return result;
+}
+
+// ========== 样例工作（Cognitive Load Theory - Worked Example） ==========
+export async function generateWorkedExample(
+  knowledgeNodeId: string,
+  subject: string,
+  difficulty: number = 3,
+): Promise<WorkedExample> {
+  const node = await prisma.knowledgeNode.findUnique({
+    where: { id: knowledgeNodeId },
+    include: { subject: { select: { name: true } } },
+  });
+
+  if (!node) {
+    throw new Error(`知识点不存在: ${knowledgeNodeId}`);
+  }
+
+  const subjectName = subject || node.subject?.name || '数学';
+
+  const systemPrompt = `你是一位资深中学${subjectName}教师，擅长按照认知负荷理论设计"样例教学"（Worked Example）。
+
+样例教学的核心结构：
+1. 给出一个典型问题（Problem）
+2. 给出完整解答过程（Solution）
+3. 拆解为逐步推理步骤（Reasoning Steps），每步包含 step 编号和 explanation 解释
+4. 再给出一个相似但略有变化的练习题（Similar Problem）及其参考答案（Similar Problem Solution）
+
+要求：
+- 题目难度与知识点难度 ${difficulty}/5 匹配
+- 语言简洁准确，适合中学生理解
+- 解答步骤要完整、逻辑清晰
+- 相似练习题要改变数值或场景，但考察同一知识点
+
+输出严格JSON格式：
+{
+  "problem": "问题陈述",
+  "solution": "完整解答",
+  "reasoningSteps": [
+    { "step": 1, "explanation": "第一步的推理说明" },
+    { "step": 2, "explanation": "第二步的推理说明" }
+  ],
+  "similarProblem": "相似练习题",
+  "similarProblemSolution": "相似练习题解答"
+}`;
+
+  const userPrompt = `学科：${subjectName}
+知识点：${node.title}
+知识点解释：${node.summary || ''}
+关键词：${(node.keywords || []).join('、')}
+难度：${difficulty}/5
+认知负荷：${node.cognitiveLoad}/5
+
+请为上述知识点生成一个样例教学（Worked Example）。`;
+
+  const result = await llmCallWithLog(
+    {
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.4,
+      maxTokens: 4096,
+      jsonMode: true,
+      generatorType: 'worked_example',
+    },
+    prisma,
+  );
+
+  const parsed = JSON.parse(sanitizeJsonString(result)) as WorkedExample;
+
+  // Validate the structure
+  if (!parsed.problem || !parsed.solution || !Array.isArray(parsed.reasoningSteps)) {
+    throw new Error('LLM 返回的样例数据不完整，缺少必要字段');
+  }
+
+  // Ensure reasoning steps have consistent step numbers
+  parsed.reasoningSteps = parsed.reasoningSteps.map((s, i) => ({
+    step: typeof s.step === 'number' ? s.step : i + 1,
+    explanation: s.explanation || '',
+  }));
+
+  if (!parsed.similarProblem) {
+    parsed.similarProblem = '';
+  }
+  if (!parsed.similarProblemSolution) {
+    parsed.similarProblemSolution = '';
+  }
+
+  return parsed;
 }

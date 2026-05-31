@@ -1,5 +1,6 @@
 import { llmCall } from '@/lib/llm-client';
 import { prisma } from '@/lib/prisma';
+import { sanitizeJsonString } from '@/lib/utils';
 import { SUBJECT_CONFIG, type SubjectName } from '@/types';
 
 // ========== 表征类型 ==========
@@ -16,21 +17,6 @@ export type RepresentationType =
   | 'comparison'
   | 'concept_map';
 
-// ========== JSON 清洗 ==========
-function sanitizeJson(str: string): string {
-  let cleaned = str
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    .trim();
-  // Remove markdown code fences
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-  // Extract JSON object boundaries
-  const startIdx = cleaned.indexOf('{');
-  const endIdx = cleaned.lastIndexOf('}');
-  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    cleaned = cleaned.slice(startIdx, endIdx + 1);
-  }
-  return cleaned || '{}';
-}
 
 // ========== 自动检测表征类型 ==========
 /**
@@ -81,7 +67,7 @@ export async function detectRepresentationType(
       jsonMode: true,
     });
 
-    const parsed = JSON.parse(sanitizeJson(result));
+    const parsed = JSON.parse(sanitizeJsonString(result));
     const type = parsed.type?.trim() || 'concept_map';
 
     return type;
@@ -108,7 +94,8 @@ const REPRESENTATION_PROMPTS: Record<
     {"symbol": "a", "name": "加速度", "unit": "m/s²"}
   ],
   "steps": ["步骤1: 明确研究对象", "步骤2: 分析受力情况"],
-  "notes": "使用注意事项"
+  "notes": "使用注意事项",
+  "boundary": "该公式仅适用于惯性参考系中的宏观低速运动，当速度接近光速或涉及微观粒子时不适用"
 }`,
   },
 
@@ -121,7 +108,8 @@ const REPRESENTATION_PROMPTS: Record<
     {"name": "支持力", "direction": "up", "magnitude": "N"},
     {"name": "推力", "direction": "right", "magnitude": "F"}
   ],
-  "coordinateSystem": "以木块中心为原点，水平向右为x轴正向，竖直向上为y轴正向"
+  "coordinateSystem": "以木块中心为原点，水平向右为x轴正向，竖直向上为y轴正向",
+  "boundary": "该受力分析基于简化的质点模型和光滑接触面假设，当物体不能简化为质点或接触面存在复杂摩擦时不适用"
 }`,
   },
 
@@ -132,7 +120,8 @@ const REPRESENTATION_PROMPTS: Record<
   "events": [
     {"date": "公元前770年", "title": "周平王东迁", "description": "东周开始", "importance": 3},
     {"date": "公元前356年", "title": "商鞅变法", "description": "秦国开始变法图强", "importance": 3}
-  ]
+  ],
+  "boundary": "该时间线仅包含关键节点事件，忽略了许多复杂的中小事件和地区差异，对于微观史学分析不适用"
 }`,
   },
 
@@ -147,7 +136,8 @@ const REPRESENTATION_PROMPTS: Record<
   "edges": [
     {"from": 0, "to": 2, "label": "导致"},
     {"from": 1, "to": 2, "label": "引发"}
-  ]
+  ],
+  "boundary": "该因果链只表示了主要的直接因果关系，省略了间接因素和反事实情况，在涉及多因素交互的复杂系统时不适用"
 }`,
   },
 
@@ -160,7 +150,8 @@ const REPRESENTATION_PROMPTS: Record<
   "conditions": "点燃",
   "type": "synthesis",
   "mechanism": "氢气在氧气中燃烧，发生化合反应生成水",
-  "notes": "反应放出大量的热"
+  "notes": "反应放出大量的热",
+  "boundary": "该反应式表示的是理想条件下的总反应，未包含中间自由基反应步骤，在非标准条件或涉及副反应时不适用"
 }`,
   },
 
@@ -169,7 +160,8 @@ const REPRESENTATION_PROMPTS: Record<
     exampleJson: `{
   "template": "解题步骤: 1. 审题提取关键信息 → 2. 结合知识点X分析 → 3. 套用公式/模板 → 4. 写出结论",
   "slots": ["关键信息", "对应公式"],
-  "examples": ["例题1: 某年真题应用示例"]
+  "examples": ["例题1: 某年真题应用示例"],
+  "boundary": "该答题模板适用于标准题型，当题目出现非典型表述、组合多个知识点或开放性设问时模板可能不完全适用"
 }`,
   },
 
@@ -180,7 +172,8 @@ const REPRESENTATION_PROMPTS: Record<
   "items": [
     {"name": "事物A", "values": ["A的定义", "A的特点", "A的示例"]},
     {"name": "事物B", "values": ["B的定义", "B的特点", "B的示例"]}
-  ]
+  ],
+  "boundary": "该对比只覆盖了选定的维度，对于未列出的维度或事物的边缘情况，对比表可能不够全面"
 }`,
   },
 
@@ -195,7 +188,8 @@ const REPRESENTATION_PROMPTS: Record<
   "relations": [
     {"from": 0, "to": 1, "label": "包含"},
     {"from": 0, "to": 2, "label": "衍生"}
-  ]
+  ],
+  "boundary": "该概念图展示的是中学阶段的核心知识关系，省略了更深层的学术细节，当涉及学科前沿或跨学科交叉时不适用"
 }`,
   },
 
@@ -204,7 +198,8 @@ const REPRESENTATION_PROMPTS: Record<
     exampleJson: `{
   "formula": "总体描述",
   "steps": ["步骤1: ...", "步骤2: ...", "步骤3: ..."],
-  "notes": "注意事项"
+  "notes": "注意事项",
+  "boundary": "该步骤流程针对标准情况设计，当遇到特殊情况、参数变化或需要跳步的变体问题时可能不再适用"
 }`,
   },
 };
@@ -231,7 +226,8 @@ ${promptConfig.exampleJson}
 要求:
 - 数据必须准确，符合中学教学内容
 - 使用中文描述
-- 如信息不足可根据教学经验合理补充`;
+- 如信息不足可根据教学经验合理补充
+- 必须在 boundary 字段中描述该表征在什么条件下不适用或会失效（指出模型的假设条件和局限性，以"该..."开头）`;
 
   try {
     const result = await llmCall({
@@ -247,7 +243,7 @@ ${promptConfig.exampleJson}
       jsonMode: true,
     });
 
-    const parsed = JSON.parse(sanitizeJson(result));
+    const parsed = JSON.parse(sanitizeJsonString(result));
     return parsed;
   } catch (error) {
     console.error('[generateRepresentationContent] AI generation failed:', error);

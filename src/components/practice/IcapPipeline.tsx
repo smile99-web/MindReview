@@ -3,6 +3,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { useUserId } from '@/components/auth/AuthProvider';
+import {
+  designConstructiveTask,
+  designInteractiveTask,
+  validateExplanation,
+  type ConstructiveTask,
+  type SelfExplanationPrompt,
+  type EvaluationCriterion,
+  type InteractiveTask,
+  type SocraticQuestion,
+  type VariantQuestion,
+  type ScenarioChallenge,
+  type ValidationResult,
+} from '@/lib/icap-enhancer';
+import { detectCognitiveGaps, type DetectCognitiveGapsResult } from '@/lib/ai-tutor';
 
 interface IcapPipelineProps {
   knowledgeNodeId: string;
@@ -33,6 +48,7 @@ interface KnowledgeNodeDetail {
   title: string;
   summary?: string | null;
   keywords?: string[];
+  subject?: { name: string } | null;
 }
 
 const STAGES = [
@@ -43,6 +59,7 @@ const STAGES = [
 ];
 
 export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, onClose }: IcapPipelineProps) {
+  const userId = useUserId() || '';
   const [stage, setStage] = useState(0);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(false);
@@ -65,6 +82,26 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   const [tutorChatInput, setTutorChatInput] = useState('');
   const [tutorChatLoading, setTutorChatLoading] = useState(false);
   const [tutorSessionId, setTutorSessionId] = useState<string | null>(null);
+  const [constructiveTask, setConstructiveTask] = useState<ConstructiveTask | null>(null);
+  const [constructiveTaskLoading, setConstructiveTaskLoading] = useState(false);
+  const [constructiveResponses, setConstructiveResponses] = useState<Record<string, string>>({});
+  const [constructiveSubmitted, setConstructiveSubmitted] = useState<Record<string, boolean>>({});
+  const [constructiveFeedbacks, setConstructiveFeedbacks] = useState<Record<string, ValidationResult | null>>({});
+  const [constructiveFeedbackLoading, setConstructiveFeedbackLoading] = useState<Record<string, boolean>>({});
+  const [interactiveTask, setInteractiveTask] = useState<InteractiveTask | null>(null);
+  const [interactiveTaskLoading, setInteractiveTaskLoading] = useState(false);
+  const [variantAnswers, setVariantAnswers] = useState<Record<string, string>>({});
+  const [variantSubmitted, setVariantSubmitted] = useState<Record<string, boolean>>({});
+  const [variantShowAnswer, setVariantShowAnswer] = useState<Record<string, boolean>>({});
+  const [scenarioResponses, setScenarioResponses] = useState<Record<string, string>>({});
+  const [scenarioSubmitted, setScenarioSubmitted] = useState<Record<string, boolean>>({});
+  const [scenarioFeedbacks, setScenarioFeedbacks] = useState<Record<string, string>>({});
+  const [scenarioFeedbackLoading, setScenarioFeedbackLoading] = useState<Record<string, boolean>>({});
+
+  // Cognitive gap detection — triggered when advancing from Constructive stage
+  const [cognitiveGaps, setCognitiveGaps] = useState<DetectCognitiveGapsResult | null>(null);
+  const [gapCheckLoading, setGapCheckLoading] = useState(false);
+  const [showGapWarning, setShowGapWarning] = useState(false);
 
   useEffect(() => {
     fetch(`/api/knowledge/${knowledgeNodeId}`)
@@ -113,6 +150,28 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
       } catch { /* ignore */ }
       setLoading(false);
     }
+
+    if (idx === 2 && node && !constructiveTask) {
+      // Constructive stage - load structured prompts
+      setConstructiveTaskLoading(true);
+      try {
+        const subject = node.subject?.name || '通用';
+        const task = await designConstructiveTask(node.title, node.summary || null, subject);
+        setConstructiveTask(task);
+      } catch { /* ignore */ }
+      setConstructiveTaskLoading(false);
+    }
+
+    if (idx === 3 && node && !interactiveTask) {
+      // Interactive stage - load structured tasks
+      setInteractiveTaskLoading(true);
+      try {
+        const subject = node.subject?.name || '通用';
+        const task = await designInteractiveTask(node.title, node.summary || null, 'intermediate', subject);
+        setInteractiveTask(task);
+      } catch { /* ignore */ }
+      setInteractiveTaskLoading(false);
+    }
   };
 
   const handleSubmitAnswer = async (questionId: string, userAnswer: string) => {
@@ -136,6 +195,64 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
     } catch { /* ignore */ }
   };
 
+  const handleSubmitConstructivePrompt = async (promptId: string) => {
+    const response = constructiveResponses[promptId];
+    if (!response?.trim()) return;
+    setConstructiveFeedbackLoading(prev => ({ ...prev, [promptId]: true }));
+    try {
+      const subject = node?.subject?.name || '通用';
+      const result = await validateExplanation(
+        response,
+        node?.title || knowledgeNodeTitle,
+        node?.summary || null,
+        subject,
+      );
+      setConstructiveFeedbacks(prev => ({ ...prev, [promptId]: result }));
+    } catch {
+      setConstructiveFeedbacks(prev => ({ ...prev, [promptId]: null }));
+    } finally {
+      setConstructiveFeedbackLoading(prev => ({ ...prev, [promptId]: false }));
+      setConstructiveSubmitted(prev => ({ ...prev, [promptId]: true }));
+    }
+  };
+
+  const handleSubmitVariantAnswer = (vqId: string, userAnswer: string) => {
+    setVariantSubmitted(prev => ({ ...prev, [vqId]: true }));
+    setVariantShowAnswer(prev => ({ ...prev, [vqId]: true }));
+    setResults(prev => ({
+      ...prev,
+      interactive: { ...prev.interactive, responses: prev.interactive.responses + 1 },
+    }));
+  };
+
+  const handleSubmitScenarioChallenge = async (scId: string) => {
+    const response = scenarioResponses[scId];
+    if (!response?.trim()) return;
+    setScenarioFeedbackLoading(prev => ({ ...prev, [scId]: true }));
+    try {
+      const res = await fetch('/api/tutor/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          knowledgeNodeId,
+          message: `我在情境挑战中提交了以下回答，请评价并给出改进建议：${response}`,
+          userId,
+        }),
+      });
+      const data = await res.json();
+      setScenarioFeedbacks(prev => ({ ...prev, [scId]: data.reply || '未收到反馈' }));
+    } catch {
+      setScenarioFeedbacks(prev => ({ ...prev, [scId]: '反馈请求失败' }));
+    } finally {
+      setScenarioFeedbackLoading(prev => ({ ...prev, [scId]: false }));
+      setScenarioSubmitted(prev => ({ ...prev, [scId]: true }));
+      setResults(prev => ({
+        ...prev,
+        interactive: { ...prev.interactive, responses: prev.interactive.responses + 1 },
+      }));
+    }
+  };
+
   const handleSubmitSummary = async () => {
     recordStageTime('constructive');
     setResults(prev => ({
@@ -151,7 +268,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
         body: JSON.stringify({
           knowledgeNodeId,
           message: `我刚才对这个知识点做了总结，请评价我的理解质量并指出可改进之处：${userSummary}`,
-          userId: 'default-user',
+          userId,
         }),
       });
       const data = await res.json();
@@ -178,7 +295,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
           sessionId: tutorSessionId,
           knowledgeNodeId,
           message: msg,
-          userId: 'default-user',
+          userId,
           history: tutorChatMessages,
         }),
       });
@@ -190,6 +307,54 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
       }));
     } catch { /* ignore */ }
     setTutorChatLoading(false);
+  };
+
+  /** Collect constructive responses and run cognitive gap detection before advancing. */
+  const handleAdvanceFromConstructive = async () => {
+    const parts: string[] = [];
+
+    // Collect structured prompt responses
+    if (constructiveTask) {
+      for (const prompt of constructiveTask.selfExplanationPrompts) {
+        const resp = constructiveResponses[prompt.id];
+        if (resp?.trim()) {
+          parts.push(`[${prompt.prompt}]: ${resp.trim()}`);
+        }
+      }
+    }
+
+    // Include the general summary if present
+    if (userSummary.trim()) {
+      parts.push(`[综合总结]: ${userSummary.trim()}`);
+    }
+
+    const combined = parts.join('\n\n');
+
+    if (!combined) {
+      // No responses to analyse — advance directly
+      goToStage(3);
+      return;
+    }
+
+    setGapCheckLoading(true);
+    try {
+      const gaps = await detectCognitiveGaps(
+        combined,
+        node?.title || knowledgeNodeTitle,
+        node?.summary || '',
+      );
+      setCognitiveGaps(gaps);
+      if (gaps.hasGaps && gaps.gaps.length > 0) {
+        setShowGapWarning(true);
+      } else {
+        goToStage(3);
+      }
+    } catch {
+      // On error, advance anyway
+      goToStage(3);
+    } finally {
+      setGapCheckLoading(false);
+    }
   };
 
   const allDone = stage === 3 && results.interactive.completed;
@@ -351,14 +516,172 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
       {/* Stage 2: Constructive */}
       {stage === 2 && (
         <div className="space-y-4">
+          {/* Structured self-explanation prompt cards (NEW) */}
+          {constructiveTaskLoading ? (
+            <div className="flex items-center gap-2 text-sm text-emerald-500 py-4">
+              <div className="animate-spin h-4 w-4 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full" />
+              正在生成构建学习任务...
+            </div>
+          ) : constructiveTask ? (
+            <>
+              <div className="bg-amber-50 rounded-xl p-4 border border-amber-100/60">
+                <p className="text-sm text-amber-800 font-medium">结构化自我解释练习</p>
+                <p className="text-xs text-amber-600/80 mt-1">
+                  以下每个提示从不同维度引导你深入思考。逐题作答，AI会逐题评估。
+                </p>
+              </div>
+              {constructiveTask.selfExplanationPrompts.map((prompt) => {
+                const isSubmitted = constructiveSubmitted[prompt.id];
+                const feedback = constructiveFeedbacks[prompt.id];
+                const isLoading = constructiveFeedbackLoading[prompt.id];
+                const categoryLabels: Record<string, string> = {
+                  concept: '概念理解',
+                  application: '应用举例',
+                  connection: '知识联系',
+                  contrast: '对比辨析',
+                };
+                const lengthLabels: Record<string, string> = {
+                  short: '简短回答',
+                  medium: '中等篇幅',
+                  long: '详细阐述',
+                };
+                return (
+                  <div key={prompt.id} className="bg-white border border-slate-200/80 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 text-xs rounded-full font-medium">
+                        {categoryLabels[prompt.category] || prompt.category}
+                      </span>
+                      <span className="px-2 py-0.5 bg-slate-100 text-slate-500 text-xs rounded-full">
+                        {lengthLabels[prompt.expectedLength] || prompt.expectedLength}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-800 font-medium mb-3">{prompt.prompt}</p>
+                    {!isSubmitted ? (
+                      <>
+                        <textarea
+                          className="w-full min-h-[80px] px-3 py-2 rounded-lg border border-slate-200 text-sm resize-none focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200"
+                          placeholder="输入你的理解..."
+                          value={constructiveResponses[prompt.id] || ''}
+                          onChange={e => setConstructiveResponses(prev => ({ ...prev, [prompt.id]: e.target.value }))}
+                        />
+                        <div className="flex justify-end mt-2">
+                          <Button
+                            size="sm"
+                            onClick={() => handleSubmitConstructivePrompt(prompt.id)}
+                            disabled={!constructiveResponses[prompt.id]?.trim() || isLoading}
+                            loading={isLoading}
+                          >
+                            提交审阅
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="bg-slate-50 rounded-lg p-3">
+                          <p className="text-xs text-slate-400 mb-0.5">你的回答</p>
+                          <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                            {constructiveResponses[prompt.id]}
+                          </p>
+                        </div>
+                        {isLoading ? (
+                          <div className="flex items-center gap-2 text-sm text-indigo-500 py-2">
+                            <div className="animate-spin h-3 w-3 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full" />
+                            AI正在评估...
+                          </div>
+                        ) : feedback ? (
+                          <div className="bg-gradient-to-br from-emerald-50/80 to-blue-50/80 rounded-xl p-3 border border-emerald-100/60">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xs font-semibold text-emerald-700">AI评估</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                                feedback.comprehensionLevel === 'excellent' ? 'bg-emerald-100 text-emerald-700' :
+                                feedback.comprehensionLevel === 'good' ? 'bg-blue-100 text-blue-700' :
+                                feedback.comprehensionLevel === 'basic' ? 'bg-amber-100 text-amber-700' :
+                                'bg-red-100 text-red-700'
+                              }`}>
+                                得分 {feedback.score}/100
+                              </span>
+                            </div>
+                            {feedback.strengths.length > 0 && (
+                              <div className="mb-2">
+                                <p className="text-xs text-emerald-600 font-medium">做得好的方面：</p>
+                                <ul className="text-xs text-slate-600 list-disc list-inside">
+                                  {feedback.strengths.map((s, si) => <li key={si}>{s}</li>)}
+                                </ul>
+                              </div>
+                            )}
+                            {feedback.misconceptions.length > 0 && (
+                              <div className="mb-2">
+                                <p className="text-xs text-red-600 font-medium">需要纠正的误解：</p>
+                                {feedback.misconceptions.map((m, mi) => (
+                                  <div key={mi} className="text-xs mt-1">
+                                    <span className="text-red-500 line-through">{m.studentSaid}</span>
+                                    <span className="text-slate-500"> → </span>
+                                    <span className="text-emerald-600">{m.correction}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {feedback.suggestions.length > 0 && (
+                              <div>
+                                <p className="text-xs text-indigo-600 font-medium">改进建议：</p>
+                                <ul className="text-xs text-slate-600 list-disc list-inside">
+                                  {feedback.suggestions.map((s, si) => <li key={si}>{s}</li>)}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-slate-400 py-2">评估失败，请重试</div>
+                        )}
+                        <button
+                          onClick={() => {
+                            setConstructiveSubmitted(prev => ({ ...prev, [prompt.id]: false }));
+                            setConstructiveFeedbacks(prev => ({ ...prev, [prompt.id]: null }));
+                          }}
+                          className="text-xs text-indigo-500 hover:text-indigo-600 transition-colors"
+                        >
+                          重新作答
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {/* Evaluation criteria overview */}
+              {constructiveTask.evaluationCriteria.length > 0 && (
+                <div className="bg-white border border-slate-200/80 rounded-xl p-4">
+                  <p className="text-sm text-slate-800 font-medium mb-2">评价标准参考</p>
+                  <div className="space-y-2">
+                    {constructiveTask.evaluationCriteria.map((ec) => (
+                      <div key={ec.id} className="flex items-start gap-2">
+                        <span className="text-xs text-indigo-500 font-mono mt-0.5">
+                          {(ec.weight * 100).toFixed(0)}%
+                        </span>
+                        <div>
+                          <p className="text-sm text-slate-700 font-medium">{ec.criterion}</p>
+                          <p className="text-xs text-slate-500">{ec.description}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-6">
+              <p className="text-sm text-slate-400">结构化提示正在加载中...</p>
+            </div>
+          )}
+
+          {/* Existing general summary section */}
           <div className="bg-amber-50 rounded-xl p-4 border border-amber-100/60">
-            <p className="text-sm text-amber-800 font-medium">请用自己的话总结这个知识点</p>
-            <p className="text-xs text-amber-600/80 mt-1">可以包括：核心概念、关键公式、解题思路、与其他知识的联系</p>
+            <p className="text-sm text-amber-800 font-medium">综合总结（可选）</p>
+            <p className="text-xs text-amber-600/80 mt-1">完成上述结构化练习后，你也可以在此做一个整体总结。</p>
           </div>
           {!feedbackSubmitted ? (
             <>
               <textarea
-                className="w-full min-h-[120px] px-4 py-3 rounded-xl border border-slate-200 text-sm resize-none focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+                className="w-full min-h-[100px] px-4 py-3 rounded-xl border border-slate-200 text-sm resize-none focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
                 placeholder="我理解的这个知识点是..."
                 value={userSummary}
                 onChange={e => setUserSummary(e.target.value)}
@@ -386,11 +709,90 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                 </div>
               )}
               <div className="flex justify-between">
-                <Button variant="ghost" disabled={feedbackLoading} onClick={() => { setFeedbackSubmitted(false); setAiFeedback(''); }}>
+                <Button variant="ghost" disabled={feedbackLoading || gapCheckLoading} onClick={() => { setFeedbackSubmitted(false); setAiFeedback(''); setShowGapWarning(false); setCognitiveGaps(null); }}>
                   重新提交
                 </Button>
-                <Button onClick={() => goToStage(3)} disabled={feedbackLoading}>下一步</Button>
+                {!showGapWarning && (
+                  <Button onClick={handleAdvanceFromConstructive} loading={gapCheckLoading} disabled={feedbackLoading || gapCheckLoading}>
+                    下一步
+                  </Button>
+                )}
               </div>
+
+              {/* Cognitive gap detection summary */}
+              {showGapWarning && cognitiveGaps && (
+                <div className="mt-4 bg-amber-50 rounded-xl p-4 border border-amber-200">
+                  <div className="flex items-start gap-2 mb-3">
+                    <svg className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800">
+                        AI 发现你在理解上存在以下缺口：
+                      </p>
+                      <p className="text-xs text-amber-600 mt-0.5">
+                        建议返回修改后再进入互动阶段，以获得更好的学习效果。
+                      </p>
+                    </div>
+                  </div>
+
+                  <ul className="space-y-2 mb-3">
+                    {cognitiveGaps.gaps.map((gap, i) => {
+                      const categoryLabels: Record<string, string> = {
+                        missing_concept: '缺失概念',
+                        superficial_understanding: '表层理解',
+                        inability_to_transfer: '迁移困难',
+                        misconception: '误解',
+                      };
+                      const categoryColors: Record<string, string> = {
+                        missing_concept: 'bg-red-100 text-red-700',
+                        superficial_understanding: 'bg-orange-100 text-orange-700',
+                        inability_to_transfer: 'bg-amber-100 text-amber-700',
+                        misconception: 'bg-pink-100 text-pink-700',
+                      };
+                      return (
+                        <li key={i} className="bg-white rounded-lg p-3 border border-slate-100">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`px-1.5 py-0.5 text-xs rounded-full font-medium ${categoryColors[gap.category] || 'bg-slate-100 text-slate-600'}`}>
+                              {categoryLabels[gap.category] || gap.category}
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-700">{gap.description}</p>
+                          <p className="text-xs text-indigo-600 mt-1">建议: {gap.suggestion}</p>
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                  {cognitiveGaps.overallAssessment && (
+                    <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+                      {cognitiveGaps.overallAssessment}
+                    </p>
+                  )}
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setShowGapWarning(false);
+                        setCognitiveGaps(null);
+                      }}
+                    >
+                      返回修改
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setShowGapWarning(false);
+                        goToStage(3);
+                      }}
+                    >
+                      继续进入互动阶段
+                    </Button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -399,10 +801,257 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
       {/* Stage 3: Interactive */}
       {stage === 3 && (
         <div className="space-y-4">
+          {/* Structured interactive tasks (NEW) */}
+          {interactiveTaskLoading ? (
+            <div className="flex items-center gap-2 text-sm text-purple-500 py-4">
+              <div className="animate-spin h-4 w-4 border-2 border-purple-500/30 border-t-purple-500 rounded-full" />
+              正在生成互动深化任务...
+            </div>
+          ) : interactiveTask ? (
+            <>
+              {/* Socratic Questions — chat-like dialogue prompts */}
+              {interactiveTask.socraticQuestions.length > 0 && (
+                <div className="space-y-3">
+                  <div className="bg-purple-50 rounded-xl p-4 border border-purple-100/60">
+                    <p className="text-sm text-purple-800 font-medium">苏格拉底式追问</p>
+                    <p className="text-xs text-purple-600/80 mt-1">
+                      点击问题即可在下方对话框中和AI展开讨论。
+                    </p>
+                  </div>
+                  {interactiveTask.socraticQuestions.map((sq) => (
+                    <div key={sq.id} className="bg-white border border-slate-200/80 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-6 h-6 rounded-full bg-purple-50 text-purple-600 text-xs font-bold flex items-center justify-center">
+                          {sq.round}
+                        </span>
+                        <span className="text-xs text-slate-400">第{sq.round}轮 · 难度 {'★'.repeat(sq.difficulty)}</span>
+                      </div>
+                      <p className="text-sm text-slate-800 font-medium mb-3">{sq.question}</p>
+                      <div className="flex gap-2 flex-wrap">
+                        <button
+                          onClick={() => {
+                            setTutorChatInput(sq.question);
+                            setTimeout(() => handleTutorChatSend(), 50);
+                          }}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-50 text-purple-600 hover:bg-purple-100 transition-colors"
+                        >
+                          在对话中回答
+                        </button>
+                        <details className="group text-xs">
+                          <summary className="cursor-pointer text-slate-400 hover:text-slate-600 transition-colors">
+                            查看提示
+                          </summary>
+                          <div className="mt-2 space-y-1.5">
+                            {sq.followUpIfStuck && (
+                              <div className="bg-amber-50 rounded-lg p-2">
+                                <span className="text-amber-600 font-medium">卡住时：</span>
+                                <span className="text-slate-600 ml-1">{sq.followUpIfStuck}</span>
+                              </div>
+                            )}
+                            {sq.followUpIfCorrect && (
+                              <div className="bg-emerald-50 rounded-lg p-2">
+                                <span className="text-emerald-600 font-medium">答对后：</span>
+                                <span className="text-slate-600 ml-1">{sq.followUpIfCorrect}</span>
+                              </div>
+                            )}
+                            {sq.expectedConcepts.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {sq.expectedConcepts.map((c, ci) => (
+                                  <span key={ci} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-500 text-xs rounded-full">
+                                    {c}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </details>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Variant Questions — challenge cards */}
+              {interactiveTask.variantQuestions.length > 0 && (
+                <div className="space-y-3">
+                  <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-100/60">
+                    <p className="text-sm text-indigo-800 font-medium">变式练习</p>
+                    <p className="text-xs text-indigo-600/80 mt-1">
+                      以下题目改变了原题条件，检验你是否真正理解而非机械记忆。
+                    </p>
+                  </div>
+                  {interactiveTask.variantQuestions.map((vq) => {
+                    const isSubmitted = variantSubmitted[vq.id];
+                    const showAns = variantShowAnswer[vq.id];
+                    const userAnswer = variantAnswers[vq.id] || '';
+                    return (
+                      <div key={vq.id} className="bg-white border border-slate-200/80 rounded-xl p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="px-2 py-0.5 bg-amber-50 text-amber-600 text-xs rounded-full font-medium">
+                            变式: {vq.variantOf}
+                          </span>
+                          <span className="text-xs text-slate-400">难度 {'★'.repeat(vq.difficulty)}</span>
+                        </div>
+                        <p className="text-sm text-slate-800 font-medium mb-3">{vq.stem}</p>
+                        {!isSubmitted ? (
+                          <>
+                            {vq.options && vq.options.length > 0 ? (
+                              <div className="space-y-1.5 mb-3">
+                                {vq.options.map((opt, j) => (
+                                  <label key={j} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 cursor-pointer text-sm">
+                                    <input
+                                      type="radio"
+                                      name={`vq-${vq.id}`}
+                                      value={opt.text}
+                                      onChange={e => setVariantAnswers(prev => ({ ...prev, [vq.id]: e.target.value }))}
+                                      className="text-indigo-600"
+                                    />
+                                    <span className="text-xs font-semibold text-slate-400">{opt.label}.</span>
+                                    <span className="text-slate-700">{opt.text}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            ) : (
+                              <input
+                                type="text"
+                                placeholder="输入你的答案..."
+                                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm mb-3 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+                                value={userAnswer}
+                                onChange={e => setVariantAnswers(prev => ({ ...prev, [vq.id]: e.target.value }))}
+                              />
+                            )}
+                            <Button
+                              size="sm"
+                              onClick={() => handleSubmitVariantAnswer(vq.id, userAnswer)}
+                              disabled={!userAnswer.trim()}
+                            >
+                              提交答案
+                            </Button>
+                          </>
+                        ) : (
+                          <div className={`p-3 rounded-lg text-sm ${showAns ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50'}`}>
+                            <p className="font-semibold text-emerald-800">答案: {vq.answer}</p>
+                            {vq.explanation && <p className="text-emerald-700/80 mt-1 text-xs">{vq.explanation}</p>}
+                            <button
+                              onClick={() => {
+                                setVariantSubmitted(prev => ({ ...prev, [vq.id]: false }));
+                                setVariantShowAnswer(prev => ({ ...prev, [vq.id]: false }));
+                                setVariantAnswers(prev => ({ ...prev, [vq.id]: '' }));
+                              }}
+                              className="mt-2 text-xs font-medium text-indigo-500 hover:text-indigo-600 transition-colors"
+                            >
+                              重新作答
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Scenario Challenges — immersive task cards */}
+              {interactiveTask.scenarioChallenges.length > 0 && (
+                <div className="space-y-3">
+                  <div className="bg-teal-50 rounded-xl p-4 border border-teal-100/60">
+                    <p className="text-sm text-teal-800 font-medium">情境挑战</p>
+                    <p className="text-xs text-teal-600/80 mt-1">
+                      将所学知识应用于真实场景，检验迁移能力。
+                    </p>
+                  </div>
+                  {interactiveTask.scenarioChallenges.map((sc) => {
+                    const isSubmitted = scenarioSubmitted[sc.id];
+                    const feedback = scenarioFeedbacks[sc.id];
+                    const isLoading = scenarioFeedbackLoading[sc.id];
+                    return (
+                      <div key={sc.id} className="bg-white border border-slate-200/80 rounded-xl p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="px-2 py-0.5 bg-teal-50 text-teal-600 text-xs rounded-full font-medium">
+                            情境模拟
+                          </span>
+                          <span className="text-xs text-slate-400">难度 {'★'.repeat(sc.difficulty)}</span>
+                        </div>
+                        <div className="bg-gradient-to-br from-slate-50 to-teal-50/50 rounded-xl p-3 mb-3">
+                          <p className="text-xs text-slate-500 font-medium mb-1">场景描述</p>
+                          <p className="text-sm text-slate-700">{sc.scenario}</p>
+                        </div>
+                        <p className="text-sm text-slate-800 font-medium mb-1">任务要求</p>
+                        <p className="text-sm text-slate-600 mb-3">{sc.task}</p>
+                        {sc.rubric.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            {sc.rubric.map((r, ri) => (
+                              <span key={ri} className="px-2 py-0.5 bg-teal-50 text-teal-600 text-xs rounded-full">
+                                {r}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {!isSubmitted ? (
+                          <>
+                            <textarea
+                              className="w-full min-h-[80px] px-3 py-2 rounded-lg border border-slate-200 text-sm resize-none focus:outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-200"
+                              placeholder="写下你的方案..."
+                              value={scenarioResponses[sc.id] || ''}
+                              onChange={e => setScenarioResponses(prev => ({ ...prev, [sc.id]: e.target.value }))}
+                            />
+                            <div className="flex justify-end mt-2">
+                              <Button
+                                size="sm"
+                                onClick={() => handleSubmitScenarioChallenge(sc.id)}
+                                disabled={!scenarioResponses[sc.id]?.trim() || isLoading}
+                                loading={isLoading}
+                              >
+                                提交方案
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="bg-slate-50 rounded-lg p-3">
+                              <p className="text-xs text-slate-400 mb-0.5">你的方案</p>
+                              <p className="text-sm text-slate-700 whitespace-pre-wrap">{scenarioResponses[sc.id]}</p>
+                            </div>
+                            {isLoading ? (
+                              <div className="flex items-center gap-2 text-sm text-indigo-500 py-2">
+                                <div className="animate-spin h-3 w-3 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full" />
+                                AI正在评估...
+                              </div>
+                            ) : feedback ? (
+                              <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-xl p-3 border border-emerald-100/60">
+                                <p className="text-xs text-emerald-600 font-medium mb-1">AI反馈</p>
+                                <p className="text-sm text-slate-700 whitespace-pre-wrap">{feedback}</p>
+                              </div>
+                            ) : (
+                              <div className="text-xs text-slate-400 py-2">提交失败，请重试</div>
+                            )}
+                            <button
+                              onClick={() => {
+                                setScenarioSubmitted(prev => ({ ...prev, [sc.id]: false }));
+                                setScenarioFeedbacks(prev => ({ ...prev, [sc.id]: '' }));
+                              }}
+                              className="text-xs font-medium text-indigo-500 hover:text-indigo-600 transition-colors"
+                            >
+                              重新作答
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-6">
+              <p className="text-sm text-slate-400">互动任务正在加载中...</p>
+            </div>
+          )}
+
+          {/* Existing chat interface */}
           <div className="bg-purple-50 rounded-xl p-4 border border-purple-100/60">
-            <p className="text-purple-800 font-medium text-sm">AI互动深化环节</p>
+            <p className="text-purple-800 font-medium text-sm">AI对话区</p>
             <p className="text-xs text-purple-600/80 mt-1">
-              与AI对话，它会围绕{knowledgeNodeTitle}追问并生成变式题，帮助你深入理解。
+              与AI自由对话，它会围绕{knowledgeNodeTitle}追问并帮助你深入理解。
             </p>
           </div>
 

@@ -6,6 +6,7 @@
  */
 
 import { llmCall } from '@/lib/llm-client';
+import { sanitizeJsonString } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,76 +96,10 @@ export interface ProgressionDecision {
 // ---------------------------------------------------------------------------
 
 /**
- * Sanitize an LLM JSON response before parsing.
- * Strips markdown code fences, extracts the first JSON object, and cleans
- * control characters that would break JSON.parse.
- */
-function sanitizeJsonResponse(raw: string): string {
-  let cleaned = raw;
-
-  // Strip markdown code fences (```json ... ```)
-  cleaned = cleaned.replace(/^```(?:json)?\s*\n?/gim, '').replace(/\n?```\s*$/gim, '');
-  cleaned = cleaned.replace(/```(?:json)?\s*\n?/gi, '');
-
-  // Extract the outermost JSON object (handles LLMs that add prose before/after)
-  const firstBrace = cleaned.indexOf('{');
-  const firstBracket = cleaned.indexOf('[');
-  let startIdx: number;
-
-  if (firstBrace === -1 && firstBracket === -1) {
-    // No JSON structure found; return cleaned as-is and let JSON.parse fail
-    return cleaned.trim();
-  }
-
-  if (firstBrace === -1) {
-    startIdx = firstBracket;
-  } else if (firstBracket === -1) {
-    startIdx = firstBrace;
-  } else {
-    startIdx = Math.min(firstBrace, firstBracket);
-  }
-
-  // Find matching closing token
-  const isObject = cleaned[startIdx] === '{';
-  const openChar = isObject ? '{' : '[';
-  const closeChar = isObject ? '}' : ']';
-
-  let depth = 0;
-  let endIdx = -1;
-  for (let i = startIdx; i < cleaned.length; i++) {
-    if (cleaned[i] === openChar) {
-      depth++;
-    } else if (cleaned[i] === closeChar) {
-      depth--;
-      if (depth === 0) {
-        endIdx = i;
-        break;
-      }
-    }
-  }
-
-  if (endIdx !== -1) {
-    cleaned = cleaned.slice(startIdx, endIdx + 1);
-  }
-
-  // Sanitize control characters (same approach as llm-client.ts)
-  cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (ch) => {
-    if (ch === '\n') return '\\n';
-    if (ch === '\r') return '\\r';
-    if (ch === '\t') return '\\t';
-    if (ch === '\b') return '\\b';
-    if (ch === '\f') return '\\f';
-    return '\\u' + ('000' + ch.charCodeAt(0).toString(16)).slice(-4);
-  });
-
-  return cleaned.trim();
-}
-
-/**
  * Safely parse a JSON string with a typed fallback.
  */
 function safeJsonParse<T>(raw: string, fallback: T, context?: string): T {
-  const cleaned = sanitizeJsonResponse(raw);
+  const cleaned = sanitizeJsonString(raw);
   try {
     return JSON.parse(cleaned) as T;
   } catch (error: any) {

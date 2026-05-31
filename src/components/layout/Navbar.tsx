@@ -7,10 +7,15 @@ import { useAuth } from "@/components/auth/AuthProvider";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "首页", icon: "🏠" },
   { href: "/subjects", label: "学科", icon: "📚" },
+  { href: "/mindmap", label: "导图", icon: "🗺️" },
+  { href: "/schemas", label: "图式", icon: "🧠" },
+  { href: "/practice", label: "练习", icon: "✏️" },
   { href: "/review", label: "复习", icon: "📝" },
   { href: "/mistakes", label: "错题本", icon: "❌" },
   { href: "/logs", label: "AI记录", icon: "🤖" },
 ];
+
+// 搜索独立于 NAV_ITEMS，在右侧用户区渲染
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -74,6 +79,15 @@ export default function Navbar() {
                   >
                     退出
                   </button>
+                  <Link
+                    href="/search"
+                    className="flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100/70 transition-all duration-200"
+                    title="搜索"
+                  >
+                    <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                    </svg>
+                  </Link>
                   <Link
                     href="/settings"
                     className="flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100/70 transition-all duration-200"

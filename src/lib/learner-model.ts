@@ -540,6 +540,206 @@ export function recommendOptimalSettings(profile: LearnerProfile): RecommendedSe
   };
 }
 
+// ── Onboarding Diagnostic ──────────────────────────────────────────────────
+
+export interface OnboardingDiagnosticResult {
+  score: number;                        // 0-100
+  level: 'beginner' | 'intermediate' | 'advanced';
+  strengths: string[];                  // 诊断中表现良好的概念/领域
+  gaps: string[];                       // 诊断中暴露的知识缺口
+  questionCount: number;
+  recommendedStartingPoint: string;     // 建议从哪个章节/知识点开始
+}
+
+/**
+ * 新用户预备知识快速诊断
+ *
+ * 当用户没有任何复习历史时，生成10道快速诊断题覆盖年级前置概念，
+ * 评估其实际预备知识水平，避免从零开始浪费学习时间。
+ *
+ * @param userId - 用户ID
+ * @param grade - 年级 (如 "初一", "初二")
+ * @param subjectId - 学科ID
+ * @param prisma - PrismaClient 实例
+ */
+export async function runOnboardingDiagnostic(
+  userId: string,
+  grade: string,
+  subjectId: string,
+  prisma: PrismaClient,
+): Promise<OnboardingDiagnosticResult> {
+  // 1. 获取该学科下所有知识点（按难度排序，优先提供基础概念）
+  const subject = await prisma.subject.findUnique({
+    where: { id: subjectId },
+    select: { id: true, name: true },
+  });
+
+  if (!subject) {
+    throw new Error(`Subject not found: ${subjectId}`);
+  }
+
+  // 2. 获取该年级的前置/基础知识点作为诊断候选
+  const knowledgeNodes = await prisma.knowledgeNode.findMany({
+    where: {
+      subjectId,
+    },
+    select: {
+      id: true,
+      title: true,
+      summary: true,
+      difficulty: true,
+      prerequisites: true,
+      keywords: true,
+      masteryLevel: true,
+    },
+    orderBy: { difficulty: 'asc' },
+    take: 30,
+  });
+
+  if (knowledgeNodes.length === 0) {
+    // 没有知识点则跳过诊断
+    return {
+      score: 0,
+      level: 'beginner',
+      strengths: [],
+      gaps: [],
+      questionCount: 0,
+      recommendedStartingPoint: '',
+    };
+  }
+
+  // 3. 生成 10 道诊断题 — 覆盖不同难度层级
+  const diagnosticQuestions: DiagnosticQuestion[] = [];
+  const selectedNodes: typeof knowledgeNodes = [];
+
+  // 按难度分层抽样：低难度4题 + 中难度3题 + 高难度3题
+  const easyNodes = knowledgeNodes.filter(n => n.difficulty <= 2);
+  const midNodes = knowledgeNodes.filter(n => n.difficulty === 3);
+  const hardNodes = knowledgeNodes.filter(n => n.difficulty >= 4);
+
+  function pickRandom<T>(arr: T[], count: number): T[] {
+    const shuffled = [...arr].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, count);
+  }
+
+  const picked = [
+    ...pickRandom(easyNodes, Math.min(4, easyNodes.length)),
+    ...pickRandom(midNodes, Math.min(3, midNodes.length)),
+    ...pickRandom(hardNodes, Math.min(3, hardNodes.length)),
+  ];
+
+  // Pad to 10 if not enough
+  const remaining = 10 - picked.length;
+  if (remaining > 0) {
+    const unpicked = knowledgeNodes.filter(n => !picked.some(p => p.id === n.id));
+    picked.push(...pickRandom(unpicked, remaining));
+  }
+
+  // Build diagnostic questions from picked nodes
+  for (const node of picked.slice(0, 10)) {
+    diagnosticQuestions.push({
+      nodeId: node.id,
+      concept: node.title,
+      difficulty: node.difficulty,
+      question: generateDiagnosticQuestionText(node),
+      passingMastery: node.difficulty <= 2 ? 30 : node.difficulty === 3 ? 50 : 65,
+    });
+    selectedNodes.push(node);
+  }
+
+  // 4. 基于已有掌握度计算结果（以现有 masteryLevel 作为"答题得分"的近似）
+  //    在实际应用中，这些题应作为交互式问答；此处基于已存储的数据做近似评估
+  let totalScore = 0;
+  const strengths: string[] = [];
+  const gaps: string[] = [];
+
+  for (let i = 0; i < diagnosticQuestions.length; i++) {
+    const q = diagnosticQuestions[i];
+    const node = selectedNodes.find(n => n.id === q.nodeId);
+    const mastery = node?.masteryLevel ?? 0;
+
+    // 模拟诊断：masteryLevel 作为该题得分近似
+    const questionScore = Math.min(100, Math.max(0, mastery));
+    totalScore += questionScore;
+
+    if (questionScore >= q.passingMastery) {
+      strengths.push(q.concept);
+    } else {
+      gaps.push(q.concept);
+    }
+  }
+
+  const avgScore = diagnosticQuestions.length > 0
+    ? Math.round(totalScore / diagnosticQuestions.length)
+    : 0;
+
+  // 5. 评定等级
+  let level: OnboardingDiagnosticResult['level'];
+  if (avgScore >= 70) level = 'advanced';
+  else if (avgScore >= 40) level = 'intermediate';
+  else level = 'beginner';
+
+  // 6. 推荐起点 — 从 gaps 中找最低难度节点
+  const gapNodes = selectedNodes.filter(n => gaps.includes(n.title));
+  const recommendedStart = gapNodes.length > 0
+    ? gapNodes.sort((a, b) => a.difficulty - b.difficulty)[0]
+    : selectedNodes[0];
+
+  const recommendedStartingPoint = recommendedStart
+    ? recommendedStart.title
+    : '';
+
+  // 7. 将诊断结果存入 ReviewLog（标记为 diagnostic 类型）
+  await prisma.reviewLog.create({
+    data: {
+      userId,
+      knowledgeNodeId: selectedNodes[0]?.id ?? 'unknown',
+      action: 'diagnostic',
+      masteryBefore: null,
+      masteryAfter: avgScore,
+      durationSeconds: null,
+      quality: Math.round(avgScore / 20),  // 将 0-100 得分映射到 0-5 质量分
+    },
+  });
+
+  return {
+    score: avgScore,
+    level,
+    strengths,
+    gaps,
+    questionCount: diagnosticQuestions.length,
+    recommendedStartingPoint,
+  };
+}
+
+// ── Internal helpers ────────────────────────────────────────────────────────
+
+interface DiagnosticQuestion {
+  nodeId: string;
+  concept: string;
+  difficulty: number;
+  question: string;
+  passingMastery: number;
+}
+
+function generateDiagnosticQuestionText(node: {
+  title: string;
+  summary: string | null;
+  difficulty: number;
+  keywords: string[];
+}): string {
+  const keywordHint = node.keywords.length > 0
+    ? node.keywords.slice(0, 3).join('、')
+    : '';
+  if (node.difficulty <= 2) {
+    return `基础概念：请解释「${node.title}」的基本含义${keywordHint ? `（关键词: ${keywordHint}）` : ''}`;
+  }
+  if (node.difficulty === 3) {
+    return `中等难度：请说明「${node.title}」的核心原理和应用场景`;
+  }
+  return `进阶挑战：「${node.title}」— 请推导或论证其关键结论`;
+}
+
 // ── Prior Knowledge Assessment ────────────────────────────────────────────
 
 export interface PriorKnowledgeResult {

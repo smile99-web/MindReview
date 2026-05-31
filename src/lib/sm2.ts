@@ -210,6 +210,54 @@ export function getQualityLabel(q: number): string {
   return labels[q] || "未评分";
 }
 
+// ── Hint Fading System (认知负荷理论 — 引导渐隐) ──────────────────────────
+
+export type HintLevel = 1 | 2 | 3;
+
+export const HINT_LEVEL_LABELS: Record<HintLevel, string> = {
+  1: '完全引导',
+  2: '部分引导',
+  3: '最小引导',
+};
+
+export const HINT_LEVEL_DESCRIPTIONS: Record<HintLevel, string> = {
+  1: '显示完整的解释和解题结构',
+  2: '显示关键概念或第一步提示',
+  3: '仅显示学科/领域作为上下文',
+};
+
+/**
+ * 根据 SM-2 重复次数和掌握度计算提示等级
+ *
+ * 认知负荷理论：随着学习者掌握度提升，逐步撤除脚手架（guidance fading）
+ *
+ * - Level 1（完全引导）: 0-1 次正确回忆 — 需要完整示例/解释
+ * - Level 2（部分引导）: 2-3 次正确回忆 — 仅给出关键线索
+ * - Level 3（最小引导）: 4+ 次正确回忆 — 几乎独立解决
+ *
+ * @param repetitions - SM-2 连续正确次数
+ * @param masteryLevel - 当前掌握度 (0-100)
+ */
+export function getHintLevel(repetitions: number, masteryLevel: number): HintLevel {
+  if (repetitions <= 1 || masteryLevel < 30) return 1;
+  if (repetitions <= 3 || masteryLevel < 60) return 2;
+  return 3;
+}
+
+/**
+ * 计算使用提示后的质量扣减
+ * 使用提示 → 说明回忆不够独立，质量应适当降低
+ *
+ * @param baseQuality - 原始质量评分 (0-5)
+ * @param hintLevel - 使用的提示等级
+ * @returns 调整后的质量评分 (0-5)
+ */
+export function adjustQualityForHint(baseQuality: number, hintLevel: HintLevel): number {
+  // Level 1 (最详细提示) 扣减最大，Level 3 扣减最小
+  const deductions: Record<HintLevel, number> = { 1: 1, 2: 0.5, 3: 0 };
+  return Math.max(0, Math.min(5, baseQuality - deductions[hintLevel]));
+}
+
 /**
  * 获取质量评分的颜色
  */

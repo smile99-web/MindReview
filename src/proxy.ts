@@ -12,6 +12,8 @@ const PROTECTED_PREFIXES = [
   "/mindmap",
   "/cards",
   "/chapters",
+  "/schemas",
+  "/search",
 ];
 
 const AUTH_PAGES = ["/auth/login", "/auth/register"];
@@ -88,7 +90,7 @@ function getBearerToken(request: NextRequest): string | undefined {
   return request.cookies.get(ACCESS_COOKIE)?.value;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const authCookie = request.cookies.get("auth_status");
   const hasValidAccessToken = await verifyAccessToken(getBearerToken(request));
@@ -130,6 +132,8 @@ export const config = {
     "/mindmap/:path*",
     "/cards/:path*",
     "/chapters/:path*",
+    "/schemas/:path*",
+    "/search/:path*",
     "/auth/:path*",
   ],
 };

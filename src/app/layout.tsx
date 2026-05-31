@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/layout/Navbar";
 import { AuthProvider } from "@/components/auth/AuthProvider";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,10 +32,12 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-[#f0f2f5]">
         <AuthProvider>
-          <Navbar />
-          <main className="flex-1 pt-14">
-            {children}
-          </main>
+          <ErrorBoundary>
+            <Navbar />
+            <main className="flex-1 pt-14">
+              {children}
+            </main>
+          </ErrorBoundary>
         </AuthProvider>
       </body>
     </html>

@@ -9,6 +9,9 @@ import { Badge } from '@/components/ui/Badge';
 import { MasteryBar } from '@/components/ui/MasteryBar';
 import { IcapPipeline } from '@/components/practice/IcapPipeline';
 import { DensityProvider, useDensity } from '@/components/ui/DensityProvider';
+import { useUserId } from '@/components/auth/AuthProvider';
+import { getHintLevel, HINT_LEVEL_LABELS, HINT_LEVEL_DESCRIPTIONS } from '@/lib/sm2';
+import type { HintLevel } from '@/lib/sm2';
 import type { ActionableStep } from '@/lib/learner-model';
 
 export default function PracticePage() {
@@ -33,7 +36,26 @@ function PracticeContent() {
   const [practiceSteps, setPracticeSteps] = useState<ActionableStep[]>([]);
   const [recommendedNodeId, setRecommendedNodeId] = useState<string | null>(null);
 
+  const userId = useUserId() || '';
   const { densityLevel, infoChunkSize } = useDensity();
+
+  // Hint level indicator based on overall review progress
+  const hintLevel: HintLevel = useMemo(() => {
+    if (!selectedNode || nodes.length === 0) return 1;
+    const currentNode = nodes.find((n: any) => n.id === selectedNode);
+    const reps = currentNode?.repetitions ?? 0;
+    const mastery = currentNode?.masteryLevel ?? 0;
+    return getHintLevel(reps, mastery);
+  }, [selectedNode, nodes]);
+
+  const hintLevelColors: Record<HintLevel, { bg: string; text: string; border: string }> = {
+    1: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
+    2: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' },
+    3: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
+  };
+
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
 
   // In sparse mode, show questions one at a time (paginated).
   const [questionPage, setQuestionPage] = useState(0);
@@ -55,6 +77,8 @@ function PracticeContent() {
     setQuestionPage(0);
   }, [questions]);
 
+  useEffect(() => { document.title = '练习 - 知图复习'; }, []);
+
   useEffect(() => {
     fetch('/api/knowledge?limit=20')
       .then(res => res.json())
@@ -67,7 +91,7 @@ function PracticeContent() {
   useEffect(() => {
     async function loadPracticeSteps() {
       try {
-        const res = await fetch('/api/learner/profile?userId=default-user');
+        const res = await fetch(`/api/learner/profile?userId=${encodeURIComponent(userId)}`);
         if (!res.ok) return;
         const data = await res.json();
         const steps: ActionableStep[] = (data.actionableSteps as ActionableStep[]) || [];
@@ -127,56 +151,139 @@ function PracticeContent() {
     { level: 'Interactive', label: '互动', desc: '变式应用题', gradient: 'from-purple-400 to-purple-500' },
   ];
 
-  const renderQuestion = (q: any, i: number) => (
-    <Card key={`q-${questionPage}-${i}`}>
-      <div className="flex items-start gap-3">
-        <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 font-semibold text-sm shrink-0 mt-0.5">
-          {questionPage * questionsPerPage + i + 1}
-        </span>
-        <div className="flex-1 min-w-0">
-          <p className="text-slate-800 font-medium mb-4">{q.stem}</p>
+  const qKey = (q: any, i: number) => `${questionPage}-${i}-${q.id || i}`;
 
-          {q.options && Array.isArray(q.options) && q.options.length > 0 && (
-            <div className="space-y-2 mb-4">
-              {q.options.map((opt: any, j: number) => (
-                <label
-                  key={j}
-                  className="flex items-center gap-3 p-3 rounded-xl border border-slate-200/80 hover:bg-slate-50 hover:border-slate-300 cursor-pointer transition-colors duration-150"
+  const renderQuestion = (q: any, i: number) => {
+    const key = qKey(q, i);
+    const selectedAnswer = answers[key] || '';
+    const isChecked = checked[key] || false;
+    const isCorrect = isChecked && selectedAnswer === q.answer;
+
+    return (
+      <Card key={key}>
+        <div className="flex items-start gap-3">
+          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 font-semibold text-sm shrink-0 mt-0.5">
+            {questionPage * questionsPerPage + i + 1}
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-slate-800 font-medium mb-4">{q.stem}</p>
+
+            {q.options && Array.isArray(q.options) && q.options.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {q.options.map((opt: any, j: number) => {
+                  const isSelected = selectedAnswer === opt.label;
+                  const showResult = isChecked;
+                  let borderClass = 'border-slate-200/80 hover:bg-slate-50 hover:border-slate-300';
+                  if (showResult) {
+                    if (opt.label === q.answer) {
+                      borderClass = 'border-emerald-300 bg-emerald-50/50';
+                    } else if (isSelected && opt.label !== q.answer) {
+                      borderClass = 'border-red-300 bg-red-50/50';
+                    } else {
+                      borderClass = 'border-slate-200/80 opacity-50';
+                    }
+                  } else if (isSelected) {
+                    borderClass = 'border-indigo-300 bg-indigo-50/50';
+                  }
+                  return (
+                    <label
+                      key={j}
+                      className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors duration-150 ${borderClass}`}
+                    >
+                      <input
+                        type="radio"
+                        name={`pq-${key}`}
+                        value={opt.label}
+                        checked={isSelected}
+                        onChange={() => {
+                          if (!isChecked) {
+                            setAnswers(prev => ({ ...prev, [key]: opt.label }));
+                          }
+                        }}
+                        disabled={isChecked}
+                        className="text-indigo-600 w-4 h-4"
+                      />
+                      <span className="text-xs font-semibold text-slate-400 w-5">{opt.label}.</span>
+                      <span className="text-sm text-slate-700">{opt.text}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Answer checking */}
+            {!isChecked && q.options && q.options.length > 0 && (
+              <button
+                onClick={() => setChecked(prev => ({ ...prev, [key]: true }))}
+                disabled={!selectedAnswer}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  selectedAnswer
+                    ? 'bg-indigo-500 text-white hover:bg-indigo-600 shadow-sm'
+                    : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                检查答案
+              </button>
+            )}
+
+            {isChecked && (
+              <div className={`mt-3 p-4 rounded-xl border ${
+                isCorrect
+                  ? 'bg-gradient-to-br from-emerald-50/80 to-green-50/80 border-emerald-100/60'
+                  : 'bg-gradient-to-br from-red-50/80 to-rose-50/80 border-red-100/60'
+              }`}>
+                <p className={`text-sm font-semibold ${isCorrect ? 'text-emerald-800' : 'text-red-800'}`}>
+                  {isCorrect ? '✓ 回答正确！' : `✗ 回答错误，正确答案是: ${q.answer}`}
+                </p>
+                {q.explanation && (
+                  <p className={`text-sm mt-1.5 ${isCorrect ? 'text-emerald-700/80' : 'text-red-700/80'}`}>
+                    解析: {q.explanation}
+                  </p>
+                )}
+                <button
+                  onClick={() => {
+                    setChecked(prev => ({ ...prev, [key]: false }));
+                    setAnswers(prev => ({ ...prev, [key]: '' }));
+                  }}
+                  className="mt-2 text-xs font-medium text-indigo-500 hover:text-indigo-600 transition-colors"
                 >
-                  <input type="radio" name={`pq-${questionPage}-${i}`} className="text-indigo-600 w-4 h-4" />
-                  <span className="text-xs font-semibold text-slate-400 w-5">{opt.label}.</span>
-                  <span className="text-sm text-slate-700">{opt.text}</span>
-                </label>
-              ))}
-            </div>
-          )}
+                  重新作答
+                </button>
+              </div>
+            )}
 
-          <details className="group">
-            <summary className="text-sm text-indigo-500 cursor-pointer hover:text-indigo-600 font-medium transition-colors">
-              查看答案与解析
-            </summary>
-            <div className="mt-3 p-4 bg-gradient-to-br from-emerald-50/80 to-green-50/80 rounded-xl border border-emerald-100/60">
-              <p className="text-sm font-semibold text-emerald-800">答案: {q.answer}</p>
-              {q.explanation && (
-                <p className="text-sm text-emerald-700/80 mt-1.5">解析: {q.explanation}</p>
-              )}
+            <div className="flex items-center gap-2 mt-3">
+              <Badge variant="default" size="sm">
+                {'★'.repeat(q.difficulty || 3)}
+              </Badge>
+              <Badge variant="purple" size="sm">{q.icapLevel}</Badge>
             </div>
-          </details>
-
-          <div className="flex items-center gap-2 mt-3">
-            <Badge variant="default" size="sm">
-              {'★'.repeat(q.difficulty || 3)}
-            </Badge>
-            <Badge variant="purple" size="sm">{q.icapLevel}</Badge>
           </div>
         </div>
-      </div>
-    </Card>
-  );
+      </Card>
+    );
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
       <h1 className="text-[28px] font-bold text-slate-800 tracking-tight mb-8">主动回忆练习</h1>
+
+      {/* Hint Level Indicator — 引导渐隐 */}
+      {selectedNode && (
+        <div className={`mb-6 rounded-xl border px-4 py-3 ${hintLevelColors[hintLevel].bg} ${hintLevelColors[hintLevel].border}`}>
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded ${hintLevelColors[hintLevel].text} bg-white/60`}>
+              {HINT_LEVEL_LABELS[hintLevel]}
+            </span>
+            <span className={`text-[13px] ${hintLevelColors[hintLevel].text}`}>
+              {HINT_LEVEL_DESCRIPTIONS[hintLevel]}
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1.5">
+            随着掌握度提升，提示会逐渐减少，帮助你独立解决问题
+          </p>
+        </div>
+      )}
 
       {/* Practice recommendation bar */}
       {practiceSteps.length > 0 && (

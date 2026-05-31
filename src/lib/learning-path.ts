@@ -51,6 +51,16 @@ export interface PathChange {
   reason: string;
 }
 
+export interface PrerequisiteCheck {
+  canAccess: boolean;
+  blockedBy: {
+    nodeId: string;
+    title: string;
+    masteryLevel: number;
+    requiredLevel: number;
+  }[];
+}
+
 // ---------------------------------------------------------------------------
 // Internal types for graph processing
 // ---------------------------------------------------------------------------
@@ -310,6 +320,159 @@ export async function generatePath(
     subjectId,
     createdAt: new Date().toISOString(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Prerequisite gating
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether a knowledge node is accessible given its prerequisites.
+ *
+ * Recursively traverses KnowledgeEdge records (relationType='prerequisite')
+ * to find all transitive prerequisites. A node is accessible only if ALL
+ * prerequisites have masteryLevel >= requiredLevel (default 60).
+ *
+ * Returns a PrerequisiteCheck with canAccess flag and the list of blocking
+ * prerequisite nodes (if any).
+ */
+export async function checkPrerequisites(
+  knowledgeNodeId: string,
+  _userId: string | null | undefined,
+  prisma: PrismaClient,
+  requiredLevel: number = 60,
+): Promise<PrerequisiteCheck> {
+  // BFS to find all transitive prerequisites
+  const visited = new Set<string>();
+  const queue: string[] = [knowledgeNodeId];
+  const allPrerequisites: { nodeId: string; title: string; masteryLevel: number }[] = [];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    if (visited.has(currentId)) continue;
+    visited.add(currentId);
+
+    // Find edges where current node is the target (depends on from-node)
+    const edges = await prisma.knowledgeEdge.findMany({
+      where: {
+        relationType: 'prerequisite',
+        toId: currentId,
+      },
+      select: {
+        from: {
+          select: { id: true, title: true, masteryLevel: true },
+        },
+      },
+    });
+
+    for (const edge of edges) {
+      const fromId = edge.from.id;
+      if (!visited.has(fromId)) {
+        allPrerequisites.push({
+          nodeId: fromId,
+          title: edge.from.title,
+          masteryLevel: edge.from.masteryLevel,
+        });
+        queue.push(fromId);
+      }
+    }
+  }
+
+  const blockedBy = allPrerequisites
+    .filter(p => p.masteryLevel < requiredLevel)
+    .map(p => ({ ...p, requiredLevel }));
+
+  return {
+    canAccess: blockedBy.length === 0,
+    blockedBy,
+  };
+}
+
+/**
+ * Batch version of checkPrerequisites — takes an array of nodeIds and
+ * returns a map of nodeId -> PrerequisiteCheck.
+ *
+ * Optimised: fetches all prerequisite edges in one query, then computes
+ * transitive closure in-memory.
+ */
+export async function batchCheckPrerequisites(
+  nodeIds: string[],
+  _userId: string | null | undefined,
+  prisma: PrismaClient,
+  requiredLevel: number = 60,
+): Promise<Record<string, PrerequisiteCheck>> {
+  if (nodeIds.length === 0) return {};
+
+  // Fetch all relevant edges in one query (all prerequisite edges)
+  const allEdges = await prisma.knowledgeEdge.findMany({
+    where: {
+      relationType: 'prerequisite',
+    },
+    select: {
+      fromId: true,
+      toId: true,
+      from: {
+        select: { id: true, title: true, masteryLevel: true },
+      },
+    },
+  });
+
+  // Build adjacency map: toId -> [fromNodes]
+  const prerequisiteOf = new Map<
+    string,
+    { nodeId: string; title: string; masteryLevel: number }[]
+  >();
+  for (const edge of allEdges) {
+    if (!prerequisiteOf.has(edge.toId)) {
+      prerequisiteOf.set(edge.toId, []);
+    }
+    prerequisiteOf.get(edge.toId)!.push({
+      nodeId: edge.from.id,
+      title: edge.from.title,
+      masteryLevel: edge.from.masteryLevel,
+    });
+  }
+
+  // Compute transitive prerequisites for a single node via BFS
+  function getTransitivePrerequisites(
+    nodeId: string,
+  ): { nodeId: string; title: string; masteryLevel: number }[] {
+    const visited = new Set<string>();
+    const result: { nodeId: string; title: string; masteryLevel: number }[] = [];
+    const queue = [nodeId];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      const prereqs = prerequisiteOf.get(current) || [];
+      for (const prereq of prereqs) {
+        if (!visited.has(prereq.nodeId)) {
+          result.push(prereq);
+          queue.push(prereq.nodeId);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  // Evaluate each node
+  const results: Record<string, PrerequisiteCheck> = {};
+  for (const nodeId of nodeIds) {
+    const allPrerequisites = getTransitivePrerequisites(nodeId);
+    const blockedBy = allPrerequisites
+      .filter(p => p.masteryLevel < requiredLevel)
+      .map(p => ({ ...p, requiredLevel }));
+
+    results[nodeId] = {
+      canAccess: blockedBy.length === 0,
+      blockedBy,
+    };
+  }
+
+  return results;
 }
 
 // ---------------------------------------------------------------------------

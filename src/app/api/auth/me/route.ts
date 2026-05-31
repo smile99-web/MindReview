@@ -4,21 +4,8 @@ import { getAuthenticatedUserId } from '@/lib/server-auth';
 
 export async function GET(request: Request) {
   try {
-    // Next.js App Router wraps the native Request; cast to access headers
-    const { headers } = request;
-    const auth = headers.get('authorization');
-    if (!auth?.startsWith('Bearer ')) {
-      return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = auth.slice('Bearer '.length).trim();
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
-    }
-
-    const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString());
-    const userId = payload.sub;
+    // Use canonical JWT verification with HMAC-SHA256 signature check
+    const userId = getAuthenticatedUserId(request as any);
 
     if (!userId) {
       return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });

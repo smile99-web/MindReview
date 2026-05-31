@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { generatePath } from '@/lib/learning-path';
+import { generatePath, checkPrerequisites, type PrerequisiteCheck } from '@/lib/learning-path';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 
 /**
@@ -14,16 +14,20 @@ import { resolveUserIdFromRequest } from '@/lib/user-context';
  * The path respects prerequisite chains (topological sort), sorts by
  * difficulty and mastery level, and assigns appropriate ICAP levels.
  *
+ * Nodes whose prerequisites have masteryLevel < 60 are marked as locked
+ * and listed in blockedNodes.
+ *
  * Response:
  * {
  *   path: {
  *     pathId: string,
- *     steps: [{ nodeId, title, icapLevel, estimatedMinutes, masteryLevel, difficulty, summary }],
+ *     steps: [{ nodeId, title, icapLevel, estimatedMinutes, masteryLevel, difficulty, summary, locked?: boolean }],
  *     totalSteps: number,
  *     totalEstimatedMinutes: number,
  *     subjectId: string,
  *     createdAt: string
- *   }
+ *   },
+ *   blockedNodes: [{ nodeId, title, blockedBy: [{ nodeId, title, masteryLevel, requiredLevel }] }]
  * }
  */
 export async function POST(req: NextRequest) {
@@ -65,7 +69,34 @@ export async function POST(req: NextRequest) {
       prisma,
     );
 
-    return NextResponse.json({ path });
+    // --- Prerequisite gating: check each step ---
+    const blockedNodes: {
+      nodeId: string;
+      title: string;
+      blockedBy: PrerequisiteCheck['blockedBy'];
+    }[] = [];
+
+    const stepsWithLocks = await Promise.all(
+      path.steps.map(async (step) => {
+        const check = await checkPrerequisites(step.nodeId, userId, prisma, 60);
+        if (!check.canAccess) {
+          blockedNodes.push({
+            nodeId: step.nodeId,
+            title: step.title,
+            blockedBy: check.blockedBy,
+          });
+          return { ...step, locked: true };
+        }
+        return { ...step, locked: false };
+      }),
+    );
+
+    const gatedPath = {
+      ...path,
+      steps: stepsWithLocks,
+    };
+
+    return NextResponse.json({ path: gatedPath, blockedNodes });
   } catch (error: any) {
     console.error('[path/generate POST]', error);
     return NextResponse.json(

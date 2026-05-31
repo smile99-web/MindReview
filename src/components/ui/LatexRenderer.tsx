@@ -29,9 +29,9 @@ export function LatexRenderer({
     try {
       katex.render(latex, el, {
         displayMode,
-        throwOnError: false,
+        throwOnError: true,
         strict: false,
-        trust: true,
+        trust: false,
       });
     } catch {
       if (showRawOnError) {

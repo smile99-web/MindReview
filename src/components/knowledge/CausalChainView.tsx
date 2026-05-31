@@ -1,7 +1,9 @@
 'use client';
 
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { LatexText } from '@/components/ui/LatexText';
+import { BoundaryCallout } from './BoundaryCallout';
 
 interface CausalNode {
   id?: string;
@@ -24,6 +26,8 @@ export interface CausalChainData {
   edges?: CausalEdge[];
   /** Alternative name for edges (task uses "chains") */
   chains?: CausalEdge[];
+  /** Boundary/limitation: when this representation breaks down */
+  boundary?: string;
 }
 
 interface CausalChainViewProps {
@@ -46,6 +50,7 @@ export function CausalChainView({
   const _data = data || {};
   const nodes = _data.nodes || [];
   const edges = _data.edges || _data.chains || [];
+  const boundary = _data.boundary;
   const hasData = nodes.length > 0;
 
   // Build adjacency map for display ordering
@@ -54,6 +59,79 @@ export function CausalChainView({
     if (!childrenOf[edge.from]) childrenOf[edge.from] = [];
     childrenOf[edge.from].push(edge.to);
   }
+
+  // ---- Interactive state: what-if parameter toggle ----
+  const [hiddenEffects, setHiddenEffects] = useState<Set<number>>(new Set());
+
+  // Reset when data content changes
+  const dataFingerprint =
+    nodes.map((n) => n.event).join('|') +
+    '::' +
+    edges.map((e) => `${e.from}-${e.to}`).join(',');
+  useEffect(() => {
+    setHiddenEffects(new Set());
+  }, [dataFingerprint]);
+
+  // Compute full downstream set for each node (all reachable nodes via edges)
+  const downstreamMap = useMemo(() => {
+    const map: Record<number, Set<number>> = {};
+    const adj: Record<number, number[]> = {};
+    for (const edge of edges) {
+      if (!adj[edge.from]) adj[edge.from] = [];
+      adj[edge.from].push(edge.to);
+    }
+
+    function dfs(node: number, visited: Set<number>): Set<number> {
+      if (map[node]) return map[node];
+      const result = new Set<number>();
+      const children = adj[node] || [];
+      for (const child of children) {
+        if (!visited.has(child)) {
+          visited.add(child);
+          result.add(child);
+          const downstream = dfs(child, new Set(visited));
+          downstream.forEach((d) => result.add(d));
+        }
+      }
+      map[node] = result;
+      return result;
+    }
+
+    for (let i = 0; i < nodes.length; i++) {
+      if (!map[i]) dfs(i, new Set());
+    }
+    return map;
+  }, [nodes, edges]);
+
+  // Which nodes should be dimmed (all downstream of hidden-effect nodes)
+  const dimmedNodes = useMemo(() => {
+    const dimmed = new Set<number>();
+    for (const hiddenIdx of hiddenEffects) {
+      const downstream = downstreamMap[hiddenIdx];
+      if (downstream) {
+        downstream.forEach((d) => dimmed.add(d));
+      }
+    }
+    return dimmed;
+  }, [hiddenEffects, downstreamMap]);
+
+  const toggleNode = useCallback((idx: number) => {
+    setHiddenEffects((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) {
+        next.delete(idx);
+      } else {
+        next.add(idx);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleShowAll = useCallback(() => {
+    setHiddenEffects(new Set());
+  }, []);
+
+  const anyHidden = hiddenEffects.size > 0;
 
   // Loading state
   if (loading) {
@@ -106,22 +184,38 @@ export function CausalChainView({
   // Data state: render the causal chain flow chart
   return (
     <div className="rounded-xl border border-red-200/60 bg-gradient-to-br from-red-50/50 to-orange-50/50 p-5">
-      <h4 className="text-sm font-semibold text-red-800 mb-5">{title}</h4>
+      <div className="flex items-center justify-between mb-5">
+        <h4 className="text-sm font-semibold text-red-800">{title}</h4>
+        <button
+          onClick={handleShowAll}
+          disabled={!anyHidden}
+          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+            anyHidden
+              ? 'text-red-600 border-red-300 bg-red-50 hover:bg-red-100 cursor-pointer'
+              : 'text-slate-400 border-slate-200 bg-slate-50 cursor-default'
+          }`}
+        >
+          {anyHidden ? `显示全部 (${hiddenEffects.size})` : '显示全部'}
+        </button>
+      </div>
 
       <div className="space-y-4">
         {nodes.map((node, i) => {
           const hasChildren = childrenOf[i] && childrenOf[i].length > 0;
           const outgoingEdges = edges.filter((e) => e.from === i);
+          const isHidden = hiddenEffects.has(i);
+          const isDimmed = dimmedNodes.has(i);
+          const dimmedClass = isDimmed ? 'opacity-30' : '';
 
           return (
-            <div key={node.id || i}>
+            <div key={node.id || i} className={dimmedClass}>
               {/* Node card */}
-              <div className="bg-white rounded-lg border border-slate-200/60 p-3.5 shadow-sm">
+              <div className="bg-white rounded-lg border border-slate-200/60 p-3.5 shadow-sm relative group">
                 <div className="flex items-start gap-2.5">
                   <span className="flex items-center justify-center w-6 h-6 rounded-full bg-red-100 text-red-600 text-xs font-bold shrink-0 mt-0.5">
                     {i + 1}
                   </span>
-                  <div>
+                  <div className="flex-1">
                     <h5 className="text-sm font-medium text-slate-800">
                       <LatexText text={node.label || node.event} />
                     </h5>
@@ -131,7 +225,30 @@ export function CausalChainView({
                       </div>
                     )}
                   </div>
+                  {/* Toggle button: show/hide this cause's downstream effects */}
+                  {hasChildren && (
+                    <button
+                      onClick={() => toggleNode(i)}
+                      title={
+                        isHidden
+                          ? '显示该原因的后续影响'
+                          : '隐藏该原因的后续影响（假设该原因未发生）'
+                      }
+                      className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold border transition-colors ${
+                        isHidden
+                          ? 'border-amber-400 bg-amber-50 text-amber-600 hover:bg-amber-100'
+                          : 'border-slate-300 bg-slate-50 text-slate-500 hover:bg-slate-100'
+                      }`}
+                    >
+                      {isHidden ? '+' : '−'}
+                    </button>
+                  )}
                 </div>
+                {isHidden && (
+                  <div className="mt-1.5 text-[10px] text-amber-600 italic">
+                    已隐藏该原因的后续影响
+                  </div>
+                )}
               </div>
 
               {/* Connector arrow to children */}
@@ -156,6 +273,8 @@ export function CausalChainView({
           );
         })}
       </div>
+
+      {boundary && <BoundaryCallout boundary={boundary} />}
 
       {error && hasData && (
         <p className="mt-3 text-xs text-red-400 text-center">{error}</p>

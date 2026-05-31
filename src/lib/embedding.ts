@@ -1,10 +1,15 @@
 /**
  * Embedding generation and vector search utilities.
- * Uses DeepSeek-compatible embeddings API with a keyword-based fallback
- * for when the embeddings endpoint is unavailable.
+ * Uses Doubao Embedding Vision API (via Ark/Volcengine) with DB-stored API key,
+ * falling back to a keyword-based TF-IDF vector when the API is unavailable.
+ *
+ * API reference: POST /api/v3/embeddings/multimodal
+ * Model: doubao-embedding-vision-250615
+ * Input: [{type: "text", text: "..."}]
  */
 
 import { prisma } from '@/lib/prisma';
+import { decryptSecret } from '@/lib/secrets';
 
 const EMBEDDING_DIM = 1536;
 
@@ -52,24 +57,46 @@ function keywordVector(text: string, dim: number = EMBEDDING_DIM): number[] {
   return vector;
 }
 
-async function fetchEmbedding(text: string): Promise<number[]> {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  const baseUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+async function getEmbeddingCredentials(): Promise<{ apiKey: string; baseUrl: string; model: string } | null> {
+  // Try DB-stored key first (Settings page), then env var
+  try {
+    const stored = await prisma.apiKey.findUnique({ where: { service: 'embedding' } });
+    if (stored?.key) {
+      return {
+        apiKey: decryptSecret(stored.key),
+        baseUrl: stored.baseUrl || 'https://ark.cn-beijing.volces.com/api/v3',
+        model: stored.model || 'doubao-embedding-vision-250615',
+      };
+    }
+  } catch { /* DB may not be available */ }
 
-  if (!apiKey || apiKey === 'sk-placeholder') {
-    return keywordVector(text);
+  // Fallback to env vars
+  const apiKey = process.env.DOUBAO_EMBEDDING_API_KEY || process.env.DEEPSEEK_API_KEY;
+  if (apiKey && apiKey !== 'sk-placeholder') {
+    return {
+      apiKey,
+      baseUrl: process.env.DOUBAO_EMBEDDING_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3',
+      model: process.env.DOUBAO_EMBEDDING_MODEL || 'doubao-embedding-vision-250615',
+    };
   }
 
+  return null;
+}
+
+async function fetchEmbedding(text: string): Promise<number[]> {
+  const creds = await getEmbeddingCredentials();
+  if (!creds) return keywordVector(text);
+
   try {
-    const res = await fetch(`${baseUrl}/v1/embeddings`, {
+    const res = await fetch(`${creds.baseUrl}/embeddings/multimodal`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${creds.apiKey}`,
       },
       body: JSON.stringify({
-        model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-        input: text,
+        model: creds.model,
+        input: [{ type: 'text', text }],
       }),
     });
 

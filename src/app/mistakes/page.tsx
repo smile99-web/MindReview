@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { authFetch } from '@/lib/auth';
 
 export default function MistakesPage() {
   const [mistakes, setMistakes] = useState<any[]>([]);
@@ -17,10 +19,12 @@ export default function MistakesPage() {
     correctAnswer: '',
   });
   const [submitting, setSubmitting] = useState(false);
-
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [subjects, setSubjects] = useState<any[]>([]);
 
-  useEffect(() => {
+  const fetchMistakes = useCallback(() => {
+    setLoading(true);
     Promise.all([
       fetch('/api/mistakes').then(r => r.json()),
       fetch('/api/subjects').then(r => r.json()),
@@ -32,6 +36,12 @@ export default function MistakesPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { document.title = '错题本 - 知图复习'; }, []);
+
+  useEffect(() => {
+    fetchMistakes();
+  }, [fetchMistakes]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,6 +64,39 @@ export default function MistakesPage() {
       console.error(err);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleToggleResolve = async (id: string, currentResolved: boolean) => {
+    setTogglingIds(prev => new Set(prev).add(id));
+    try {
+      const res = await authFetch(`/api/mistakes/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resolved: !currentResolved }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setMistakes(prev => prev.map(m => m.id === id ? { ...m, resolved: updated.resolved } : m));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTogglingIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeletingIds(prev => new Set(prev).add(id));
+    try {
+      const res = await authFetch(`/api/mistakes/${id}`, { method: 'DELETE' });
+      if (res.ok || res.status === 404) {
+        setMistakes(prev => prev.filter(m => m.id !== id));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDeletingIds(prev => { const next = new Set(prev); next.delete(id); return next; });
     }
   };
 
@@ -161,7 +204,7 @@ export default function MistakesPage() {
 
       <div className="space-y-4">
         {mistakes.map((m: any) => (
-          <Card key={m.id}>
+          <Card key={m.id} className={m.resolved ? 'opacity-70' : ''}>
             <div className="flex items-start justify-between mb-3">
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge
@@ -211,18 +254,37 @@ export default function MistakesPage() {
                 <p className="text-sm text-indigo-700/80">{m.analysis}</p>
               </div>
             )}
+
+            {/* 操作按钮 */}
+            <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
+              <Button
+                size="sm"
+                variant="ghost"
+                loading={togglingIds.has(m.id)}
+                onClick={() => handleToggleResolve(m.id, m.resolved)}
+              >
+                {m.resolved ? '标记未解决' : '标记已解决'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                loading={deletingIds.has(m.id)}
+                onClick={() => handleDelete(m.id)}
+                className="text-red-500 hover:text-red-600 hover:bg-red-50"
+              >
+                删除
+              </Button>
+            </div>
           </Card>
         ))}
 
         {mistakes.length === 0 && (
           <Card>
-            <div className="text-center py-14">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-100 text-2xl mb-4">
-                📝
-              </div>
-              <p className="text-slate-500 font-medium">还没有错题记录</p>
-              <p className="text-sm text-slate-400 mt-1.5">点击上方按钮录入错题，AI会帮你分析错因</p>
-            </div>
+            <EmptyState
+              icon="📝"
+              title="还没有错题记录"
+              description="点击上方按钮录入错题，AI会帮你分析错因"
+            />
           </Card>
         )}
       </div>

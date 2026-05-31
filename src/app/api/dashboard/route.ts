@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
       totalNodes,
       totalSubjects,
       totalChapters,
+      totalReviewCount,
       reviewedToday,
       pendingTasks,
       totalMistakes,
@@ -29,6 +30,9 @@ export async function GET(req: NextRequest) {
       prisma.knowledgeNode.count(),
       prisma.subject.count(),
       prisma.chapter.count(),
+      prisma.reviewLog.count({
+        where: { userId, action: { in: ['reviewed', 'solved', 'mastered'] } },
+      }),
       prisma.reviewLog.count({
         where: {
           userId,
@@ -76,6 +80,7 @@ export async function GET(req: NextRequest) {
         totalNodes,
         totalSubjects,
         totalChapters,
+        totalReviewCount,
         reviewedToday,
         pendingTasks,
         totalMistakes,

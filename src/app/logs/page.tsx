@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { formatDateTime } from '@/lib/utils';
 import type { BadgeVariant } from '@/components/ui/Badge';
 
@@ -54,10 +55,10 @@ export default function AILogsPage() {
     }
   }, []);
 
+  useEffect(() => { document.title = 'AI生成记录 - 知图复习'; }, []);
+
   useEffect(() => {
-    queueMicrotask(() => {
-      void fetchLogs(filter, page);
-    });
+    void fetchLogs(filter, page);
   }, [filter, page, fetchLogs]);
 
   const handleFilterChange = (newFilter: string) => {
@@ -125,15 +126,11 @@ export default function AILogsPage() {
           {[1, 2, 3].map(i => <div key={i} className="h-16 bg-slate-100 rounded-2xl animate-pulse" />)}
         </div>
       ) : logs.length === 0 ? (
-        <Card>
-          <div className="text-center py-14">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-100 text-2xl mb-4">
-              📋
-            </div>
-            <p className="text-slate-500 font-medium">暂无AI生成记录</p>
-            <p className="text-sm text-slate-400 mt-1.5">使用AI功能后，记录会在这里显示</p>
-          </div>
-        </Card>
+        <EmptyState
+          icon="📋"
+          title="暂无AI生成记录"
+          description="使用AI功能后，记录会在这里显示"
+        />
       ) : (
         <div className="space-y-2">
           {logs.map((log) => (

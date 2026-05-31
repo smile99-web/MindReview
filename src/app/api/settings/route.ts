@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { encryptSecret, maskSecret } from "@/lib/secrets";
 import { assertSafeExternalBaseUrl } from "@/lib/url-security";
 
-const SERVICES = new Set(["llm", "tts", "image"]);
+const SERVICES = new Set(["llm", "tts", "image", "embedding"]);
 
 export async function GET() {
   try {
@@ -71,6 +71,23 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to save settings";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const service = searchParams.get('service');
+
+    if (!service || !SERVICES.has(service)) {
+      return NextResponse.json({ error: "valid service is required" }, { status: 400 });
+    }
+
+    await prisma.apiKey.deleteMany({ where: { service } });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete settings";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

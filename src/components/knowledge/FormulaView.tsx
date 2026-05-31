@@ -3,6 +3,7 @@
 import { Button } from '@/components/ui/Button';
 import { LatexRenderer } from '@/components/ui/LatexRenderer';
 import { LatexText } from '@/components/ui/LatexText';
+import { BoundaryCallout } from './BoundaryCallout';
 
 interface FormulaVariable {
   symbol: string;
@@ -22,6 +23,8 @@ export interface FormulaViewData {
   derivation?: string[];
   /** Usage notes */
   notes?: string;
+  /** Boundary/limitation: when this representation breaks down */
+  boundary?: string;
 }
 
 interface FormulaViewProps {
@@ -51,6 +54,7 @@ export function FormulaView({
   const steps = _data.steps || _data.derivation;
   const variables = _data.variables;
   const notes = _data.notes;
+  const boundary = _data.boundary;
 
   const hasData = !!(
     formula ||
@@ -176,6 +180,8 @@ export function FormulaView({
           {notes}
         </p>
       )}
+
+      {boundary && <BoundaryCallout boundary={boundary} />}
 
       {/* Error banner when there IS data but also an error */}
       {error && hasData && (

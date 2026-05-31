@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { analyzeMistake } from '@/lib/llm-client';
-import { generateQuestions } from '@/lib/llm-client';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 
 // GET /api/mistakes — 获取错题列表
@@ -35,7 +34,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
-      userId: rawUserId,
       subjectId,
       knowledgeNodeId,
       questionText,
@@ -49,7 +47,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. 尝试从 subjectId 获取学科名
-    let subjectName = '数学';
+    let subjectName = '未知学科';
     if (subjectId) {
       const subject = await prisma.subject.findUnique({ where: { id: subjectId } });
       if (subject) subjectName = subject.name;
@@ -101,19 +99,3 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH /api/mistakes/[id] — 标记错题已解决
-export async function PATCH(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { id, resolved } = body;
-
-    const mistake = await prisma.mistake.update({
-      where: { id },
-      data: { resolved },
-    });
-
-    return NextResponse.json(mistake);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-}

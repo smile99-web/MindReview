@@ -15,20 +15,34 @@ export async function GET(req: NextRequest) {
     if (chapterId) baseWhere.chapterId = chapterId;
     if (rootId) baseWhere.parentId = rootId;
 
-    // When includeSchemas is true, also include schema nodes
-    const nodeFilters = Object.keys(baseWhere).length > 0
-      ? [{ ...baseWhere }]
-      : [];
-    if (includeSchemas) {
-      nodeFilters.push({ representationType: 'schema' });
+    // Build the where clause with proper schema filtering
+    const conditions: any[] = [];
+    if (subjectId || chapterId || rootId) {
+      conditions.push({ ...baseWhere });
     }
-    const where = nodeFilters.length > 1
-      ? { OR: nodeFilters }
-      : (nodeFilters.length === 1 ? nodeFilters[0] : {});
+    if (includeSchemas) {
+      conditions.push({ representationType: 'schema' });
+    }
+
+    let where: any;
+    if (conditions.length === 0) {
+      where = includeSchemas
+        ? { representationType: 'schema' }
+        : { representationType: { not: 'schema' } };
+    } else if (conditions.length === 1) {
+      where = conditions[0];
+      // If we have subjectId/chapterId/rootId but not includeSchemas, exclude schemas
+      if (!includeSchemas) {
+        where = { ...where, representationType: { not: 'schema' } };
+      }
+    } else {
+      where = { OR: conditions };
+    }
 
     const nodes = await prisma.knowledgeNode.findMany({
       where,
       include: {
+        subject: { select: { id: true, name: true } },
         chapter: { select: { id: true, title: true } },
         children: { select: { id: true } },
       },
@@ -55,6 +69,22 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+
+    // Validate required fields
+    if (typeof body.fromId !== 'string' || body.fromId.trim() === '') {
+      return NextResponse.json({ error: 'fromId 必须是非空字符串' }, { status: 400 });
+    }
+    if (typeof body.toId !== 'string' || body.toId.trim() === '') {
+      return NextResponse.json({ error: 'toId 必须是非空字符串' }, { status: 400 });
+    }
+    if (typeof body.relationType !== 'string' || body.relationType.trim() === '') {
+      return NextResponse.json({ error: 'relationType 必须是非空字符串' }, { status: 400 });
+    }
+    // Validate optional field type if present
+    if (body.label !== undefined && body.label !== null && typeof body.label !== 'string') {
+      return NextResponse.json({ error: 'label 必须是字符串' }, { status: 400 });
+    }
+
     const edge = await prisma.knowledgeEdge.create({ data: body });
     return NextResponse.json(edge);
   } catch (error: any) {

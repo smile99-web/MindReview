@@ -15,19 +15,44 @@ export default function ChapterDetailPage() {
   const [chapter, setChapter] = useState<any>(null);
   const [nodes, setNodes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [blockedMap, setBlockedMap] = useState<Map<string, any[]>>(new Map());
 
   useEffect(() => {
     async function load() {
       try {
         const [chRes, nodeRes] = await Promise.all([
-          fetch(`/api/chapters`),
+          fetch(`/api/chapters/${id}`),
           fetch(`/api/knowledge?chapterId=${id}&limit=100`),
         ]);
 
-        const chapters = await chRes.json();
-        const currentChapter = chapters.find((c: any) => c.id === id);
-        setChapter(currentChapter || null);
-        setNodes((await nodeRes.json()).nodes || []);
+        if (chRes.ok) {
+          setChapter(await chRes.json());
+        }
+
+        const nodeData = (await nodeRes.json()).nodes || [];
+        setNodes(nodeData);
+
+        // Batch prerequisite check for all nodes in this chapter
+        if (nodeData.length > 0) {
+          const nodeIds = nodeData.map((n: any) => n.id);
+          try {
+            const prereqRes = await fetch('/api/path/prerequisites', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ nodeIds }),
+            });
+            const prereqData = await prereqRes.json();
+            const map = new Map<string, any[]>();
+            if (prereqData.results) {
+              for (const [nid, check] of Object.entries(prereqData.results) as [string, any][]) {
+                if (!check.canAccess) {
+                  map.set(nid, check.blockedBy);
+                }
+              }
+            }
+            setBlockedMap(map);
+          } catch { /* ignore prerequisite check errors */ }
+        }
       } catch (err) {
         console.error(err);
       } finally {
@@ -75,13 +100,20 @@ export default function ChapterDetailPage() {
       </div>
 
       <div className="space-y-2">
-        {nodes.map((node: any) => (
-          <Link key={node.id} href={`/cards/${node.id}`}>
-            <Card hover padding="sm">
+        {nodes.map((node: any) => {
+          const blockedBy = blockedMap.get(node.id);
+          const isLocked = blockedBy && blockedBy.length > 0;
+          const lockTooltip = isLocked
+            ? `需要先掌握: ${blockedBy.map((b: any) => b.title).join('、')}`
+            : '';
+
+          const cardContent = (
+            <Card hover={!isLocked} padding="sm" className={isLocked ? 'opacity-60' : ''}>
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <h4 className="font-medium text-slate-800">{node.title}</h4>
+                    {isLocked && <span className="text-sm cursor-default" title={lockTooltip}>🔒</span>}
+                    <h4 className={`font-medium ${isLocked ? 'text-slate-400' : 'text-slate-800'}`}>{node.title}</h4>
                     <Badge variant="purple" size="sm">{node.icapLevel}</Badge>
                     <span className="text-xs text-slate-400">
                       {'★'.repeat(node.difficulty)}
@@ -100,14 +132,22 @@ export default function ChapterDetailPage() {
                   <div className="w-24">
                     <MasteryBar level={node.masteryLevel} />
                   </div>
-                  <svg className="w-4 h-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </svg>
+                  {!isLocked && (
+                    <svg className="w-4 h-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                    </svg>
+                  )}
                 </div>
               </div>
             </Card>
-          </Link>
-        ))}
+          );
+
+          return isLocked ? (
+            <div key={node.id} title={lockTooltip}>{cardContent}</div>
+          ) : (
+            <Link key={node.id} href={`/cards/${node.id}`}>{cardContent}</Link>
+          );
+        })}
       </div>
     </div>
   );

@@ -46,6 +46,15 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+
+    // Validation: subjectId and title are required
+    if (!body.subjectId || typeof body.subjectId !== 'string' || body.subjectId.trim().length === 0) {
+      return NextResponse.json({ error: 'subjectId is required and must be a non-empty string' }, { status: 400 });
+    }
+    if (!body.title || typeof body.title !== 'string' || body.title.trim().length === 0) {
+      return NextResponse.json({ error: 'title is required and must be a non-empty string' }, { status: 400 });
+    }
+
     const node = await prisma.knowledgeNode.create({ data: body });
     return NextResponse.json(node);
   } catch (error: any) {

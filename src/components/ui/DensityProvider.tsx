@@ -60,6 +60,7 @@ export function DensityProvider({ children, initialLoad = 3 }: DensityProviderPr
   const [cognitiveLoad, setCognitiveLoadRaw] = useState(initialLoad);
 
   const setCognitiveLoad = useCallback((load: number) => {
+    if (!Number.isFinite(load)) return;
     const clamped = Math.min(5, Math.max(1, Math.round(load)));
     setCognitiveLoadRaw(clamped);
   }, []);

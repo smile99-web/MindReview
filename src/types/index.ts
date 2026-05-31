@@ -206,3 +206,34 @@ export interface ReviewTaskItem {
   taskType: IcapLevel;
   content: any;
 }
+
+// ========== Worked Example (认知负荷理论) ==========
+export interface WorkedExampleReasoningStep {
+  step: number;
+  explanation: string;
+}
+
+export interface WorkedExample {
+  problem: string;
+  solution: string;
+  reasoningSteps: WorkedExampleReasoningStep[];
+  similarProblem: string;
+  similarProblemSolution: string;
+}
+
+export interface WorkedExampleGenerateRequest {
+  knowledgeNodeId: string;
+  subject?: string;
+  difficulty?: number;
+}
+
+export interface WorkedExampleGenerateResponse {
+  success: boolean;
+  workedExample?: WorkedExample;
+  knowledgeCard?: {
+    id: string;
+    cardType: string;
+    title: string;
+    content: string;
+  };
+}

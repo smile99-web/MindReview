@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui/Button';
 import { LatexText } from '@/components/ui/LatexText';
+import { BoundaryCallout } from './BoundaryCallout';
 
 interface TimelineEvent {
   date: string;
@@ -16,6 +17,8 @@ export interface TimelineViewData {
   period?: string;
   /** Engine-generated: list of events */
   events?: TimelineEvent[];
+  /** Boundary/limitation: when this representation breaks down */
+  boundary?: string;
 }
 
 interface TimelineViewProps {
@@ -44,6 +47,7 @@ export function TimelineView({
   const _data = data || {};
   const events = _data.events || [];
   const period = _data.period;
+  const boundary = _data.boundary;
   const hasData = events.length > 0;
 
   // Loading state
@@ -112,7 +116,7 @@ export function TimelineView({
 
         <div className="space-y-5">
           {events.map((event, i) => (
-            <div key={i} className="relative">
+            <div key={`${event.date}-${event.title}-${i}`} className="relative">
               {/* Dot marker */}
               <div
                 className={`absolute left-[-22px] top-1.5 w-3.5 h-3.5 rounded-full border-2 border-white shadow-sm ${
@@ -147,6 +151,8 @@ export function TimelineView({
           ))}
         </div>
       </div>
+
+      {boundary && <BoundaryCallout boundary={boundary} />}
 
       {error && hasData && (
         <p className="mt-3 text-xs text-red-400 text-center">{error}</p>

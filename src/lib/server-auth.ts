@@ -8,7 +8,11 @@ const ACCESS_TOKEN_EXPIRE_SECONDS = 15 * 60; // 15 min
 const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 
 function getSecret(): string {
-  return process.env.JWT_SECRET_KEY || DEV_JWT_SECRET;
+  if (process.env.JWT_SECRET_KEY) return process.env.JWT_SECRET_KEY;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET_KEY environment variable is required in production');
+  }
+  return DEV_JWT_SECRET;
 }
 
 function base64UrlEncode(data: Buffer | string): string {

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { authFetch } from "@/lib/auth";
 
-type ServiceName = "llm" | "tts" | "image";
+type ServiceName = "llm" | "tts" | "image" | "embedding";
 
 interface KeyState {
   saved: boolean;
@@ -45,6 +45,11 @@ const DEFAULT_KEYS: Record<ServiceName, KeyState> = {
     maskedKey: "", key: "", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seedream-5-0-260128",
     cluster: "", voiceType: "",
   },
+  embedding: {
+    saved: false, testing: false, result: null,
+    maskedKey: "", key: "", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-embedding-vision-250615",
+    cluster: "", voiceType: "",
+  },
 };
 
 const SERVICE_INFO: Record<ServiceName, { title: string; icon: string; desc: string; docUrl: string; docLabel: string; fields: string[] }> = {
@@ -72,6 +77,14 @@ const SERVICE_INFO: Record<ServiceName, { title: string; icon: string; desc: str
     docLabel: "火山方舟图片生成文档",
     fields: ["key", "baseUrl", "model"],
   },
+  embedding: {
+    title: "Doubao Embedding",
+    icon: "🧠",
+    desc: "知识点语义向量搜索",
+    docUrl: "https://www.volcengine.com/docs/82379/1537010",
+    docLabel: "火山方舟 Embedding 文档",
+    fields: ["key", "baseUrl", "model"],
+  },
 };
 
 export default function SettingsPage() {
@@ -85,7 +98,7 @@ export default function SettingsPage() {
     setKeys((prev) => {
       const next = { ...prev };
       for (const saved of data) {
-        if (saved.service !== "llm" && saved.service !== "tts" && saved.service !== "image") continue;
+        if (saved.service !== "llm" && saved.service !== "tts" && saved.service !== "image" && saved.service !== "embedding") continue;
         const svc = saved.service;
         next[svc] = {
           ...next[svc],
@@ -100,6 +113,8 @@ export default function SettingsPage() {
       return next;
     });
   }, []);
+
+  useEffect(() => { document.title = '设置 - 知图复习'; }, []);
 
   // 加载已保存的 keys
   useEffect(() => {
@@ -191,6 +206,7 @@ export default function SettingsPage() {
       llm: "/api/settings/test-llm",
       tts: "/api/settings/test-tts",
       image: "/api/settings/test-image",
+      embedding: "/api/settings/test-embedding",
     };
 
     try {
@@ -349,7 +365,7 @@ export default function SettingsPage() {
                   )}
 
                   {/* LLM / Image: Base URL + Model */}
-                  {(svc === "llm" || svc === "image") && (
+                  {(svc === "llm" || svc === "image" || svc === "embedding") && (
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">Base URL</label>

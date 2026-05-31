@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { MasteryBar } from "@/components/ui/MasteryBar";
 import { ICAP_LABELS } from "@/types";
-import { getQualityLabel, getQualityColor } from "@/lib/sm2";
+import { getQualityColor, getHintLevel, adjustQualityForHint, HINT_LEVEL_LABELS, HINT_LEVEL_DESCRIPTIONS } from "@/lib/sm2";
+import type { HintLevel } from "@/lib/sm2";
 import type { IcapLevel } from "@/types";
 
 interface ReviewTaskCardProps {
@@ -52,6 +53,13 @@ export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
   const [submitting, setSubmitting] = useState(false);
   const [completed, setCompleted] = useState(task.completed || false);
   const [selectedQuality, setSelectedQuality] = useState<number | null>(null);
+  const [hintUsed, setHintUsed] = useState(false);
+  const [hintRevealed, setHintRevealed] = useState(false);
+
+  const node = task.knowledgeNode;
+  const reps = node.repetitions ?? 0;
+  const mastery = node.masteryLevel ?? 0;
+  const hintLevel: HintLevel = getHintLevel(reps, mastery);
 
   if (completed) {
     return (
@@ -71,17 +79,18 @@ export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
     );
   }
 
-  const node = task.knowledgeNode;
   const icapLabel =
     ICAP_LABELS[task.taskType as IcapLevel] || task.taskType;
 
   const handleSelectQuality = async (q: number) => {
-    setSelectedQuality(q);
+    // 使用提示 → 扣减质量分
+    const adjustedQuality = hintUsed ? adjustQualityForHint(q, hintLevel) : q;
+    setSelectedQuality(adjustedQuality);
     setSubmitting(true);
 
     try {
       await new Promise((r) => setTimeout(r, 300)); // 视觉反馈
-      onComplete?.(task.id, q, node.id);
+      onComplete?.(task.id, adjustedQuality, node.id);
       setCompleted(true);
     } catch {
       setSubmitting(false);
@@ -152,6 +161,74 @@ export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
         )}
         {(node.intervalDays ?? 0) > 0 && (
           <span>间隔: {node.intervalDays} 天</span>
+        )}
+      </div>
+
+      {/* 提示系统 — 引导渐隐 (认知负荷理论) */}
+      <div className="mt-3">
+        {!hintRevealed ? (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setHintRevealed(true);
+                setHintUsed(true);
+              }}
+            >
+              <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              显示提示
+            </Button>
+            <span className="text-[11px] text-slate-400">
+              {HINT_LEVEL_LABELS[hintLevel]} · {HINT_LEVEL_DESCRIPTIONS[hintLevel]}
+            </span>
+          </div>
+        ) : (
+          <div className="p-3 rounded-xl bg-amber-50/60 border border-amber-200/60">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="text-[11px] font-semibold text-amber-600 bg-amber-100/70 px-1.5 py-0.5 rounded">
+                {HINT_LEVEL_LABELS[hintLevel]}
+              </span>
+              <span className="text-[11px] text-amber-600/70">
+                {hintUsed && "使用提示会在评分时适当扣减"}
+              </span>
+            </div>
+            {hintLevel === 1 && (
+              <div className="text-sm text-amber-900 mt-1">
+                <p className="font-medium">完整引导：</p>
+                <p className="mt-0.5 text-amber-800/80">
+                  {node.title} — {node.summary}
+                </p>
+                <p className="mt-1 text-xs text-amber-700/60">
+                  试着在脑中还原完整的知识结构和解答步骤
+                </p>
+              </div>
+            )}
+            {hintLevel === 2 && (
+              <div className="text-sm text-amber-900 mt-1">
+                <p className="font-medium">部分引导：</p>
+                <p className="mt-0.5 text-amber-800/80">
+                  核心概念：「{node.title}」
+                </p>
+                <p className="mt-1 text-xs text-amber-700/60">
+                  从这个关键概念出发，尝试自己完成整个推导
+                </p>
+              </div>
+            )}
+            {hintLevel === 3 && (
+              <div className="text-sm text-amber-900 mt-1">
+                <p className="font-medium">最小引导：</p>
+                <p className="mt-0.5 text-amber-800/80">
+                  思考这个知识点属于什么领域？它与哪些概念相关？
+                </p>
+                <p className="mt-1 text-xs text-amber-700/60">
+                  你已经掌握了基础，试着完全独立回忆
+                </p>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

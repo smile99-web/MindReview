@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { llmCallWithLog } from '@/lib/llm-client';
+import { sanitizeJsonString } from '@/lib/utils';
 import { SUBJECT_CONFIG, SUBJECTS } from '@/types';
 import type { IcapLevel, SubjectName } from '@/types';
 
@@ -44,17 +45,6 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
 
 function cleanText(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
-}
-
-function sanitizeJsonString(str: string): string {
-  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (ch) => {
-    if (ch === '\n') return '\\n';
-    if (ch === '\r') return '\\r';
-    if (ch === '\t') return '\\t';
-    if (ch === '\b') return '\\b';
-    if (ch === '\f') return '\\f';
-    return '\\u' + ('000' + ch.charCodeAt(0).toString(16)).slice(-4);
-  });
 }
 
 function parseJsonObject(raw: string): { editionNote?: unknown; chapters?: unknown } {

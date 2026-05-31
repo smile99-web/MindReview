@@ -1,16 +1,5 @@
 import { llmCall } from '@/lib/llm-client';
-
-// ========== LOCAL COPY of sanitizeJsonString (not exported from llm-client.ts) ==========
-function sanitizeJsonString(str: string): string {
-  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (ch) => {
-    if (ch === '\n') return '\\n';
-    if (ch === '\r') return '\\r';
-    if (ch === '\t') return '\\t';
-    if (ch === '\b') return '\\b';
-    if (ch === '\f') return '\\f';
-    return '\\u' + ('000' + ch.charCodeAt(0).toString(16)).slice(-4);
-  });
-}
+import { sanitizeJsonString } from '@/lib/utils';
 
 // ========== TYPES ==========
 

@@ -16,7 +16,7 @@ const FEATURES = [
     title: "AI 智能拆解",
     desc: "输入教材内容，AI 自动拆解为最小可复习知识点，生成关键词、前置知识和典型题型。",
     gradient: "from-indigo-500 to-blue-500",
-    bg: "from-indigo-50 to-blue-50",
+
   },
   {
     icon: (
@@ -27,7 +27,7 @@ const FEATURES = [
     title: "思维导图",
     desc: "可视化知识点之间的包含、前置、对比等关系，支持拖拽缩放，点击节点查看详情。",
     gradient: "from-purple-500 to-violet-500",
-    bg: "from-purple-50 to-violet-50",
+
   },
   {
     icon: (
@@ -38,7 +38,7 @@ const FEATURES = [
     title: "ICAP 分层学习",
     desc: "从被动阅读到互动应用，四个层级精准匹配认知负荷，让每个知识点都得到充分消化。",
     gradient: "from-emerald-500 to-green-500",
-    bg: "from-emerald-50 to-green-50",
+
   },
   {
     icon: (
@@ -49,7 +49,7 @@ const FEATURES = [
     title: "间隔复习调度",
     desc: "基于掌握度自动安排复习计划，次日、3天、7天、14天四档间隔，最大化记忆效率。",
     gradient: "from-amber-500 to-orange-500",
-    bg: "from-amber-50 to-orange-50",
+
   },
   {
     icon: (
@@ -60,7 +60,7 @@ const FEATURES = [
     title: "错题本 + AI 分析",
     desc: "记录错题后 AI 自动分析错因类型（概念/计算/粗心/应用），关联对应知识点查漏补缺。",
     gradient: "from-red-500 to-rose-500",
-    bg: "from-red-50 to-rose-50",
+
   },
   {
     icon: (
@@ -71,7 +71,7 @@ const FEATURES = [
     title: "TTS 语音朗读",
     desc: "点击即可听取知识卡片的语音讲解，支持豆包 TTS 引擎，让听觉辅助记忆。",
     gradient: "from-cyan-500 to-teal-500",
-    bg: "from-cyan-50 to-teal-50",
+
   },
 ];
 

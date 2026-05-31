@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
@@ -9,12 +9,15 @@ import { Button } from '@/components/ui/Button';
 import { MasteryBar } from '@/components/ui/MasteryBar';
 import { DecomposeForm } from '@/components/knowledge/DecomposeForm';
 import { TextbookGenerateForm } from '@/components/knowledge/TextbookGenerateForm';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { authFetch } from '@/lib/auth';
+import { useUserId } from '@/components/auth/AuthProvider';
 import { SUBJECT_CONFIG } from '@/types';
 import type { SubjectName } from '@/types';
 
 export default function SubjectDetailPage() {
   const params = useParams();
+  const userId = useUserId() || '';
   const router = useRouter();
   const id = params.id as string;
 
@@ -29,31 +32,34 @@ export default function SubjectDetailPage() {
   const [deletingNode, setDeletingNode] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'chapter' | 'node'; id: string; title: string } | null>(null);
   const [learningPath, setLearningPath] = useState<any>(null);
+  const [blockedNodes, setBlockedNodes] = useState<any[]>([]);
   const [pathLoading, setPathLoading] = useState(false);
   const [showPath, setShowPath] = useState(false);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [subjRes, chRes, nodeRes] = await Promise.all([
-          fetch(`/api/subjects`),
-          fetch(`/api/chapters?subjectId=${id}`),
-          fetch(`/api/knowledge?subjectId=${id}&limit=100`),
-        ]);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [subjRes, chRes, nodeRes] = await Promise.all([
+        fetch(`/api/subjects`),
+        fetch(`/api/chapters?subjectId=${id}`),
+        fetch(`/api/knowledge?subjectId=${id}&limit=100`),
+      ]);
 
-        const subjects = await subjRes.json();
-        const currentSubject = subjects.find((s: any) => s.id === id);
-        setSubject(currentSubject || null);
-        setChapters(await chRes.json());
-        setNodes((await nodeRes.json()).nodes || []);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
+      const subjects = await subjRes.json();
+      const currentSubject = subjects.find((s: any) => s.id === id);
+      setSubject(currentSubject || null);
+      setChapters(await chRes.json());
+      setNodes((await nodeRes.json()).nodes || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-    load();
   }, [id]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleDeleteChapter = async (chId: string) => {
     setDeletingChapter(chId);
@@ -94,13 +100,20 @@ export default function SubjectDetailPage() {
       const res = await fetch('/api/path/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subjectId: id, userId: 'default-user' }),
+        body: JSON.stringify({ subjectId: id, userId }),
       });
       const data = await res.json();
       setLearningPath(data.path);
+      setBlockedNodes(data.blockedNodes || []);
     } catch { /* ignore */ }
     setPathLoading(false);
   };
+
+  // Build lookup: nodeId -> blockedBy info
+  const blockedMap = new Map<string, any[]>();
+  for (const bn of blockedNodes) {
+    blockedMap.set(bn.nodeId, bn.blockedBy);
+  }
 
   if (loading) {
     return (
@@ -184,7 +197,7 @@ export default function SubjectDetailPage() {
             initialSubject={subject.name as SubjectName}
             onGenerated={() => {
               setShowTextbookGenerate(false);
-              window.location.reload();
+              loadData(); router.refresh();
             }}
           />
         </div>
@@ -195,7 +208,7 @@ export default function SubjectDetailPage() {
           <DecomposeForm
             onDecomposed={(result) => {
               setShowDecompose(false);
-              window.location.reload();
+              loadData(); router.refresh();
             }}
           />
         </div>
@@ -214,39 +227,58 @@ export default function SubjectDetailPage() {
               </div>
             ) : learningPath ? (
               <div className="space-y-0">
-                {learningPath.path?.steps?.map((step: any, i: number) => (
-                  <div key={i} className="flex gap-3">
-                    <div className="flex flex-col items-center flex-shrink-0">
-                      <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-bold">
-                        {i + 1}
+                {learningPath.steps?.map((step: any, i: number) => {
+                  const isLocked = step.locked === true;
+                  const blockedInfo = blockedMap.get(step.nodeId);
+                  const lockTooltip = blockedInfo?.length
+                    ? `需要先掌握: ${blockedInfo.map((b: any) => b.title).join('、')}`
+                    : '需要先掌握前置知识点';
+
+                  return (
+                    <div key={i} className="flex gap-3">
+                      <div className="flex flex-col items-center flex-shrink-0">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                          isLocked ? 'bg-slate-100 text-slate-400' : 'bg-indigo-100 text-indigo-600'
+                        }`}>
+                          {i + 1}
+                        </div>
+                        {i < (learningPath.steps?.length || 0) - 1 && (
+                          <div className={`w-0.5 flex-1 min-h-[16px] ${
+                            isLocked ? 'bg-slate-100' : 'bg-indigo-100'
+                          }`} />
+                        )}
                       </div>
-                      {i < (learningPath.path?.steps?.length || 0) - 1 && (
-                        <div className="w-0.5 flex-1 bg-indigo-100 min-h-[16px]" />
-                      )}
-                    </div>
-                    <div className="pb-5 flex-1 min-w-0">
-                      <Link href={`/cards/${step.nodeId}`} className="font-medium text-slate-800 text-sm hover:text-indigo-600 transition-colors">
-                        {step.title}
-                      </Link>
-                      {step.summary && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{step.summary}</p>}
-                      <div className="flex items-center gap-2 mt-1.5">
-                        <Badge variant="info" size="sm">{step.icapLevel}</Badge>
-                        {step.estimatedMinutes && <span className="text-xs text-slate-400">{step.estimatedMinutes}分钟</span>}
-                        <span className="text-xs text-slate-400">难度 {step.difficulty}</span>
-                        <div className="w-16">
-                          <MasteryBar level={step.masteryLevel} />
+                      <div className="pb-5 flex-1 min-w-0">
+                        {isLocked ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm cursor-default" title={lockTooltip}>🔒</span>
+                            <span className="font-medium text-slate-400 text-sm" title={lockTooltip}>{step.title}</span>
+                          </div>
+                        ) : (
+                          <Link href={`/cards/${step.nodeId}`} className="font-medium text-slate-800 text-sm hover:text-indigo-600 transition-colors">
+                            {step.title}
+                          </Link>
+                        )}
+                        {step.summary && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{step.summary}</p>}
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <Badge variant={isLocked ? 'default' : 'info'} size="sm">{step.icapLevel}</Badge>
+                          {step.estimatedMinutes && <span className="text-xs text-slate-400">{step.estimatedMinutes}分钟</span>}
+                          <span className="text-xs text-slate-400">难度 {step.difficulty}</span>
+                          <div className="w-16">
+                            <MasteryBar level={step.masteryLevel} />
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 <div className="flex gap-3 text-xs text-slate-400 pt-2 border-t border-slate-100">
-                  <span>共 {learningPath.path?.totalSteps || 0} 步</span>
-                  <span>预估 {learningPath.path?.totalEstimatedMinutes || 0} 分钟</span>
+                  <span>共 {learningPath.totalSteps || 0} 步</span>
+                  <span>预估 {learningPath.totalEstimatedMinutes || 0} 分钟</span>
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-slate-400 text-center py-8">暂无学习路径数据</p>
+              <EmptyState icon="🗺️" title="暂无学习路径数据" />
             )}
           </Card>
         </div>

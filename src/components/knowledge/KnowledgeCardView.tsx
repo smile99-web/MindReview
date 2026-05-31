@@ -6,9 +6,11 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { getDifficultyLabel } from '@/lib/utils';
 import { ICAP_LABELS, SUBJECT_CONFIG } from '@/types';
-import type { IcapLevel, SubjectName } from '@/types';
+import type { IcapLevel, SubjectName, WorkedExample } from '@/types';
 import { RepresentationView } from './RepresentationView';
 import { LatexText } from '@/components/ui/LatexText';
+import { BoundaryCallout } from './BoundaryCallout';
+import { progressiveDisclosure } from '@/lib/ui-density';
 
 // 所有可用的表征类型（用于下拉选择）
 const ALL_REPRESENTATION_TYPES = [
@@ -58,6 +60,11 @@ export function KnowledgeCardView({
   const [ttsPlaying, setTtsPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
+  // Progressive disclosure: chunk summary by cognitive load, show expand/collapse
+  const summaryChunked = progressiveDisclosure(node.summary || '', node.cognitiveLoad);
+  const hasHiddenContent = summaryChunked.hidden.length > 0;
+  const [showFullSummary, setShowFullSummary] = useState(false);
+
   // 表征状态 — 父组件统一管理
   const [repType, setRepType] = useState<string>(node.representationType || '');
   const [repData, setRepData] = useState<any>(node.representationData || null);
@@ -76,6 +83,15 @@ export function KnowledgeCardView({
 
   const subjectRepTypes =
     SUBJECT_CONFIG[node.subject?.name as SubjectName]?.representationTypes ?? [];
+
+  // ========== Worked Example interaction state ==========
+  const [weSolutionVisible, setWeSolutionVisible] = useState<Record<string, boolean>>({});
+  const [weStepsExpanded, setWeStepsExpanded] = useState<Record<string, boolean>>({});
+  const [weSimilarVisible, setWeSimilarVisible] = useState<Record<string, boolean>>({});
+  const [weAnswerRevealed, setWeAnswerRevealed] = useState<Record<string, boolean>>({});
+  const [weGenerating, setWeGenerating] = useState(false);
+  const [weError, setWeError] = useState<string | null>(null);
+  const [weResult, setWeResult] = useState<WorkedExample | null>(null);
 
   const handleTTS = async () => {
     if (audioUrl) {
@@ -113,6 +129,57 @@ export function KnowledgeCardView({
       `中学${node.subject?.name || ''}知识点：${node.title}，${node.summary}`,
     );
   };
+
+  /** Generate a worked example for this knowledge node */
+  const handleGenerateWorkedExample = async () => {
+    setWeGenerating(true);
+    setWeError(null);
+
+    try {
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'generate-worked-example',
+          knowledgeNodeId: node.id,
+          subject: node.subject?.name,
+          difficulty: node.difficulty,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `请求失败 (${res.status})`);
+      }
+
+      const data = await res.json();
+      if (data.workedExample) {
+        setWeResult(data.workedExample);
+      }
+    } catch (err: any) {
+      setWeError(err.message || '生成样例失败');
+      console.error('[KnowledgeCardView] Generate worked example failed:', err);
+    } finally {
+      setWeGenerating(false);
+    }
+  };
+
+  /** Parse a knowledge card's content as a WorkedExample */
+  const parseWorkedExample = (content: string): WorkedExample | null => {
+    try {
+      return JSON.parse(content) as WorkedExample;
+    } catch {
+      return null;
+    }
+  };
+
+  // Collect worked examples from existing cards + newly generated
+  const workedExampleCards = (node.knowledgeCards || []).filter(
+    (c: any) => c.cardType === 'worked_example',
+  );
+  const otherCards = (node.knowledgeCards || []).filter(
+    (c: any) => c.cardType !== 'worked_example',
+  );
 
   /** 自动检测 + 生成表征（RepresentationView 的 onDetect 回调） */
   const handleDetect = async () => {
@@ -197,7 +264,15 @@ export function KnowledgeCardView({
           {node.title}
         </h2>
         <div className="text-slate-600 leading-relaxed text-[15px] mb-4">
-          <LatexText text={node.summary || ''} />
+          <LatexText text={showFullSummary ? (node.summary || '') : summaryChunked.visible} />
+          {hasHiddenContent && (
+            <button
+              onClick={() => setShowFullSummary(prev => !prev)}
+              className="block mt-1 text-xs font-medium text-indigo-500 hover:text-indigo-700 transition-colors"
+            >
+              {showFullSummary ? '收起' : '展开更多'}
+            </button>
+          )}
         </div>
 
         {/* 关键词 */}
@@ -233,6 +308,15 @@ export function KnowledgeCardView({
             >
               生成配图
             </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={handleGenerateWorkedExample}
+              loading={weGenerating}
+              disabled={weGenerating}
+            >
+              生成样例
+            </Button>
           </div>
           {generatingImage && (
             <div className="space-y-2">
@@ -263,8 +347,107 @@ export function KnowledgeCardView({
               </div>
             </div>
           )}
+          {weGenerating && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs text-emerald-600">
+                <svg
+                  className="w-3.5 h-3.5 animate-spin"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    className="opacity-25"
+                  />
+                  <path
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    fill="currentColor"
+                    className="opacity-75"
+                  />
+                </svg>
+                AI 正在生成样例教学...
+              </div>
+              <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-400 rounded-full animate-progress" />
+              </div>
+            </div>
+          )}
         </div>
       </Card>
+
+      {/* ========== Worked Example 样例教学 ========== */}
+      {/* Error message */}
+      {weError && !weGenerating && (
+        <Card padding="sm">
+          <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">
+            {weError}
+          </p>
+        </Card>
+      )}
+
+      {/* Newly generated worked example */}
+      {weResult && (
+        <WorkedExampleDisplay
+          example={weResult}
+          cardId="new"
+          solutionVisible={weSolutionVisible['new'] || false}
+          stepsExpanded={weStepsExpanded['new'] || false}
+          similarVisible={weSimilarVisible['new'] || false}
+          answerRevealed={weAnswerRevealed['new'] || false}
+          onToggleSolution={() =>
+            setWeSolutionVisible(prev => {
+              const next = { ...prev, new: !prev['new'] };
+              if (!prev['new']) {
+                // When solution is first revealed, show similar problem section
+                setWeSimilarVisible(s => ({ ...s, new: true }));
+              }
+              return next;
+            })
+          }
+          onToggleSteps={() =>
+            setWeStepsExpanded(prev => ({ ...prev, new: !prev['new'] }))
+          }
+          onRevealAnswer={() =>
+            setWeAnswerRevealed(prev => ({ ...prev, new: !prev['new'] }))
+          }
+        />
+      )}
+
+      {/* Existing saved worked example cards */}
+      {workedExampleCards.map((card: any) => {
+        const we = parseWorkedExample(card.content);
+        if (!we) return null;
+        return (
+          <WorkedExampleDisplay
+            key={card.id}
+            example={we}
+            cardId={card.id}
+            solutionVisible={weSolutionVisible[card.id] || false}
+            stepsExpanded={weStepsExpanded[card.id] || false}
+            similarVisible={weSimilarVisible[card.id] || false}
+            answerRevealed={weAnswerRevealed[card.id] || false}
+            onToggleSolution={() =>
+              setWeSolutionVisible(prev => {
+                const next = { ...prev, [card.id]: !prev[card.id] };
+                if (!prev[card.id]) {
+                  setWeSimilarVisible(s => ({ ...s, [card.id]: true }));
+                }
+                return next;
+              })
+            }
+            onToggleSteps={() =>
+              setWeStepsExpanded(prev => ({ ...prev, [card.id]: !prev[card.id] }))
+            }
+            onRevealAnswer={() =>
+              setWeAnswerRevealed(prev => ({ ...prev, [card.id]: !prev[card.id] }))
+            }
+          />
+        );
+      })}
 
       {/* 表征视图 */}
       <Card>
@@ -321,6 +504,8 @@ export function KnowledgeCardView({
           onDetect={handleDetect}
           onRegenerate={handleRegenerate}
         />
+
+        {repData?.boundary && <BoundaryCallout boundary={repData.boundary as string} />}
       </Card>
 
       {/* 前置知识 */}
@@ -390,9 +575,9 @@ export function KnowledgeCardView({
       )}
 
       {/* 关联知识卡片 */}
-      {node.knowledgeCards && node.knowledgeCards.length > 0 && (
+      {otherCards.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {node.knowledgeCards.map((card: any) => (
+          {otherCards.map((card: any) => (
             <Card key={card.id} padding="sm" hover>
               <div className="text-[11px] text-slate-400 mb-1 uppercase tracking-wide">
                 {card.cardType}
@@ -408,5 +593,197 @@ export function KnowledgeCardView({
         </div>
       )}
     </div>
+  );
+}
+
+// ========== Worked Example Display (sub-component) ==========
+function WorkedExampleDisplay({
+  example,
+  cardId,
+  solutionVisible,
+  stepsExpanded,
+  similarVisible,
+  answerRevealed,
+  onToggleSolution,
+  onToggleSteps,
+  onRevealAnswer,
+}: {
+  example: WorkedExample;
+  cardId: string;
+  solutionVisible: boolean;
+  stepsExpanded: boolean;
+  similarVisible: boolean;
+  answerRevealed: boolean;
+  onToggleSolution: () => void;
+  onToggleSteps: () => void;
+  onRevealAnswer: () => void;
+}) {
+  return (
+    <Card>
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-3">
+        <Badge variant="success">样例教学</Badge>
+        <span className="text-[11px] text-slate-400">
+          认知负荷理论 · 样例→练习
+        </span>
+      </div>
+
+      {/* Problem Statement — always visible, prominent */}
+      <div className="mb-4 p-4 bg-gradient-to-br from-amber-50 to-yellow-50 rounded-xl border border-amber-200/60">
+        <div className="text-[11px] font-semibold text-amber-600 uppercase tracking-wide mb-1.5">
+          例题
+        </div>
+        <p className="text-[15px] text-slate-800 font-medium leading-relaxed">
+          {example.problem}
+        </p>
+      </div>
+
+      {/* Solution Section — initially collapsed per CLT */}
+      {!solutionVisible ? (
+        <div className="text-center py-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onToggleSolution}
+          >
+            <svg
+              className="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+            </svg>
+            查看解答
+          </Button>
+          <p className="text-[11px] text-slate-400 mt-1.5">
+            先尝试自己思考，再查看解答
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Full Solution */}
+          <div className="p-4 bg-indigo-50/50 rounded-xl border border-indigo-100/60">
+            <div className="text-[11px] font-semibold text-indigo-600 uppercase tracking-wide mb-2">
+              完整解答
+            </div>
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+              {example.solution}
+            </p>
+          </div>
+
+          {/* Reasoning Steps — expandable accordion */}
+          {example.reasoningSteps && example.reasoningSteps.length > 0 && (
+            <div>
+              <button
+                onClick={onToggleSteps}
+                className="flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-indigo-600 transition-colors w-full text-left py-1"
+              >
+                <svg
+                  className={`w-4 h-4 transition-transform duration-200 ${stepsExpanded ? 'rotate-90' : ''}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+                逐步推理
+                <span className="text-slate-400">
+                  ({example.reasoningSteps.length} 步)
+                </span>
+                <span className="text-[11px] text-slate-400 ml-1">
+                  {stepsExpanded ? '收起' : '展开'}
+                </span>
+              </button>
+
+              {stepsExpanded && (
+                <div className="mt-3 space-y-3 pl-6 border-l-2 border-indigo-200">
+                  {example.reasoningSteps.map((rs, i) => (
+                    <div key={i} className="relative">
+                      {/* Step number badge */}
+                      <div className="absolute -left-[2.15rem] top-0.5 w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 text-[10px] font-bold flex items-center justify-center">
+                        {rs.step}
+                      </div>
+                      <p className="text-sm text-slate-600 leading-relaxed">
+                        {rs.explanation}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Similar Problem Section — shown after solution is viewed */}
+          {similarVisible && example.similarProblem && (
+            <div className="mt-4 p-4 bg-gradient-to-br from-teal-50 to-emerald-50 rounded-xl border border-teal-200/60">
+              <div className="text-[11px] font-semibold text-teal-600 uppercase tracking-wide mb-1.5">
+                尝试类似题目
+              </div>
+              <p className="text-[15px] text-slate-800 font-medium leading-relaxed mb-3">
+                {example.similarProblem}
+              </p>
+
+              {!answerRevealed ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onRevealAnswer}
+                >
+                  <svg
+                    className="w-3.5 h-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 10.5v5.25m0 2.25h.008v.008H12v-.008zM12 2.25c-5.385 0-10 4.615-10 10s4.615 10 10 10 10-4.615 10-10S17.385 2.25 12 2.25z"
+                    />
+                  </svg>
+                  显示答案
+                </Button>
+              ) : (
+                <div className="bg-white/70 rounded-lg p-3 border border-emerald-200/60">
+                  <div className="text-[11px] font-semibold text-emerald-600 uppercase tracking-wide mb-1">
+                    参考答案
+                  </div>
+                  <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                    {example.similarProblemSolution}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Collapse solution button */}
+          <div className="text-center pt-1">
+            <button
+              onClick={onToggleSolution}
+              className="text-[11px] text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              收起解答
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

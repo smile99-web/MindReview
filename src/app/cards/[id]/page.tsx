@@ -9,15 +9,19 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { LatexText } from '@/components/ui/LatexText';
+import { useUserId } from '@/components/auth/AuthProvider';
 
 export default function KnowledgeCardPage() {
   const params = useParams();
   const router = useRouter();
+  const userId = useUserId() || '';
   const id = params.id as string;
 
   const [node, setNode] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'card' | 'mindmap' | 'practice'>('card');
+  const [practiceAnswers, setPracticeAnswers] = useState<Record<string, string>>({});
+  const [practiceChecked, setPracticeChecked] = useState<Record<string, boolean>>({});
   const [questions, setQuestions] = useState<any[]>([]);
   const [generatingQuestions, setGeneratingQuestions] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -27,6 +31,7 @@ export default function KnowledgeCardPage() {
   const [schemasLoading, setSchemasLoading] = useState(false);
   const [selectedSchemaIds, setSelectedSchemaIds] = useState<Set<string>>(new Set());
   const [buildingSchema, setBuildingSchema] = useState(false);
+  const [unmetPrerequisites, setUnmetPrerequisites] = useState<any[]>([]);
 
   useEffect(() => {
     async function load() {
@@ -36,6 +41,19 @@ export default function KnowledgeCardPage() {
         const data = await res.json();
         setNode(data);
         setQuestions(data.questions || []);
+
+        // Check prerequisites for this node
+        try {
+          const prereqRes = await fetch('/api/path/prerequisites', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nodeIds: [id] }),
+          });
+          const prereqData = await prereqRes.json();
+          if (prereqData.results?.[id] && !prereqData.results[id].canAccess) {
+            setUnmetPrerequisites(prereqData.results[id].blockedBy || []);
+          }
+        } catch { /* ignore */ }
       } catch (err) {
         console.error(err);
       } finally {
@@ -183,6 +201,30 @@ export default function KnowledgeCardPage() {
         <span className="text-slate-600 truncate font-medium">{node.title}</span>
       </div>
 
+      {/* Prerequisite warning banner */}
+      {unmetPrerequisites.length > 0 && (
+        <div className="mb-6 p-4 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50/80 to-yellow-50/80">
+          <div className="flex items-start gap-3">
+            <span className="text-lg shrink-0 mt-0.5">🔒</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-800">建议先复习以下前置知识点：</p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {unmetPrerequisites.map((p: any) => (
+                  <Link
+                    key={p.nodeId}
+                    href={`/cards/${p.nodeId}`}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 text-xs font-medium hover:bg-amber-200 transition-colors"
+                  >
+                    {p.title}
+                    <span className="text-amber-500">({p.masteryLevel}/{p.requiredLevel})</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex gap-1 mb-8 bg-white/60 backdrop-blur rounded-xl p-1 border border-slate-200/60 inline-flex shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
         {tabs.map(tab => (
@@ -286,7 +328,7 @@ export default function KnowledgeCardPage() {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                           knowledgeNodeIds: Array.from(selectedSchemaIds),
-                          userId: 'default-user',
+                          userId,
                         }),
                       });
                       setSelectedSchemaIds(new Set());
@@ -336,7 +378,13 @@ export default function KnowledgeCardPage() {
               </div>
             </Card>
           ) : (
-            questions.map((q: any, i: number) => (
+            questions.map((q: any, i: number) => {
+              const key = `${q.id || i}`;
+              const selectedAnswer = practiceAnswers[key] || '';
+              const isChecked = practiceChecked[key] || false;
+              const isCorrect = isChecked && selectedAnswer === q.answer;
+
+              return (
               <Card key={q.id || i}>
                 <div className="flex items-start gap-3">
                   <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 font-semibold text-sm shrink-0 mt-0.5">
@@ -349,40 +397,94 @@ export default function KnowledgeCardPage() {
 
                     {q.options && Array.isArray(q.options) && q.options.length > 0 && (
                       <div className="space-y-2 mb-4">
-                        {q.options.map((opt: any, j: number) => (
+                        {q.options.map((opt: any, j: number) => {
+                          const isSelected = selectedAnswer === opt.label;
+                          const showResult = isChecked;
+                          let borderClass = 'border-slate-200/80 hover:bg-slate-50 hover:border-slate-300';
+                          if (showResult) {
+                            if (opt.label === q.answer) {
+                              borderClass = 'border-emerald-300 bg-emerald-50/50';
+                            } else if (isSelected && opt.label !== q.answer) {
+                              borderClass = 'border-red-300 bg-red-50/50';
+                            } else {
+                              borderClass = 'border-slate-200/80 opacity-50';
+                            }
+                          } else if (isSelected) {
+                            borderClass = 'border-indigo-300 bg-indigo-50/50';
+                          }
+                          return (
                           <label
                             key={j}
-                            className="flex items-center gap-3 p-3 rounded-xl border border-slate-200/80 hover:bg-slate-50 hover:border-slate-300 cursor-pointer transition-colors"
+                            className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors duration-150 ${borderClass}`}
                           >
-                            <input type="radio" name={`q-${i}`} className="text-indigo-600 w-4 h-4" />
+                            <input
+                              type="radio"
+                              name={`card-q-${key}`}
+                              value={opt.label}
+                              checked={isSelected}
+                              onChange={() => {
+                                if (!isChecked) {
+                                  setPracticeAnswers(prev => ({ ...prev, [key]: opt.label }));
+                                }
+                              }}
+                              disabled={isChecked}
+                              className="text-indigo-600 w-4 h-4"
+                            />
                             <span className="text-xs font-semibold text-slate-400 w-5">{opt.label}.</span>
                             <span className="text-sm text-slate-700">
                               <LatexText text={opt.text || ''} />
                             </span>
                           </label>
-                        ))}
+                        );
+                        })}
                       </div>
                     )}
 
-                    <details className="group">
-                      <summary className="text-sm text-indigo-500 cursor-pointer hover:text-indigo-600 font-medium transition-colors">
-                        查看答案与解析
-                      </summary>
-                      <div className="mt-3 p-4 bg-gradient-to-br from-emerald-50/80 to-green-50/80 rounded-xl border border-emerald-100/60">
-                        <div className="text-sm font-semibold text-emerald-800">
-                          答案: <LatexText text={q.answer || ''} />
+                    {!isChecked && q.options && q.options.length > 0 && (
+                      <button
+                        onClick={() => setPracticeChecked(prev => ({ ...prev, [key]: true }))}
+                        disabled={!selectedAnswer}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                          selectedAnswer
+                            ? 'bg-indigo-500 text-white hover:bg-indigo-600 shadow-sm'
+                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                        }`}
+                      >
+                        检查答案
+                      </button>
+                    )}
+
+                    {isChecked && (
+                      <div className={`mt-3 p-4 rounded-xl border ${
+                        isCorrect
+                          ? 'bg-gradient-to-br from-emerald-50/80 to-green-50/80 border-emerald-100/60'
+                          : 'bg-gradient-to-br from-red-50/80 to-rose-50/80 border-red-100/60'
+                      }`}>
+                        <div className={`text-sm font-semibold ${isCorrect ? 'text-emerald-800' : 'text-red-800'}`}>
+                          {isCorrect ? '✓ 回答正确！' : `✗ 回答错误，正确答案是: `}
+                          {!isCorrect && <LatexText text={q.answer || ''} />}
                         </div>
                         {q.explanation && (
-                          <div className="text-sm text-emerald-700/80 mt-1.5">
+                          <div className={`text-sm mt-1.5 ${isCorrect ? 'text-emerald-700/80' : 'text-red-700/80'}`}>
                             解析: <LatexText text={q.explanation} />
                           </div>
                         )}
+                        <button
+                          onClick={() => {
+                            setPracticeChecked(prev => ({ ...prev, [key]: false }));
+                            setPracticeAnswers(prev => ({ ...prev, [key]: '' }));
+                          }}
+                          className="mt-2 text-xs font-medium text-indigo-500 hover:text-indigo-600 transition-colors"
+                        >
+                          重新作答
+                        </button>
                       </div>
-                    </details>
+                    )}
                   </div>
                 </div>
               </Card>
-            ))
+            );
+            })
           )}
         </div>
       )}
