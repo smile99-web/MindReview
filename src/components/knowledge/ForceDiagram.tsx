@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { BoundaryCallout } from './BoundaryCallout';
 
@@ -152,22 +152,26 @@ export function ForceDiagram({
   // Normalize data: accept both engine format (body + forces) and legacy format (objects)
   const _data = data || {};
 
-  let objects: ForceObject[] = _data.objects || [];
+  const objects: ForceObject[] = useMemo(() => {
+    if (_data.objects && _data.objects.length > 0) return _data.objects;
 
-  // If engine format is provided, wrap it into objects array
-  if (objects.length === 0 && _data.body && _data.forces && _data.forces.length > 0) {
-    objects = [
-      {
-        name: _data.body,
-        forces: _data.forces.map((f) => ({
-          name: f.name,
-          direction: (f.direction as ForceVector['direction']) || 'down',
-          magnitude: f.magnitude,
-          color: (f as any).color,
-        })),
-      },
-    ];
-  }
+    // If engine format is provided, wrap it into objects array
+    if (_data.body && _data.forces && _data.forces.length > 0) {
+      return [
+        {
+          name: _data.body,
+          forces: _data.forces.map((f) => ({
+            name: f.name,
+            direction: (f.direction as ForceVector['direction']) || 'down',
+            magnitude: f.magnitude,
+            color: f.color,
+          })),
+        },
+      ];
+    }
+
+    return [];
+  }, [_data.body, _data.forces, _data.objects]);
 
   const coordinateSystem = _data.coordinateSystem;
   const boundary = _data.boundary;
@@ -179,15 +183,19 @@ export function ForceDiagram({
   const dragSvgRef = useRef<SVGSVGElement | null>(null);
   // Keep a ref to objects so the document-level drag handler reads current data
   const objectsRef = useRef(objects);
-  objectsRef.current = objects;
+  useEffect(() => {
+    objectsRef.current = objects;
+  }, [objects]);
 
   // Reset magnitudes when the underlying data changes
   const dataFingerprint = objects
     .map((o) => o.forces.map((f) => f.magnitude).join(','))
     .join('|');
   useEffect(() => {
-    setMagnitudes({});
-    setDraggingKey(null);
+    queueMicrotask(() => {
+      setMagnitudes({});
+      setDraggingKey(null);
+    });
   }, [dataFingerprint]);
 
   const getScale = useCallback(

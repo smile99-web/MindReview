@@ -1,6 +1,8 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { decomposeKnowledge, llmCallWithLog } from '@/lib/llm-client';
+import { decomposeKnowledge } from '@/lib/llm-client';
+import type { KnowledgeNode } from '@prisma/client';
 
 // POST /api/knowledge/decompose — 知识点拆解
 export async function POST(req: NextRequest) {
@@ -37,16 +39,23 @@ export async function POST(req: NextRequest) {
     if (!result.nodes || !Array.isArray(result.nodes)) {
       return NextResponse.json({ error: 'AI拆解失败，返回格式不正确' }, { status: 500 });
     }
+    const decomposedNodes = result.nodes.filter(
+      (node): node is NonNullable<typeof result.nodes>[number] & { title: string } =>
+        typeof node.title === 'string' && node.title.trim().length > 0,
+    );
+    if (decomposedNodes.length === 0) {
+      return NextResponse.json({ error: 'AI returned no savable knowledge nodes' }, { status: 500 });
+    }
 
     // 4. 在事务中批量创建知识点、边和卡片
     const result2 = await prisma.$transaction(async (tx) => {
-      const createdNodes: any[] = [];
-      for (const node of result.nodes) {
+      const createdNodes: KnowledgeNode[] = [];
+      for (const node of decomposedNodes) {
         const created = await tx.knowledgeNode.create({
           data: {
             subjectId: subjectRecord.id,
             chapterId: chapter.id,
-            title: node.title,
+            title: node.title.trim(),
             summary: node.summary || '',
             keywords: node.keywords || [],
             prerequisites: node.prerequisites || [],
@@ -101,7 +110,7 @@ export async function POST(req: NextRequest) {
             knowledgeNodeId: node.id,
             cardType: 'summary',
             title: node.title,
-            content: node.summary,
+            content: node.summary || '',
           },
         });
       }
@@ -124,7 +133,7 @@ export async function POST(req: NextRequest) {
       nodes: result2,
       count: result2.length,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Knowledge Decompose] Error:', error);
 
     // 记录失败日志
@@ -135,13 +144,13 @@ export async function POST(req: NextRequest) {
           model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
           prompt: '知识点拆解失败',
           status: 'failed',
-          errorMessage: error.message,
+          errorMessage: getErrorMessage(error),
         },
       });
     } catch {}
 
     return NextResponse.json(
-      { error: `知识点拆解失败: ${error.message}` },
+      { error: `知识点拆解失败: ${getErrorMessage(error)}` },
       { status: 500 },
     );
   }

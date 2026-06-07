@@ -1,15 +1,24 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { MasteryBar } from '@/components/ui/MasteryBar';
+import { getErrorMessage } from '@/lib/errors';
 import type { LearnerProfile, RecommendedSettings, ActionableStep } from '@/lib/learner-model';
 
 interface LearnerProfileCardProps {
   userId: string;
   compact?: boolean;
+}
+
+interface LearnerProfileResponse {
+  error?: string;
+  profile?: LearnerProfile;
+  recommendations?: RecommendedSettings;
+  actionableSteps?: ActionableStep[];
 }
 
 // ── Action type icons ──────────────────────────────────────────────────────
@@ -156,24 +165,26 @@ export default function LearnerProfileCard({ userId, compact = false }: LearnerP
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/learner/profile?userId=${encodeURIComponent(userId)}`);
+      const res = await authFetch(`/api/learner/profile?userId=${encodeURIComponent(userId)}`);
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json() as LearnerProfileResponse;
         throw new Error(data.error || 'Failed to load profile');
       }
-      const data = await res.json();
-      setProfile(data.profile);
-      setRecommendations(data.recommendations);
-      setActionableSteps((data.actionableSteps as ActionableStep[]) || []);
-    } catch (err: any) {
-      setError(err.message || '加载失败');
+      const data = await res.json() as LearnerProfileResponse;
+      setProfile(data.profile || null);
+      setRecommendations(data.recommendations || null);
+      setActionableSteps(data.actionableSteps || []);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, '加载失败'));
     } finally {
       setLoading(false);
     }
   }, [userId]);
 
   useEffect(() => {
-    loadProfile();
+    queueMicrotask(() => {
+      void loadProfile();
+    });
   }, [loadProfile]);
 
   if (loading) {
@@ -210,7 +221,7 @@ export default function LearnerProfileCard({ userId, compact = false }: LearnerP
     );
   }
 
-  const { cognitivePreferences, strengthAreas, weaknessAreas, learningVelocity, mistakePatterns, attentionProfile, knowledgeGraphStats, recommendedNextSteps } = profile;
+  const { strengthAreas, weaknessAreas, learningVelocity, mistakePatterns, attentionProfile, knowledgeGraphStats, recommendedNextSteps } = profile;
 
   if (compact) {
     return (

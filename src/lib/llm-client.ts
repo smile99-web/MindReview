@@ -1,9 +1,11 @@
+import { getErrorMessage } from '@/lib/errors';
+import { parseAiJson, runAiTask } from '@/lib/ai-service';
 import OpenAI from 'openai';
 import { prisma } from '@/lib/prisma';
 import { decryptSecret } from '@/lib/secrets';
 import { assertSafeExternalBaseUrl } from '@/lib/url-security';
-import { sanitizeJsonString } from '@/lib/utils';
-import type { WorkedExample, WorkedExampleReasoningStep } from '@/types';
+import type { PrismaClient } from '@prisma/client';
+import type { WorkedExample } from '@/types';
 
 export type LlmRole = 'system' | 'user' | 'assistant';
 
@@ -19,7 +21,220 @@ export interface LlmCallOptions {
   jsonMode?: boolean;
 }
 
+interface DecomposedKnowledgeNode {
+  title?: string;
+  summary?: string;
+  keywords?: string[];
+  prerequisites?: string[];
+  commonMistakes?: string[];
+  typicalQuestions?: string[];
+  difficulty?: number;
+  cognitiveLoad?: number;
+  icapLevel?: string;
+}
+
+interface DecomposedKnowledgeEdge {
+  fromIndex: number;
+  toIndex: number;
+  relationType?: string;
+  label?: string;
+}
+
+export interface DecomposeKnowledgeResult {
+  nodes?: DecomposedKnowledgeNode[];
+  edges?: DecomposedKnowledgeEdge[];
+}
+
+export interface GeneratedQuestion {
+  questionType?: string;
+  icapLevel?: string;
+  stem?: string;
+  question?: string;
+  options?: unknown;
+  answer?: string;
+  explanation?: string;
+  difficulty?: number;
+  cognitiveLoad?: number;
+}
+
+export interface GenerateQuestionsResult {
+  questions?: GeneratedQuestion[];
+}
+
+export interface MistakeAnalysisResult {
+  mistakeType?: string;
+  analysis?: string;
+  relatedKnowledge?: string[];
+  suggestion?: string;
+}
+
+export interface AnswerGradeResult {
+  isCorrect: boolean;
+  score: number;
+  quality: number;
+  feedback: string;
+  confidence: number;
+}
+
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+const LLM_TIMEOUT_MS = Number(process.env.AI_LLM_TIMEOUT_MS || 60_000);
+const LLM_RETRIES = Number(process.env.AI_LLM_RETRIES || 1);
+const VALID_ICAP_LEVELS = ['Passive', 'Active', 'Constructive', 'Interactive'];
+const VALID_RELATION_TYPES = ['contains', 'prerequisite', 'cause', 'compare', 'formula', 'experiment'];
+const VALID_MISTAKE_TYPES = ['conceptual', 'calculation', 'careless', 'application'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return fallback;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asString(item))
+    .filter((item) => item.length > 0);
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(numeric)));
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, numeric));
+}
+
+function normalizeOptions(value: unknown): unknown {
+  if (!Array.isArray(value)) return undefined;
+  const options = value
+    .filter(isRecord)
+    .map((option, index) => ({
+      label: asString(option.label, String.fromCharCode(65 + index)),
+      text: asString(option.text || option.value || option.content),
+    }))
+    .filter((option) => option.text.length > 0);
+  return options.length > 0 ? options : undefined;
+}
+
+function normalizeDecomposeKnowledgeResult(value: unknown): DecomposeKnowledgeResult {
+  const root = isRecord(value) ? value : {};
+  const nodes = Array.isArray(root.nodes)
+    ? root.nodes
+        .filter(isRecord)
+        .map((node): DecomposedKnowledgeNode => ({
+          title: asString(node.title),
+          summary: asString(node.summary),
+          keywords: asStringArray(node.keywords),
+          prerequisites: asStringArray(node.prerequisites),
+          commonMistakes: asStringArray(node.commonMistakes),
+          typicalQuestions: asStringArray(node.typicalQuestions),
+          difficulty: clampInt(node.difficulty, 1, 5, 3),
+          cognitiveLoad: clampInt(node.cognitiveLoad, 1, 5, 3),
+          icapLevel: VALID_ICAP_LEVELS.includes(asString(node.icapLevel))
+            ? asString(node.icapLevel)
+            : 'Active',
+        }))
+        .filter((node) => !!node.title)
+    : [];
+
+  const edges = Array.isArray(root.edges)
+    ? root.edges
+        .filter(isRecord)
+        .map((edge): DecomposedKnowledgeEdge => ({
+          fromIndex: clampInt(edge.fromIndex, 0, Math.max(0, nodes.length - 1), 0),
+          toIndex: clampInt(edge.toIndex, 0, Math.max(0, nodes.length - 1), 0),
+          relationType: VALID_RELATION_TYPES.includes(asString(edge.relationType))
+            ? asString(edge.relationType)
+            : 'contains',
+          label: asString(edge.label),
+        }))
+        .filter((edge) => edge.fromIndex !== edge.toIndex)
+    : [];
+
+  return { nodes, edges };
+}
+
+function normalizeGenerateQuestionsResult(value: unknown): GenerateQuestionsResult {
+  const root = isRecord(value) ? value : {};
+  const questions = Array.isArray(root.questions)
+    ? root.questions
+        .filter(isRecord)
+        .map((question): GeneratedQuestion => {
+          const stem = asString(question.stem || question.question);
+          return {
+            questionType: asString(question.questionType),
+            icapLevel: VALID_ICAP_LEVELS.includes(asString(question.icapLevel))
+              ? asString(question.icapLevel)
+              : undefined,
+            stem,
+            question: stem,
+            options: normalizeOptions(question.options),
+            answer: asString(question.answer),
+            explanation: asString(question.explanation),
+            difficulty: clampInt(question.difficulty, 1, 5, 3),
+            cognitiveLoad: clampInt(question.cognitiveLoad, 1, 5, 3),
+          };
+        })
+        .filter((question) => !!question.stem && !!question.answer)
+    : [];
+
+  return { questions };
+}
+
+function normalizeMistakeAnalysisResult(value: unknown): MistakeAnalysisResult {
+  const root = isRecord(value) ? value : {};
+  const mistakeType = asString(root.mistakeType);
+  return {
+    mistakeType: VALID_MISTAKE_TYPES.includes(mistakeType) ? mistakeType : 'conceptual',
+    analysis: asString(root.analysis),
+    relatedKnowledge: asStringArray(root.relatedKnowledge),
+    suggestion: asString(root.suggestion),
+  };
+}
+
+function normalizeAnswerGradeResult(value: unknown): AnswerGradeResult {
+  const root = isRecord(value) ? value : {};
+  const score = clampNumber(root.score, 0, 1, 0);
+  const quality = clampInt(root.quality, 0, 5, score >= 0.75 ? 4 : score >= 0.5 ? 3 : 1);
+  const isCorrect = typeof root.isCorrect === 'boolean' ? root.isCorrect : score >= 0.65;
+
+  return {
+    isCorrect,
+    score,
+    quality,
+    feedback: asString(root.feedback, isCorrect ? '回答基本正确。' : '答案还不够完整，请对照解析补充关键点。'),
+    confidence: clampNumber(root.confidence, 0, 1, 0.6),
+  };
+}
+
+function normalizeWorkedExample(value: unknown): WorkedExample {
+  const root = isRecord(value) ? value : {};
+  const reasoningSteps = Array.isArray(root.reasoningSteps)
+    ? root.reasoningSteps
+        .filter(isRecord)
+        .map((step, index) => ({
+          step: clampInt(step.step, 1, 20, index + 1),
+          explanation: asString(step.explanation),
+        }))
+        .filter((step) => step.explanation.length > 0)
+    : [];
+
+  return {
+    problem: asString(root.problem),
+    solution: asString(root.solution),
+    reasoningSteps,
+    similarProblem: asString(root.similarProblem),
+    similarProblemSolution: asString(root.similarProblemSolution),
+  };
+}
 
 async function getLlmSettings() {
   const saved = await prisma.apiKey.findUnique({ where: { service: 'llm' } }).catch(() => null);
@@ -46,28 +261,36 @@ export async function llmCall(options: LlmCallOptions): Promise<string> {
       baseURL: settings.baseURL,
     });
 
-    const response = await client.chat.completions.create({
-      model: settings.model,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      })),
-      temperature,
-      max_tokens: maxTokens,
-      response_format: jsonMode ? { type: 'json_object' } : undefined,
-    });
+    const response = await runAiTask(
+      {
+        service: 'llm',
+        operation: 'chat.completions.create',
+        timeoutMs: LLM_TIMEOUT_MS,
+        retries: LLM_RETRIES,
+      },
+      () => client.chat.completions.create({
+        model: settings.model,
+        messages: messages.map(m => ({
+          role: m.role,
+          content: m.content,
+        })),
+        temperature,
+        max_tokens: maxTokens,
+        response_format: jsonMode ? { type: 'json_object' } : undefined,
+      }),
+    );
 
     const content = response.choices[0]?.message?.content || '';
     return content;
-  } catch (error: any) {
-    console.error('[llmCall] Error:', error.message);
-    throw new Error(`LLM调用失败: ${error.message}`);
+  } catch (error: unknown) {
+    console.error('[llmCall] Error:', getErrorMessage(error));
+    throw new Error(`LLM调用失败: ${getErrorMessage(error)}`);
   }
 }
 
 export async function llmCallWithLog(
   options: LlmCallOptions & { generatorType?: string },
-  prisma?: any,
+  prisma?: Pick<PrismaClient, 'aiGenerationLog'>,
 ): Promise<string> {
   const startTime = Date.now();
   const prompt = options.messages.map(m => `[${m.role}] ${m.content}`).join('\n');
@@ -91,7 +314,7 @@ export async function llmCallWithLog(
     }
 
     return response;
-  } catch (error: any) {
+  } catch (error: unknown) {
     const durationMs = Date.now() - startTime;
 
     if (prisma) {
@@ -101,7 +324,7 @@ export async function llmCallWithLog(
           model: settings.model,
           prompt: prompt.slice(0, 4000),
           status: 'failed',
-          errorMessage: error.message,
+          errorMessage: getErrorMessage(error),
           durationMs,
         },
       });
@@ -118,7 +341,7 @@ export async function decomposeKnowledge(
   grade: string,
   chapter: string,
   content: string,
-): Promise<any> {
+): Promise<DecomposeKnowledgeResult> {
   const systemPrompt = `你是一位资深中学${subject}教师，擅长将教材内容拆解为最小可复习知识点。
 
 请将以下内容拆解为知识点列表。每个知识点包含：
@@ -157,7 +380,7 @@ export async function decomposeKnowledge(
     jsonMode: true,
   });
 
-  return JSON.parse(sanitizeJsonString(result));
+  return normalizeDecomposeKnowledgeResult(parseAiJson<unknown>(result, 'decomposeKnowledge'));
 }
 
 // ========== 题目生成 ==========
@@ -168,7 +391,7 @@ export async function generateQuestions(
   questionType: string,
   icapLevel: string,
   count: number = 3,
-): Promise<any> {
+): Promise<GenerateQuestionsResult> {
   const systemPrompt = `你是一位中学${subject}出题专家。请根据知识点生成${count}道${questionType}题目。
 ICAP层级：${icapLevel}
 题目要求：
@@ -189,7 +412,7 @@ ICAP层级：${icapLevel}
     jsonMode: true,
   });
 
-  return JSON.parse(sanitizeJsonString(result));
+  return normalizeGenerateQuestionsResult(parseAiJson<unknown>(result, 'generateQuestions'));
 }
 
 // ========== 错因分析 ==========
@@ -198,7 +421,7 @@ export async function analyzeMistake(
   questionText: string,
   wrongAnswer: string | undefined,
   correctAnswer: string,
-): Promise<any> {
+): Promise<MistakeAnalysisResult> {
   const systemPrompt = `你是一位中学${subject}教师，擅长分析学生的错题原因。
 请分析以下错题，输出JSON：
 {
@@ -219,7 +442,54 @@ export async function analyzeMistake(
     jsonMode: true,
   });
 
-  return JSON.parse(sanitizeJsonString(result));
+  return normalizeMistakeAnalysisResult(parseAiJson<unknown>(result, 'analyzeMistake'));
+}
+
+// ========== 建构类答案判分 ==========
+export async function gradeConstructedAnswer(options: {
+  knowledgeTitle: string;
+  questionText: string;
+  userAnswer: string;
+  correctAnswer: string;
+  explanation?: string | null;
+}, logPrisma?: Pick<PrismaClient, 'aiGenerationLog'>): Promise<AnswerGradeResult> {
+  const systemPrompt = `你是一位严谨的中学教师，正在批改简答题或变式应用题。
+请根据语义而不是字面完全一致来判分。允许学生使用等价表述、等价公式或合理步骤。
+如果答案只命中部分关键点，应给部分分；如果概念方向错误，即使包含少量关键词也应判为不正确。
+
+输出严格 JSON：
+{
+  "isCorrect": true,
+  "score": 0.0,
+  "quality": 0,
+  "feedback": "给学生的一句话中文反馈",
+  "confidence": 0.0
+}
+
+字段要求：
+- score: 0 到 1，表示答案完整度
+- quality: 0 到 5，用于复习调度；0-2 不通过，3 部分掌握，4-5 掌握
+- isCorrect: score >= 0.65 且关键概念没有方向性错误时为 true
+- feedback: 中文，具体指出缺了什么或哪里正确`;
+
+  const userPrompt = `知识点：${options.knowledgeTitle}
+题目：${options.questionText}
+标准答案：${options.correctAnswer}
+解析：${options.explanation || '无'}
+学生答案：${options.userAnswer}`;
+
+  const result = await llmCallWithLog({
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.1,
+    maxTokens: 900,
+    jsonMode: true,
+    generatorType: 'practice_answer_grading',
+  }, logPrisma);
+
+  return normalizeAnswerGradeResult(parseAiJson<unknown>(result, 'gradeConstructedAnswer'));
 }
 
 // ========== 复习总结 ==========
@@ -312,7 +582,7 @@ export async function generateWorkedExample(
     prisma,
   );
 
-  const parsed = JSON.parse(sanitizeJsonString(result)) as WorkedExample;
+  const parsed = normalizeWorkedExample(parseAiJson<unknown>(result, 'generateWorkedExample'));
 
   // Validate the structure
   if (!parsed.problem || !parsed.solution || !Array.isArray(parsed.reasoningSteps)) {

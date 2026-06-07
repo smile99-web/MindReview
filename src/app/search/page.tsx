@@ -1,11 +1,12 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
 import { useState, useCallback, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { getErrorMessage } from '@/lib/errors';
 
 interface SearchResult {
   id: string;
@@ -15,9 +16,12 @@ interface SearchResult {
   score: number;
 }
 
-export default function SearchPage() {
-  const router = useRouter();
+interface SearchResponse {
+  error?: string;
+  results?: SearchResult[];
+}
 
+export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -32,16 +36,17 @@ export default function SearchPage() {
     setSearched(true);
 
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/search?q=${encodeURIComponent(q.trim())}&limit=15`,
       );
       if (!res.ok) {
-        throw new Error((await res.json().catch(() => ({})))?.error || '搜索失败');
+        const data = await res.json().catch(() => ({})) as SearchResponse;
+        throw new Error(data.error || '搜索失败');
       }
-      const data = await res.json();
+      const data = await res.json() as SearchResponse;
       setResults(data.results || []);
-    } catch (err: any) {
-      setError(err.message || '搜索出错');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, '搜索出错'));
       setResults([]);
     } finally {
       setLoading(false);

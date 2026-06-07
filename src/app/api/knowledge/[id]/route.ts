@@ -1,5 +1,13 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
+import type { Prisma } from '@prisma/client';
+
+const nonSchemaNodeConditions: Prisma.KnowledgeNodeWhereInput[] = [
+  { representationType: null },
+  { representationType: { not: 'schema' } },
+];
 
 // GET /api/knowledge/[id] — 获取单个知识点详情
 export async function GET(
@@ -8,6 +16,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const userId = await resolveUserIdFromRequest(req);
     const node = await prisma.knowledgeNode.findUnique({
       where: { id },
       include: {
@@ -19,7 +28,7 @@ export async function GET(
         questions: true,
         outgoingEdges: { include: { to: true } },
         incomingEdges: { include: { from: true } },
-        mistakes: true,
+        mistakes: { where: { userId } },
       },
     });
 
@@ -27,9 +36,48 @@ export async function GET(
       return NextResponse.json({ error: '知识点不存在' }, { status: 404 });
     }
 
-    return NextResponse.json(node);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const siblingWhere: Prisma.KnowledgeNodeWhereInput = {
+      subjectId: node.subjectId,
+      OR: nonSchemaNodeConditions,
+    };
+    if (node.chapterId) {
+      siblingWhere.chapterId = node.chapterId;
+    }
+
+    const siblings = await prisma.knowledgeNode.findMany({
+      where: siblingWhere,
+      select: {
+        id: true,
+        title: true,
+      },
+      orderBy: [
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
+    });
+
+    const currentIndex = siblings.findIndex((item) => item.id === node.id);
+    const scopeLabel = node.chapter?.title || node.subject?.name || '当前知识范围';
+    const navigation = currentIndex >= 0
+      ? {
+          previous: currentIndex > 0 ? siblings[currentIndex - 1] : null,
+          next: currentIndex < siblings.length - 1 ? siblings[currentIndex + 1] : null,
+          index: currentIndex + 1,
+          total: siblings.length,
+          scopeLabel,
+        }
+      : {
+          previous: null,
+          next: null,
+          index: 0,
+          total: siblings.length,
+          scopeLabel,
+        };
+
+    return NextResponse.json({ ...node, navigation });
+  } catch (error: unknown) {
+    const message = getErrorMessage(error);
+    return NextResponse.json({ error: message }, { status: message === 'Authentication required' ? 401 : 500 });
   }
 }
 
@@ -40,6 +88,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    await resolveUserIdFromRequest(req);
     const body = await req.json();
 
     // --- input validation ---
@@ -103,8 +152,9 @@ export async function PATCH(
     });
 
     return NextResponse.json(node);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = getErrorMessage(error);
+    return NextResponse.json({ error: message }, { status: message === 'Authentication required' ? 401 : 500 });
   }
 }
 
@@ -115,9 +165,11 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    await resolveUserIdFromRequest(req);
     await prisma.knowledgeNode.delete({ where: { id } });
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = getErrorMessage(error);
+    return NextResponse.json({ error: message }, { status: message === 'Authentication required' ? 401 : 500 });
   }
 }

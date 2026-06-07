@@ -1,5 +1,7 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 
 // GET /api/knowledge — 获取知识点列表
 export async function GET(req: NextRequest) {
@@ -11,7 +13,7 @@ export async function GET(req: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '50');
 
-    const where: any = {};
+    const where: Prisma.KnowledgeNodeWhereInput = {};
     if (subjectId) where.subjectId = subjectId;
     if (chapterId) where.chapterId = chapterId;
     if (search) {
@@ -37,8 +39,8 @@ export async function GET(req: NextRequest) {
     ]);
 
     return NextResponse.json({ nodes, total, page, limit });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -57,7 +59,7 @@ export async function POST(req: NextRequest) {
 
     const node = await prisma.knowledgeNode.create({ data: body });
     return NextResponse.json(node);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }

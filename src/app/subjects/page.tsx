@@ -40,7 +40,7 @@ export default function SubjectsPage() {
   useEffect(() => { document.title = '学科列表 - 知图复习'; }, []);
 
   useEffect(() => {
-    fetchSubjects();
+    queueMicrotask(fetchSubjects);
   }, [fetchSubjects]);
 
   const handleDecomposed = () => {

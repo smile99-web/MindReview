@@ -1,3 +1,4 @@
+import { getErrorMessage } from '@/lib/errors';
 /**
  * ICAP Enhancement Engine
  *
@@ -102,10 +103,10 @@ function safeJsonParse<T>(raw: string, fallback: T, context?: string): T {
   const cleaned = sanitizeJsonString(raw);
   try {
     return JSON.parse(cleaned) as T;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error(
       `[icap-enhancer] JSON parse error${context ? ` (${context})` : ''}:`,
-      error.message,
+      getErrorMessage(error),
       '\nSanitized input (first 500 chars):',
       cleaned.slice(0, 500),
     );
@@ -117,26 +118,208 @@ function safeJsonParse<T>(raw: string, fallback: T, context?: string): T {
 // Validators (runtime type checks after JSON parse)
 // ---------------------------------------------------------------------------
 
-function isValidConstructiveTask(obj: any): obj is ConstructiveTask {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return fallback;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asString(item))
+    .filter((item) => item.length > 0);
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, numeric));
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  return Math.round(clampNumber(value, min, max, fallback));
+}
+
+function normalizePromptCategory(value: unknown): SelfExplanationPrompt['category'] {
+  const category = asString(value);
+  return ['concept', 'application', 'connection', 'contrast'].includes(category)
+    ? (category as SelfExplanationPrompt['category'])
+    : 'concept';
+}
+
+function normalizeExpectedLength(value: unknown): SelfExplanationPrompt['expectedLength'] {
+  const expectedLength = asString(value);
+  return ['short', 'medium', 'long'].includes(expectedLength)
+    ? (expectedLength as SelfExplanationPrompt['expectedLength'])
+    : 'medium';
+}
+
+function normalizeSeverity(value: unknown): Misconception['severity'] {
+  const severity = asString(value);
+  return ['minor', 'moderate', 'critical'].includes(severity)
+    ? (severity as Misconception['severity'])
+    : 'minor';
+}
+
+function normalizeComprehensionLevel(value: unknown, score: number): ValidationResult['comprehensionLevel'] {
+  const level = asString(value);
+  if (['poor', 'basic', 'good', 'excellent'].includes(level)) {
+    return level as ValidationResult['comprehensionLevel'];
+  }
+  if (score >= 90) return 'excellent';
+  if (score >= 75) return 'good';
+  if (score >= 50) return 'basic';
+  return 'poor';
+}
+
+function normalizeConstructiveTask(value: unknown, fallback: ConstructiveTask): ConstructiveTask {
+  const root = isRecord(value) ? value : {};
+  const selfExplanationPrompts = Array.isArray(root.selfExplanationPrompts)
+    ? root.selfExplanationPrompts
+        .filter(isRecord)
+        .map((prompt, index): SelfExplanationPrompt => ({
+          id: asString(prompt.id, `sep-${index + 1}`),
+          prompt: asString(prompt.prompt),
+          category: normalizePromptCategory(prompt.category),
+          expectedLength: normalizeExpectedLength(prompt.expectedLength),
+        }))
+        .filter((prompt) => prompt.prompt.length > 0)
+    : [];
+
+  const evaluationCriteria = Array.isArray(root.evaluationCriteria)
+    ? root.evaluationCriteria
+        .filter(isRecord)
+        .map((criterion, index): EvaluationCriterion => ({
+          id: asString(criterion.id, `ec-${index + 1}`),
+          criterion: asString(criterion.criterion),
+          weight: clampNumber(criterion.weight, 0, 1, 0),
+          description: asString(criterion.description),
+        }))
+        .filter((criterion) => criterion.criterion.length > 0)
+    : [];
+
+  return {
+    selfExplanationPrompts: selfExplanationPrompts.length > 0
+      ? selfExplanationPrompts
+      : fallback.selfExplanationPrompts,
+    evaluationCriteria: evaluationCriteria.length > 0
+      ? evaluationCriteria
+      : fallback.evaluationCriteria,
+    knowledgeMapTemplate: asString(root.knowledgeMapTemplate, fallback.knowledgeMapTemplate),
+  };
+}
+
+function normalizeInteractiveTask(value: unknown, fallback: InteractiveTask): InteractiveTask {
+  const root = isRecord(value) ? value : {};
+  const socraticQuestions = Array.isArray(root.socraticQuestions)
+    ? root.socraticQuestions
+        .filter(isRecord)
+        .map((question, index): SocraticQuestion => ({
+          id: asString(question.id, `sq-${index + 1}`),
+          round: clampInt(question.round, 1, 10, index + 1),
+          question: asString(question.question),
+          expectedConcepts: asStringArray(question.expectedConcepts),
+          difficulty: clampInt(question.difficulty, 1, 5, 3),
+          followUpIfStuck: asString(question.followUpIfStuck),
+          followUpIfCorrect: asString(question.followUpIfCorrect),
+        }))
+        .filter((question) => question.question.length > 0)
+    : [];
+
+  const variantQuestions = Array.isArray(root.variantQuestions)
+    ? root.variantQuestions
+        .filter(isRecord)
+        .map((question, index): VariantQuestion => ({
+          id: asString(question.id, `vq-${index + 1}`),
+          stem: asString(question.stem),
+          options: Array.isArray(question.options)
+            ? question.options
+                .filter(isRecord)
+                .map((option, optionIndex) => ({
+                  label: asString(option.label, String.fromCharCode(65 + optionIndex)),
+                  text: asString(option.text),
+                }))
+                .filter((option) => option.text.length > 0)
+            : undefined,
+          answer: asString(question.answer),
+          explanation: asString(question.explanation),
+          difficulty: clampInt(question.difficulty, 1, 5, 3),
+          variantOf: asString(question.variantOf),
+        }))
+        .filter((question) => question.stem.length > 0 && question.answer.length > 0)
+    : [];
+
+  const scenarioChallenges = Array.isArray(root.scenarioChallenges)
+    ? root.scenarioChallenges
+        .filter(isRecord)
+        .map((challenge, index): ScenarioChallenge => ({
+          id: asString(challenge.id, `sc-${index + 1}`),
+          scenario: asString(challenge.scenario),
+          task: asString(challenge.task),
+          rubric: asStringArray(challenge.rubric),
+          difficulty: clampInt(challenge.difficulty, 1, 5, 3),
+        }))
+        .filter((challenge) => challenge.scenario.length > 0 && challenge.task.length > 0)
+    : [];
+
+  return {
+    socraticQuestions: socraticQuestions.length > 0 ? socraticQuestions : fallback.socraticQuestions,
+    variantQuestions: variantQuestions.length > 0 ? variantQuestions : fallback.variantQuestions,
+    scenarioChallenges: scenarioChallenges.length > 0 ? scenarioChallenges : fallback.scenarioChallenges,
+  };
+}
+
+function normalizeValidationResult(value: unknown): ValidationResult {
+  const root = isRecord(value) ? value : {};
+  const fallback = getDefaultValidationResult();
+  const score = clampInt(root.score, 0, 100, fallback.score);
+  const misconceptions = Array.isArray(root.misconceptions)
+    ? root.misconceptions
+        .filter(isRecord)
+        .map((misconception): Misconception => ({
+          concept: asString(misconception.concept),
+          studentSaid: asString(misconception.studentSaid),
+          correction: asString(misconception.correction),
+          severity: normalizeSeverity(misconception.severity),
+        }))
+        .filter((misconception) => misconception.concept.length > 0 || misconception.correction.length > 0)
+    : [];
+
+  return {
+    score,
+    comprehensionLevel: normalizeComprehensionLevel(root.comprehensionLevel, score),
+    missingElements: asStringArray(root.missingElements),
+    misconceptions,
+    strengths: asStringArray(root.strengths),
+    suggestions: asStringArray(root.suggestions),
+  };
+}
+
+function isValidConstructiveTask(obj: unknown): obj is ConstructiveTask {
   return (
-    obj &&
+    isRecord(obj) &&
     Array.isArray(obj.selfExplanationPrompts) &&
     Array.isArray(obj.evaluationCriteria) &&
     typeof obj.knowledgeMapTemplate === 'string'
   );
 }
 
-function isValidInteractiveTask(obj: any): obj is InteractiveTask {
+function isValidInteractiveTask(obj: unknown): obj is InteractiveTask {
   return (
-    obj &&
+    isRecord(obj) &&
     Array.isArray(obj.socraticQuestions) &&
     Array.isArray(obj.variantQuestions)
   );
 }
 
-function isValidValidationResult(obj: any): obj is ValidationResult {
+function isValidValidationResult(obj: unknown): obj is ValidationResult {
   return (
-    obj &&
+    isRecord(obj) &&
     typeof obj.score === 'number' &&
     Array.isArray(obj.missingElements) &&
     Array.isArray(obj.misconceptions) &&
@@ -336,11 +519,11 @@ export async function designConstructiveTask(
       jsonMode: true,
     });
 
-    const parsed = safeJsonParse<ConstructiveTask>(
+    const parsed = normalizeConstructiveTask(safeJsonParse<unknown>(
       raw,
       getDefaultConstructiveTask(nodeTitle, nodeSummary || ''),
       `designConstructiveTask: ${nodeTitle}`,
-    );
+    ), getDefaultConstructiveTask(nodeTitle, nodeSummary || ''));
 
     if (!isValidConstructiveTask(parsed)) {
       console.warn('[icap-enhancer] LLM returned invalid ConstructiveTask structure, using fallback');
@@ -358,8 +541,8 @@ export async function designConstructiveTask(
     }
 
     return parsed;
-  } catch (error: any) {
-    console.error('[icap-enhancer] designConstructiveTask error:', error.message);
+  } catch (error: unknown) {
+    console.error('[icap-enhancer] designConstructiveTask error:', getErrorMessage(error));
     return getDefaultConstructiveTask(nodeTitle, nodeSummary || '');
   }
 }
@@ -444,11 +627,11 @@ export async function designInteractiveTask(
       jsonMode: true,
     });
 
-    const parsed = safeJsonParse<InteractiveTask>(
+    const parsed = normalizeInteractiveTask(safeJsonParse<unknown>(
       raw,
       getDefaultInteractiveTask(nodeTitle, subject),
       `designInteractiveTask: ${nodeTitle}`,
-    );
+    ), getDefaultInteractiveTask(nodeTitle, subject));
 
     if (!isValidInteractiveTask(parsed)) {
       console.warn('[icap-enhancer] LLM returned invalid InteractiveTask structure, using fallback');
@@ -461,8 +644,8 @@ export async function designInteractiveTask(
     }
 
     return parsed;
-  } catch (error: any) {
-    console.error('[icap-enhancer] designInteractiveTask error:', error.message);
+  } catch (error: unknown) {
+    console.error('[icap-enhancer] designInteractiveTask error:', getErrorMessage(error));
     return getDefaultInteractiveTask(nodeTitle, subject);
   }
 }
@@ -536,11 +719,11 @@ ${studentText}`;
       jsonMode: true,
     });
 
-    const parsed = safeJsonParse<ValidationResult>(
+    const parsed = normalizeValidationResult(safeJsonParse<unknown>(
       raw,
       getDefaultValidationResult(),
       `validateExplanation: ${nodeTitle}`,
-    );
+    ));
 
     if (!isValidValidationResult(parsed)) {
       console.warn('[icap-enhancer] LLM returned invalid ValidationResult structure, using fallback');
@@ -566,8 +749,8 @@ ${studentText}`;
     }
 
     return parsed;
-  } catch (error: any) {
-    console.error('[icap-enhancer] validateExplanation error:', error.message);
+  } catch (error: unknown) {
+    console.error('[icap-enhancer] validateExplanation error:', getErrorMessage(error));
     return getDefaultValidationResult();
   }
 }

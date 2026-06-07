@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
 
 export async function GET(req: NextRequest) {
   try {
@@ -19,13 +20,10 @@ export async function GET(req: NextRequest) {
       pendingTasks,
       totalMistakes,
       totalQuestions,
-      averageMasteryResult,
+      allNodesForMastery,
       subjects,
       recentNodes,
       dueTasks,
-      lowMastery,
-      mediumMastery,
-      highMastery,
     ] = await Promise.all([
       prisma.knowledgeNode.count(),
       prisma.subject.count(),
@@ -43,7 +41,7 @@ export async function GET(req: NextRequest) {
       prisma.reviewTask.count({ where: { userId, completed: false } }),
       prisma.mistake.count({ where: { userId } }),
       prisma.question.count(),
-      prisma.knowledgeNode.aggregate({ _avg: { masteryLevel: true } }),
+      prisma.knowledgeNode.findMany({ select: { id: true, masteryLevel: true } }),
       prisma.subject.findMany({
         include: {
           _count: {
@@ -70,10 +68,32 @@ export async function GET(req: NextRequest) {
         orderBy: { dueDate: 'asc' },
         take: 5,
       }),
-      prisma.knowledgeNode.count({ where: { masteryLevel: { lt: 34 } } }),
-      prisma.knowledgeNode.count({ where: { masteryLevel: { gte: 34, lt: 67 } } }),
-      prisma.knowledgeNode.count({ where: { masteryLevel: { gte: 67 } } }),
     ]);
+
+    const progressByNodeId = await loadProgressByNodeId(
+      userId,
+      allNodesForMastery.map((node) => node.id),
+      prisma,
+    );
+    const masteryValues = allNodesForMastery.map(
+      (node) => progressByNodeId.get(node.id)?.masteryLevel ?? node.masteryLevel,
+    );
+    const averageMastery =
+      masteryValues.length > 0
+        ? Math.round(masteryValues.reduce((sum, value) => sum + value, 0) / masteryValues.length)
+        : 0;
+    const lowMastery = masteryValues.filter((value) => value < 34).length;
+    const mediumMastery = masteryValues.filter((value) => value >= 34 && value < 67).length;
+    const highMastery = masteryValues.filter((value) => value >= 67).length;
+    const dueTasksWithProgress = dueTasks.map((task) => ({
+      ...task,
+      knowledgeNode: {
+        ...task.knowledgeNode,
+        masteryLevel:
+          progressByNodeId.get(task.knowledgeNode.id)?.masteryLevel ??
+          task.knowledgeNode.masteryLevel,
+      },
+    }));
 
     return NextResponse.json({
       stats: {
@@ -85,11 +105,11 @@ export async function GET(req: NextRequest) {
         pendingTasks,
         totalMistakes,
         totalQuestions,
-        averageMastery: Math.round(averageMasteryResult._avg.masteryLevel ?? 0),
+        averageMastery,
       },
       subjects,
       recentNodes,
-      dueTasks,
+      dueTasks: dueTasksWithProgress,
       masteryDistribution: {
         low: lowMastery,
         medium: mediumMastery,

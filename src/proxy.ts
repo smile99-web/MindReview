@@ -22,6 +22,7 @@ const PUBLIC_API_PREFIXES = [
   "/api/auth/login",
   "/api/auth/register",
   "/api/auth/refresh",
+  "/api/health",
 ];
 const ACCESS_COOKIE = "mindreview_access_token";
 const DEV_JWT_SECRET = "mindreview-dev-secret-change-me";

@@ -1,8 +1,9 @@
-const { PrismaClient } = require('@prisma/client');
-const bcrypt = require('bcryptjs');
-const prisma = new PrismaClient();
-
 async function main() {
+  const { PrismaClient } = await import('@prisma/client');
+  const bcryptModule = await import('bcryptjs');
+  const bcrypt = bcryptModule.default ?? bcryptModule;
+  const prisma = new PrismaClient();
+
   console.log('🌱 Seeding database...');
 
   const hash = await bcrypt.hash('password123', 10);

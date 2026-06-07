@@ -47,18 +47,21 @@ export function CausalChainView({
   error = null,
   onGenerate,
 }: CausalChainViewProps) {
-  const _data = data || {};
-  const nodes = _data.nodes || [];
-  const edges = _data.edges || _data.chains || [];
+  const _data = useMemo(() => data || {}, [data]);
+  const nodes = useMemo(() => _data.nodes || [], [_data.nodes]);
+  const edges = useMemo(() => _data.edges || _data.chains || [], [_data.edges, _data.chains]);
   const boundary = _data.boundary;
   const hasData = nodes.length > 0;
 
   // Build adjacency map for display ordering
-  const childrenOf: Record<number, number[]> = {};
-  for (const edge of edges) {
-    if (!childrenOf[edge.from]) childrenOf[edge.from] = [];
-    childrenOf[edge.from].push(edge.to);
-  }
+  const childrenOf = useMemo(() => {
+    const map: Record<number, number[]> = {};
+    for (const edge of edges) {
+      if (!map[edge.from]) map[edge.from] = [];
+      map[edge.from].push(edge.to);
+    }
+    return map;
+  }, [edges]);
 
   // ---- Interactive state: what-if parameter toggle ----
   const [hiddenEffects, setHiddenEffects] = useState<Set<number>>(new Set());
@@ -69,7 +72,9 @@ export function CausalChainView({
     '::' +
     edges.map((e) => `${e.from}-${e.to}`).join(',');
   useEffect(() => {
-    setHiddenEffects(new Set());
+    queueMicrotask(() => {
+      setHiddenEffects(new Set());
+    });
   }, [dataFingerprint]);
 
   // Compute full downstream set for each node (all reachable nodes via edges)

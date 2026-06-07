@@ -1,3 +1,4 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
@@ -67,10 +68,10 @@ export async function POST(req: NextRequest) {
       representationType: repType,
       representationData: repData,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Representation Generate] Error:', error);
     return NextResponse.json(
-      { error: `表征生成失败: ${error.message}` },
+      { error: `表征生成失败: ${getErrorMessage(error)}` },
       { status: 500 },
     );
   }

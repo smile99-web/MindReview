@@ -13,6 +13,46 @@ type RepresentationData = Record<string, unknown>;
 /** Canonical representation types that can be compared side by side */
 type RType = 'formula' | 'force' | 'timeline' | 'reaction' | 'causal' | 'concept' | 'step' | 'viewpoint';
 
+function isRecord(value: unknown): value is RepresentationData {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asRecordArray(value: unknown): RepresentationData[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function asString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  return undefined;
+}
+
+function asNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.map((item) => asString(item)).filter((item): item is string => !!item);
+}
+
+function hasValue(data: RepresentationData, key: string): boolean {
+  return data[key] !== undefined && data[key] !== null;
+}
+
+function firstString(data: RepresentationData, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = asString(data[key]);
+    if (value) return value;
+  }
+  return undefined;
+}
+
 interface RepresentationViewProps {
   node: {
     id?: string;
@@ -244,7 +284,7 @@ export function RepresentationView({
 
     // --- Type-based routing (generic) ---
 
-    if (type === 'formula' || type === 'step' || (data as any).formula || (data as any).latex || (data as any).steps) {
+    if (type === 'formula' || type === 'step' || hasValue(data, 'formula') || hasValue(data, 'latex') || hasValue(data, 'steps')) {
       return (
         <FormulaView
           data={data as FormulaViewData}
@@ -254,7 +294,7 @@ export function RepresentationView({
         />
       );
     }
-    if (type === 'force' || (data as any).forces || (data as any).body) {
+    if (type === 'force' || hasValue(data, 'forces') || hasValue(data, 'body')) {
       return (
         <ForceDiagram
           data={data as ForceDiagramData}
@@ -264,7 +304,7 @@ export function RepresentationView({
         />
       );
     }
-    if (type === 'timeline' || (data as any).events) {
+    if (type === 'timeline' || hasValue(data, 'events')) {
       return (
         <TimelineView
           data={data as TimelineViewData}
@@ -274,7 +314,7 @@ export function RepresentationView({
         />
       );
     }
-    if (type === 'reaction' || (data as any).reactants || (data as any).equation) {
+    if (type === 'reaction' || hasValue(data, 'reactants') || hasValue(data, 'equation')) {
       return (
         <ReactionView
           data={data as ReactionViewData}
@@ -284,7 +324,7 @@ export function RepresentationView({
         />
       );
     }
-    if (type === 'causal' || ((data as any).nodes && ((data as any).edges || (data as any).chains))) {
+    if (type === 'causal' || (hasValue(data, 'nodes') && (hasValue(data, 'edges') || hasValue(data, 'chains')))) {
       return (
         <CausalChainView
           data={data as CausalChainData}
@@ -303,19 +343,22 @@ export function RepresentationView({
       type === 'concept_map' ||
       type === 'mindmap'
     ) {
-      const d = data as any;
+      const concepts = asRecordArray(data.concepts);
+      const relations = asRecordArray(data.relations);
+      const dimensions = asStringArray(data.dimensions) || [];
+      const items = asRecordArray(data.items);
 
       // concept_map / mindmap: has concepts + relations → adapt to CausalChainView
-      if (d.concepts && d.relations) {
+      if (concepts.length > 0 && relations.length > 0) {
         const adapted: CausalChainData = {
-          nodes: d.concepts.map((c: any) => ({
-            event: c.name,
-            description: c.description,
+          nodes: concepts.map((concept) => ({
+            event: asString(concept.name) || '',
+            description: asString(concept.description),
           })),
-          edges: (d.relations || []).map((r: any) => ({
-            from: r.from,
-            to: r.to,
-            label: r.label,
+          edges: relations.map((relation) => ({
+            from: asNumber(relation.from),
+            to: asNumber(relation.to),
+            label: asString(relation.label),
           })),
         };
         return (
@@ -329,10 +372,10 @@ export function RepresentationView({
       }
 
       // template: has template / slots → adapt to FormulaView
-      if (d.template || d.slots) {
+      if (hasValue(data, 'template') || hasValue(data, 'slots')) {
         const adapted: FormulaViewData = {
-          formula: d.template,
-          steps: d.steps || d.slots,
+          formula: asString(data.template),
+          steps: asStringArray(data.steps) || asStringArray(data.slots),
         };
         return (
           <FormulaView
@@ -345,14 +388,17 @@ export function RepresentationView({
       }
 
       // comparison: has dimensions + items → adapt to CausalChainView
-      if (d.dimensions && d.items) {
+      if (dimensions.length > 0 && items.length > 0) {
         const adapted: CausalChainData = {
-          nodes: (d.items || []).map((item: any) => ({
-            event: item.name,
-            description: (d.dimensions || [])
-              .map((dim: string, i: number) => `${dim}: ${item.values?.[i] ?? '-'}`)
-              .join('; '),
-          })),
+          nodes: items.map((item) => {
+            const values = Array.isArray(item.values) ? item.values : [];
+            return {
+              event: asString(item.name) || '',
+              description: dimensions
+                .map((dim, i) => `${dim}: ${asString(values[i]) ?? '-'}`)
+                .join('; '),
+            };
+          }),
           edges: [],
         };
         return (
@@ -367,7 +413,7 @@ export function RepresentationView({
     }
 
     // --- Final fallback: inspect data shape ---
-    if ((data as any).formula || (data as any).latex || (data as any).steps) {
+    if (hasValue(data, 'formula') || hasValue(data, 'latex') || hasValue(data, 'steps')) {
       return (
         <FormulaView
           data={data as FormulaViewData}
@@ -377,7 +423,7 @@ export function RepresentationView({
         />
       );
     }
-    if ((data as any).events) {
+    if (hasValue(data, 'events')) {
       return (
         <TimelineView
           data={data as TimelineViewData}
@@ -387,7 +433,7 @@ export function RepresentationView({
         />
       );
     }
-    if ((data as any).reactants || (data as any).equation) {
+    if (hasValue(data, 'reactants') || hasValue(data, 'equation')) {
       return (
         <ReactionView
           data={data as ReactionViewData}
@@ -397,7 +443,7 @@ export function RepresentationView({
         />
       );
     }
-    if ((data as any).nodes && ((data as any).edges || (data as any).chains)) {
+    if (hasValue(data, 'nodes') && (hasValue(data, 'edges') || hasValue(data, 'chains'))) {
       return (
         <CausalChainView
           data={data as CausalChainData}
@@ -430,13 +476,17 @@ export function RepresentationView({
   // Render the *alternate* representation type using the same data object.
   // This re-interprets the existing representationData through a different view component.
   const renderAlternateView = () => {
-    const d = data as any;
+    const d = data;
 
     if (compareType === 'formula') {
       const adapted: FormulaViewData = {
-        formula: d.formula || d.latex || d.equation || null,
-        steps: d.steps || null,
-        variables: d.variables || d.symbols || null,
+        formula: firstString(d, ['formula', 'latex', 'equation']),
+        steps: asStringArray(d.steps),
+        variables: Array.isArray(d.variables)
+          ? d.variables as FormulaViewData['variables']
+          : Array.isArray(d.symbols)
+            ? d.symbols as FormulaViewData['variables']
+            : undefined,
       };
       return (
         <FormulaView
@@ -450,9 +500,9 @@ export function RepresentationView({
 
     if (compareType === 'step') {
       const adapted: FormulaViewData = {
-        formula: d.result || d.conclusion || null,
-        steps: d.steps || (d.solution ? [{ step: 1, content: d.solution }] : null),
-        variables: d.variables || null,
+        formula: firstString(d, ['result', 'conclusion']),
+        steps: asStringArray(d.steps) || (asString(d.solution) ? [asString(d.solution) as string] : undefined),
+        variables: Array.isArray(d.variables) ? d.variables as FormulaViewData['variables'] : undefined,
       };
       return (
         <FormulaView
@@ -466,11 +516,11 @@ export function RepresentationView({
 
     if (compareType === 'force') {
       const adapted: ForceDiagramData = {
-        body: d.body || node.title,
-        forces: d.forces || [],
-        coordinateSystem: d.coordinateSystem,
-        boundary: d.boundary,
-        objects: d.objects,
+        body: firstString(d, ['body']) || node.title,
+        forces: Array.isArray(d.forces) ? d.forces as ForceDiagramData['forces'] : [],
+        coordinateSystem: asString(d.coordinateSystem),
+        boundary: asString(d.boundary),
+        objects: Array.isArray(d.objects) ? d.objects as ForceDiagramData['objects'] : undefined,
       };
       return (
         <ForceDiagram
@@ -484,7 +534,7 @@ export function RepresentationView({
 
     if (compareType === 'timeline') {
       const adapted: TimelineViewData = {
-        events: d.events || (d.nodes ? d.events : []),
+        events: Array.isArray(d.events) ? d.events as TimelineViewData['events'] : [],
       };
       return (
         <TimelineView
@@ -498,10 +548,10 @@ export function RepresentationView({
 
     if (compareType === 'reaction') {
       const adapted: ReactionViewData = {
-        equation: d.equation || d.formula || null,
-        reactants: d.reactants || [],
-        products: d.products || [],
-        conditions: d.conditions || null,
+        equation: firstString(d, ['equation', 'formula']),
+        reactants: asStringArray(d.reactants) || [],
+        products: asStringArray(d.products) || [],
+        conditions: asString(d.conditions),
       };
       return (
         <ReactionView
@@ -514,9 +564,17 @@ export function RepresentationView({
     }
 
     if (compareType === 'causal') {
+      const eventNodes = asRecordArray(d.events).map((event) => ({
+        event: firstString(event, ['name', 'title']) || '',
+        description: firstString(event, ['description', 'date']) || '',
+      }));
       const adapted: CausalChainData = {
-        nodes: d.nodes || (d.events ? d.events.map((e: any) => ({ event: e.name || e.title, description: e.description || e.date || '' })) : []),
-        edges: d.edges || d.chains || [],
+        nodes: Array.isArray(d.nodes) ? d.nodes as CausalChainData['nodes'] : eventNodes,
+        edges: Array.isArray(d.edges)
+          ? d.edges as CausalChainData['edges']
+          : Array.isArray(d.chains)
+            ? d.chains as CausalChainData['edges']
+            : [],
       };
       return (
         <CausalChainView
@@ -529,11 +587,17 @@ export function RepresentationView({
     }
 
     if (compareType === 'concept') {
+      const applications = asStringArray(d.applications);
+      const examples = asStringArray(d.examples);
       const adapted: FormulaViewData = {
-        formula: d.definition || d.concept || null,
-        variables: d.properties || d.attributes || null,
-        steps: d.applications || d.examples
-          ? [String((Array.isArray(d.applications) ? d.applications : d.examples || []).join(' | '))]
+        formula: firstString(d, ['definition', 'concept']),
+        variables: Array.isArray(d.properties)
+          ? d.properties as FormulaViewData['variables']
+          : Array.isArray(d.attributes)
+            ? d.attributes as FormulaViewData['variables']
+            : undefined,
+        steps: applications || examples
+          ? [(applications || examples || []).join(' | ')]
           : undefined,
       };
       return (
@@ -547,10 +611,14 @@ export function RepresentationView({
     }
 
     if (compareType === 'viewpoint') {
+      const viewpoints = asRecordArray(d.viewpoints);
       const adapted: CausalChainData = {
-        nodes: d.viewpoints
-          ? d.viewpoints.map((v: any) => ({ event: v.name || v.stance, description: v.reason || v.content || '' }))
-          : [{ event: node.title, description: d.summary || node.summary || '' }],
+        nodes: viewpoints.length > 0
+          ? viewpoints.map((viewpoint) => ({
+            event: firstString(viewpoint, ['name', 'stance']) || '',
+            description: firstString(viewpoint, ['reason', 'content']) || '',
+          }))
+          : [{ event: node.title, description: asString(d.summary) || node.summary || '' }],
         edges: [],
       };
       return (
@@ -567,7 +635,7 @@ export function RepresentationView({
     return (
       <FormulaView
         data={{
-          formula: d.summary || node.summary || '无可用数据',
+          formula: asString(d.summary) || node.summary || '无可用数据',
           variables: Object.entries(d)
             .filter(([, v]) => typeof v === 'string' || typeof v === 'number')
             .map(([k, v]) => ({ symbol: k, name: String(v) })),

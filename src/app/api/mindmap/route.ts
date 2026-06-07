@@ -1,5 +1,12 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
+
+const nonSchemaNodeConditions: Prisma.KnowledgeNodeWhereInput[] = [
+  { representationType: null },
+  { representationType: { not: 'schema' } },
+];
 
 // GET /api/mindmap?subjectId=xxx&chapterId=xxx — 获取思维导图数据
 export async function GET(req: NextRequest) {
@@ -10,13 +17,13 @@ export async function GET(req: NextRequest) {
     const rootId = searchParams.get('rootId');
     const includeSchemas = searchParams.get('includeSchemas') === 'true';
 
-    const baseWhere: any = {};
+    const baseWhere: Prisma.KnowledgeNodeWhereInput = {};
     if (subjectId) baseWhere.subjectId = subjectId;
     if (chapterId) baseWhere.chapterId = chapterId;
     if (rootId) baseWhere.parentId = rootId;
 
     // Build the where clause with proper schema filtering
-    const conditions: any[] = [];
+    const conditions: Prisma.KnowledgeNodeWhereInput[] = [];
     if (subjectId || chapterId || rootId) {
       conditions.push({ ...baseWhere });
     }
@@ -24,16 +31,16 @@ export async function GET(req: NextRequest) {
       conditions.push({ representationType: 'schema' });
     }
 
-    let where: any;
+    let where: Prisma.KnowledgeNodeWhereInput;
     if (conditions.length === 0) {
       where = includeSchemas
         ? { representationType: 'schema' }
-        : { representationType: { not: 'schema' } };
+        : { OR: nonSchemaNodeConditions };
     } else if (conditions.length === 1) {
       where = conditions[0];
       // If we have subjectId/chapterId/rootId but not includeSchemas, exclude schemas
       if (!includeSchemas) {
-        where = { ...where, representationType: { not: 'schema' } };
+        where = { ...where, OR: nonSchemaNodeConditions };
       }
     } else {
       where = { OR: conditions };
@@ -60,8 +67,8 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json({ nodes, edges });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -69,6 +76,74 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+
+    if (body.action === 'generate-relations') {
+      const subjectId = typeof body.subjectId === 'string' ? body.subjectId.trim() : '';
+      const chapterId = typeof body.chapterId === 'string' ? body.chapterId.trim() : '';
+
+      if (!subjectId && !chapterId) {
+        return NextResponse.json({ error: 'subjectId 或 chapterId 至少需要一个' }, { status: 400 });
+      }
+
+      const where: Prisma.KnowledgeNodeWhereInput = {
+        OR: nonSchemaNodeConditions,
+      };
+      if (subjectId) where.subjectId = subjectId;
+      if (chapterId) where.chapterId = chapterId;
+
+      const nodes = await prisma.knowledgeNode.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          chapterId: true,
+          createdAt: true,
+        },
+        orderBy: [
+          { chapterId: 'asc' },
+          { createdAt: 'asc' },
+        ],
+      });
+
+      const byChapter = new Map<string, typeof nodes>();
+      for (const node of nodes) {
+        const key = node.chapterId || 'uncategorized';
+        byChapter.set(key, [...(byChapter.get(key) || []), node]);
+      }
+
+      let created = 0;
+      for (const chapterNodes of byChapter.values()) {
+        for (let index = 0; index < chapterNodes.length - 1; index += 1) {
+          const fromNode = chapterNodes[index];
+          const toNode = chapterNodes[index + 1];
+          const existing = await prisma.knowledgeEdge.findFirst({
+            where: {
+              fromId: fromNode.id,
+              toId: toNode.id,
+              relationType: 'prerequisite',
+            },
+          });
+
+          if (!existing) {
+            await prisma.knowledgeEdge.create({
+              data: {
+                fromId: fromNode.id,
+                toId: toNode.id,
+                relationType: 'prerequisite',
+                label: `${fromNode.title} → ${toNode.title}`,
+              },
+            });
+            created += 1;
+          }
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        created,
+        nodeCount: nodes.length,
+      });
+    }
 
     // Validate required fields
     if (typeof body.fromId !== 'string' || body.fromId.trim() === '') {
@@ -87,7 +162,7 @@ export async function POST(req: NextRequest) {
 
     const edge = await prisma.knowledgeEdge.create({ data: body });
     return NextResponse.json(edge);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }

@@ -1,5 +1,7 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 
 type SchemaMember = { id: string; title: string; masteryLevel: number };
 type SchemaNodeForList = {
@@ -26,7 +28,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const subjectId = searchParams.get('subjectId');
 
-    const where: any = {
+    const where: Prisma.KnowledgeNodeWhereInput = {
       representationType: 'schema',
     };
     if (subjectId) {
@@ -83,8 +85,8 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json({ schemas });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Schema List API] Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }

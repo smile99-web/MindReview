@@ -1,8 +1,14 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { generateQuestions } from '@/lib/llm-client';
+import { generateQuestions, gradeConstructedAnswer } from '@/lib/llm-client';
 import { sm2 } from '@/lib/sm2';
-import { resolveUserId, resolveUserIdFromRequest } from '@/lib/user-context';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
+import {
+  getOrCreateUserKnowledgeProgress,
+  updateUserKnowledgeProgress,
+} from '@/lib/user-knowledge-progress';
+import type { Prisma } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,6 +65,36 @@ interface CompareResult {
   normalizedCorrect: string;
 }
 
+interface PracticeGradeResult {
+  isCorrect: boolean;
+  quality: number;
+  feedback: string | null;
+  source: 'rule' | 'ai' | 'self';
+}
+
+type PracticeQuestion = Awaited<ReturnType<typeof prisma.question.findMany>>[number];
+
+interface GeneratedQuestion {
+  questionType?: string;
+  stem?: string;
+  options?: Prisma.QuestionCreateInput['options'];
+  answer?: string;
+  explanation?: string;
+  difficulty?: number;
+  cognitiveLoad?: number;
+}
+
+interface PracticeRequestBody {
+  action?: unknown;
+  knowledgeNodeId?: unknown;
+  icapLevel?: unknown;
+  count?: unknown;
+  questionId?: unknown;
+  userAnswer?: unknown;
+  durationSeconds?: unknown;
+  selfQuality?: unknown;
+}
+
 function compareAnswer(
   userAnswer: string,
   correctAnswer: string,
@@ -111,6 +147,79 @@ function qualityFromCorrectness(isCorrect: boolean, selfQuality?: number | null)
   return isCorrect ? 4 : 1;
 }
 
+function shouldUseAiGrading(questionType: string): boolean {
+  return questionType === 'short_answer' || questionType === 'variant';
+}
+
+function buildPracticeContext(knowledgeNode: {
+  summary: string | null;
+  representationType?: string | null;
+  outgoingEdges?: Array<{ to: { title: string; summary: string | null } }>;
+}): string {
+  const schemaMemberContext = knowledgeNode.representationType === 'schema'
+    ? (knowledgeNode.outgoingEdges || [])
+      .map((edge, index) => `${index + 1}. ${edge.to.title}: ${edge.to.summary || ''}`.trim())
+      .join('\n')
+    : '';
+
+  return [
+    knowledgeNode.summary || '',
+    schemaMemberContext ? `图式成员知识点：\n${schemaMemberContext}` : '',
+  ].filter(Boolean).join('\n\n');
+}
+
+async function gradePracticeAnswer(options: {
+  question: {
+    questionType: string;
+    stem: string;
+    answer: string;
+    explanation: string | null;
+    knowledgeNode: { title: string };
+  };
+  userAnswer: string;
+  selfQuality: number | null;
+}): Promise<PracticeGradeResult> {
+  const ruleResult = compareAnswer(
+    options.userAnswer,
+    options.question.answer,
+    options.question.questionType,
+  );
+
+  if (!shouldUseAiGrading(options.question.questionType)) {
+    return {
+      isCorrect: ruleResult.isCorrect,
+      quality: qualityFromCorrectness(ruleResult.isCorrect, options.selfQuality),
+      feedback: null,
+      source: options.selfQuality !== null ? 'self' : 'rule',
+    };
+  }
+
+  try {
+    const aiGrade = await gradeConstructedAnswer({
+      knowledgeTitle: options.question.knowledgeNode.title,
+      questionText: options.question.stem,
+      userAnswer: options.userAnswer,
+      correctAnswer: options.question.answer,
+      explanation: options.question.explanation,
+    }, prisma);
+
+    return {
+      isCorrect: aiGrade.isCorrect,
+      quality: qualityFromCorrectness(aiGrade.isCorrect, options.selfQuality ?? aiGrade.quality),
+      feedback: aiGrade.feedback,
+      source: options.selfQuality !== null ? 'self' : 'ai',
+    };
+  } catch (error: unknown) {
+    console.warn('[practice POST] AI grading failed; falling back to rule grading:', getErrorMessage(error));
+    return {
+      isCorrect: ruleResult.isCorrect,
+      quality: qualityFromCorrectness(ruleResult.isCorrect, options.selfQuality),
+      feedback: null,
+      source: options.selfQuality !== null ? 'self' : 'rule',
+    };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/practice
 // Query: ?knowledgeNodeId=xxx&icapLevel=Active&count=3&forceGenerate=false
@@ -119,6 +228,16 @@ function qualityFromCorrectness(isCorrect: boolean, selfQuality?: number | null)
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
+    const action = searchParams.get('action');
+    if (action === 'recommendations') {
+      return handlePracticeRecommendations(await resolveUserIdFromRequest(req));
+    }
+    if (action === 'history') {
+      return handlePracticeHistory(await resolveUserIdFromRequest(req));
+    }
+
+    await resolveUserIdFromRequest(req);
+
     const knowledgeNodeId = searchParams.get('knowledgeNodeId');
     const icapLevelRaw = searchParams.get('icapLevel') || 'Active';
     const count = Math.min(parseInt(searchParams.get('count') || '3', 10) || 3, 10);
@@ -149,7 +268,19 @@ export async function GET(req: NextRequest) {
         id: true,
         title: true,
         summary: true,
+        representationType: true,
         subject: { select: { name: true } },
+        outgoingEdges: {
+          where: { relationType: 'schema_member' },
+          select: {
+            to: {
+              select: {
+                title: true,
+                summary: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -158,7 +289,7 @@ export async function GET(req: NextRequest) {
     }
 
     // --- fetch existing questions from DB ---
-    let existingQuestions: any[] = [];
+    let existingQuestions: PracticeQuestion[] = [];
     if (!forceGenerate) {
       existingQuestions = await prisma.question.findMany({
         where: { knowledgeNodeId, icapLevel },
@@ -177,25 +308,25 @@ export async function GET(req: NextRequest) {
       try {
         const llmResult = await generateQuestions(
           knowledgeNode.title,
-          knowledgeNode.summary || '',
+          buildPracticeContext(knowledgeNode),
           knowledgeNode.subject?.name || '通用',
           questionTypeDesc,
           icapLevel,
           needed,
         );
 
-        const generated = (llmResult.questions || []).slice(0, needed);
+        const generated = ((llmResult.questions || []) as GeneratedQuestion[]).slice(0, needed);
 
         // Persist generated questions
         const savedQuestions = await Promise.all(
-          generated.map((q: any) =>
+          generated.map((q) =>
             prisma.question.create({
               data: {
                 knowledgeNodeId,
                 questionType: q.questionType || questionTypeDesc || 'multiple_choice',
                 icapLevel,
                 stem: q.stem || '',
-                options: q.options || null,
+                options: q.options ?? undefined,
                 answer: q.answer || '',
                 explanation: q.explanation || '',
                 difficulty: q.difficulty ?? 3,
@@ -206,14 +337,14 @@ export async function GET(req: NextRequest) {
         );
 
         questions = forceGenerate ? savedQuestions : [...existingQuestions, ...savedQuestions];
-      } catch (llmError: any) {
-        console.error('[practice GET] LLM generation failed:', llmError.message);
+      } catch (llmError: unknown) {
+        console.error('[practice GET] LLM generation failed:', getErrorMessage(llmError));
 
         if (existingQuestions.length === 0) {
           return NextResponse.json(
             {
               error: 'Question generation failed and no cached questions are available.',
-              detail: llmError.message,
+              detail: getErrorMessage(llmError),
             },
             { status: 503 },
           );
@@ -234,9 +365,13 @@ export async function GET(req: NextRequest) {
       icapLevel,
       total: questions.length,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[practice GET]', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    const message = getErrorMessage(error, 'Internal server error');
+    return NextResponse.json(
+      { error: message },
+      { status: message === 'Authentication required' ? 401 : 500 },
+    );
   }
 }
 
@@ -250,7 +385,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = await req.json() as PracticeRequestBody;
 
     // --- Mode 1: generate ---
     if (body.action === 'generate') {
@@ -258,19 +393,102 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Mode 2: submit answer ---
-    return handleSubmitAnswer(body);
-  } catch (error: any) {
+    return handleSubmitAnswer(body, await resolveUserIdFromRequest(req));
+  } catch (error: unknown) {
     console.error('[practice POST]', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    const message = getErrorMessage(error, 'Internal server error');
+    return NextResponse.json(
+      { error: message },
+      { status: message === 'Authentication required' ? 401 : 500 },
+    );
   }
+}
+
+async function handlePracticeRecommendations(uid: string) {
+  const logs = await prisma.reviewLog.findMany({
+    where: {
+      userId: uid,
+      knowledgeNodeId: { not: null },
+      quality: { lt: 3 },
+    },
+    include: {
+      knowledgeNode: {
+        select: {
+          id: true,
+          title: true,
+          masteryLevel: true,
+          subject: { select: { name: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 12,
+  });
+
+  const seen = new Set<string>();
+  const recommendations = logs
+    .filter((log) => log.knowledgeNode && !seen.has(log.knowledgeNode.id))
+    .map((log) => {
+      seen.add(log.knowledgeNode!.id);
+      return {
+        id: `review_low_quality_${log.knowledgeNode!.id}`,
+        type: 'review_low_quality',
+        nodeId: log.knowledgeNode!.id,
+        title: log.knowledgeNode!.title,
+        masteryLevel: log.knowledgeNode!.masteryLevel,
+        subjectName: log.knowledgeNode!.subject?.name ?? null,
+        quality: log.quality,
+        createdAt: log.createdAt,
+        targetUrl: `/practice?nodeId=${encodeURIComponent(log.knowledgeNode!.id)}&icapLevel=Active`,
+      };
+    });
+
+  return NextResponse.json({ recommendations });
+}
+
+async function handlePracticeHistory(uid: string) {
+  const logs = await prisma.reviewLog.findMany({
+    where: {
+      userId: uid,
+      action: { in: ['solved', 'mistake'] },
+    },
+    include: {
+      knowledgeNode: {
+        select: {
+          id: true,
+          title: true,
+          subject: { select: { name: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 12,
+  });
+
+  return NextResponse.json({
+    history: logs.map((log) => ({
+      id: log.id,
+      nodeId: log.knowledgeNodeId,
+      nodeTitle: log.knowledgeNode?.title ?? '未知知识点',
+      subjectName: log.knowledgeNode?.subject?.name ?? null,
+      action: log.action,
+      quality: log.quality,
+      masteryBefore: log.masteryBefore,
+      masteryAfter: log.masteryAfter,
+      durationSeconds: log.durationSeconds,
+      createdAt: log.createdAt,
+    })),
+  });
 }
 
 // ---------------------------------------------------------------------------
 // POST sub-handlers
 // ---------------------------------------------------------------------------
 
-async function handleGenerateQuestion(body: any) {
-  const { knowledgeNodeId, icapLevel: icapLevelRaw = 'Active', count = 3 } = body;
+async function handleGenerateQuestion(body: PracticeRequestBody) {
+  const knowledgeNodeId = typeof body.knowledgeNodeId === 'string' ? body.knowledgeNodeId : '';
+  const icapLevelRaw = typeof body.icapLevel === 'string' ? body.icapLevel : 'Active';
+  const count = typeof body.count === 'number' ? body.count : Number(body.count ?? 3);
 
   if (!knowledgeNodeId) {
     return NextResponse.json({ error: 'knowledgeNodeId is required' }, { status: 400 });
@@ -290,7 +508,19 @@ async function handleGenerateQuestion(body: any) {
       id: true,
       title: true,
       summary: true,
+      representationType: true,
       subject: { select: { name: true } },
+      outgoingEdges: {
+        where: { relationType: 'schema_member' },
+        select: {
+          to: {
+            select: {
+              title: true,
+              summary: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -303,14 +533,14 @@ async function handleGenerateQuestion(body: any) {
 
   const llmResult = await generateQuestions(
     knowledgeNode.title,
-    knowledgeNode.summary || '',
+    buildPracticeContext(knowledgeNode),
     knowledgeNode.subject?.name || '通用',
     questionTypeDesc,
     icapLevel,
     safeCount,
   );
 
-  const generated = (llmResult.questions || []).slice(0, safeCount);
+  const generated = ((llmResult.questions || []) as GeneratedQuestion[]).slice(0, safeCount);
 
   if (generated.length === 0) {
     return NextResponse.json(
@@ -320,14 +550,14 @@ async function handleGenerateQuestion(body: any) {
   }
 
   const savedQuestions = await Promise.all(
-    generated.map((q: any) =>
+    generated.map((q) =>
       prisma.question.create({
         data: {
           knowledgeNodeId,
           questionType: q.questionType || questionTypeDesc || 'multiple_choice',
           icapLevel,
           stem: q.stem || '',
-          options: q.options || null,
+          options: q.options ?? undefined,
           answer: q.answer || '',
           explanation: q.explanation || '',
           difficulty: q.difficulty ?? 3,
@@ -345,8 +575,11 @@ async function handleGenerateQuestion(body: any) {
   });
 }
 
-async function handleSubmitAnswer(body: any) {
-  const { questionId, userAnswer, durationSeconds, selfQuality } = body;
+async function handleSubmitAnswer(body: PracticeRequestBody, uid: string) {
+  const questionId = typeof body.questionId === 'string' ? body.questionId : '';
+  const { userAnswer } = body;
+  const durationSeconds = typeof body.durationSeconds === 'number' ? body.durationSeconds : null;
+  const selfQuality = typeof body.selfQuality === 'number' ? body.selfQuality : null;
 
   // --- validation ---
   if (!questionId) {
@@ -388,34 +621,25 @@ async function handleSubmitAnswer(body: any) {
     return NextResponse.json({ error: 'Associated KnowledgeNode not found' }, { status: 500 });
   }
 
-  // --- compare answer ---
-  const { isCorrect } = compareAnswer(answerStr, question.answer, question.questionType);
-  const quality = qualityFromCorrectness(isCorrect, selfQuality);
+  const progress = await getOrCreateUserKnowledgeProgress(uid, node.id, prisma);
 
-  // --- resolve user ---
-  const uid = await resolveUserId(body.userId);
+  // --- compare answer ---
+  const grade = await gradePracticeAnswer({
+    question,
+    userAnswer: answerStr,
+    selfQuality,
+  });
+  const { isCorrect, quality } = grade;
 
   // --- SM-2 scheduling ---
   const sm2Result = sm2(quality, {
-    repetitions: node.repetitions,
-    easeFactor: node.easeFactor,
-    intervalDays: node.intervalDays,
-    lastReviewAt: node.lastReviewAt,
+    repetitions: progress.repetitions,
+    easeFactor: progress.easeFactor,
+    intervalDays: progress.intervalDays,
+    lastReviewAt: progress.lastReviewAt,
   });
 
-  // --- update knowledge node ---
-  await prisma.knowledgeNode.update({
-    where: { id: node.id },
-    data: {
-      repetitions: sm2Result.state.repetitions,
-      easeFactor: sm2Result.state.easeFactor,
-      intervalDays: sm2Result.state.intervalDays,
-      nextReviewAt: sm2Result.state.nextReviewAt,
-      lastReviewAt: sm2Result.state.lastReviewAt,
-      forgetRisk: sm2Result.state.forgetRisk,
-      masteryLevel: sm2Result.state.masteryLevel,
-    },
-  });
+  await updateUserKnowledgeProgress(uid, node.id, sm2Result.state, prisma);
 
   // --- create ReviewLog ---
   await prisma.reviewLog.create({
@@ -424,7 +648,7 @@ async function handleSubmitAnswer(body: any) {
       knowledgeNodeId: node.id,
       action: isCorrect ? 'solved' : 'mistake',
       quality,
-      masteryBefore: node.masteryLevel,
+      masteryBefore: progress.masteryLevel,
       masteryAfter: sm2Result.state.masteryLevel,
       easeFactorBefore: sm2Result.log.easeFactorBefore,
       easeFactorAfter: sm2Result.log.easeFactorAfter,
@@ -440,9 +664,9 @@ async function handleSubmitAnswer(body: any) {
   const correctDisplay = question.answer;
   const explanation = question.explanation || null;
 
-  const feedback = isCorrect
+  const feedback = grade.feedback || (isCorrect
     ? '回答正确！继续保持。'
-    : explanation || `正确答案是: ${correctDisplay}`;
+    : explanation || `正确答案是: ${correctDisplay}`);
 
   const scoreValue = quality !== undefined ? Math.round(quality * 20) : null;
 
@@ -453,11 +677,12 @@ async function handleSubmitAnswer(body: any) {
     feedback,
     correctAnswer: correctDisplay,
     explanation,
+    gradingSource: grade.source,
     userAnswer: answerStr,
     masteryChange: {
-      before: node.masteryLevel,
+      before: progress.masteryLevel,
       after: sm2Result.state.masteryLevel,
-      delta: sm2Result.state.masteryLevel - node.masteryLevel,
+      delta: sm2Result.state.masteryLevel - progress.masteryLevel,
     },
     nextReviewAt: sm2Result.state.nextReviewAt,
     sm2State: {

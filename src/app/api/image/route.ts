@@ -1,6 +1,8 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { generateImage } from '@/lib/image-client';
+import type { Prisma } from '@prisma/client';
 
 // POST /api/image — 生成图片
 export async function POST(req: NextRequest) {
@@ -54,7 +56,7 @@ export async function POST(req: NextRequest) {
       prompt: result.prompt,
       assetId: asset.id,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Image API] Error:', error);
 
     try {
@@ -64,12 +66,12 @@ export async function POST(req: NextRequest) {
           model: process.env.SEEDREAM_MODEL || 'doubao-seedream-5-0',
           prompt: '图片生成失败',
           status: 'failed',
-          errorMessage: error.message,
+          errorMessage: getErrorMessage(error),
         },
       });
     } catch {}
 
-    return NextResponse.json({ error: `图片生成失败: ${error.message}` }, { status: 500 });
+    return NextResponse.json({ error: `图片生成失败: ${getErrorMessage(error)}` }, { status: 500 });
   }
 }
 
@@ -80,8 +82,9 @@ export async function GET(req: NextRequest) {
     const imageType = searchParams.get('imageType');
     const status = searchParams.get('status');
     const contentRefId = searchParams.get('contentRefId');
+    const limit = Math.min(50, Math.max(1, Number(searchParams.get('limit') || 50)));
 
-    const where: any = {};
+    const where: Prisma.ImageAssetWhereInput = {};
     if (imageType) where.imageType = imageType;
     if (status) where.status = status;
     if (contentRefId) where.contentRefId = contentRefId;
@@ -89,11 +92,11 @@ export async function GET(req: NextRequest) {
     const images = await prisma.imageAsset.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      take: limit,
     });
 
     return NextResponse.json(images);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }

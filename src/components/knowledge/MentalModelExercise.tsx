@@ -1,5 +1,7 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
+import { getErrorMessage } from '@/lib/errors';
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -42,7 +44,7 @@ export function MentalModelExercise({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch(`/api/knowledge/${knowledgeNodeId}`)
+    authFetch(`/api/knowledge/${knowledgeNodeId}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.error) {
@@ -66,7 +68,7 @@ export function MentalModelExercise({
     setResult(null);
 
     try {
-      const res = await fetch('/api/ai', {
+      const res = await authFetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -87,8 +89,8 @@ export function MentalModelExercise({
         suggestions: data.suggestions ?? '',
       });
       setAttemptCount((prev) => prev + 1);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }

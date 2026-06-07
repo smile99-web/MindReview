@@ -1,5 +1,8 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
+import type { Prisma } from '@prisma/client';
 
 // GET /api/cards/[id] — 获取单个卡片（含知识点详情）
 export async function GET(
@@ -27,8 +30,9 @@ export async function GET(
     }
 
     return NextResponse.json(card);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = getErrorMessage(error);
+    return NextResponse.json({ error: message }, { status: message === 'Authentication required' ? 401 : 500 });
   }
 }
 
@@ -39,6 +43,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    await resolveUserIdFromRequest(req);
     const body = await req.json();
 
     // 检查卡片是否存在
@@ -49,7 +54,7 @@ export async function PATCH(
 
     // 如果更新 cardType，验证合法值
     if (body.cardType) {
-      const validCardTypes = ['summary', 'formula', 'diagram', 'timeline', 'template', 'mistake'];
+      const validCardTypes = ['summary', 'formula', 'diagram', 'timeline', 'template', 'mistake', 'worked_example'];
       if (!validCardTypes.includes(body.cardType)) {
         return NextResponse.json(
           { error: `cardType 必须为以下值之一: ${validCardTypes.join(', ')}` },
@@ -72,7 +77,7 @@ export async function PATCH(
     }
 
     // 构建更新数据，只包含允许的字段
-    const data: any = {};
+    const data: Prisma.KnowledgeCardUncheckedUpdateInput = {};
     if (body.knowledgeNodeId !== undefined) data.knowledgeNodeId = body.knowledgeNodeId;
     if (body.cardType !== undefined) data.cardType = body.cardType;
     if (body.title !== undefined) data.title = body.title;
@@ -92,8 +97,9 @@ export async function PATCH(
     });
 
     return NextResponse.json(card);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = getErrorMessage(error);
+    return NextResponse.json({ error: message }, { status: message === 'Authentication required' ? 401 : 500 });
   }
 }
 
@@ -104,6 +110,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    await resolveUserIdFromRequest(req);
 
     const existing = await prisma.knowledgeCard.findUnique({ where: { id } });
     if (!existing) {
@@ -113,7 +120,8 @@ export async function DELETE(
     await prisma.knowledgeCard.delete({ where: { id } });
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = getErrorMessage(error);
+    return NextResponse.json({ error: message }, { status: message === 'Authentication required' ? 401 : 500 });
   }
 }

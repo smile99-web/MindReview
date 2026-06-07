@@ -1,16 +1,28 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { analyzeMistake } from '@/lib/llm-client';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
+import type { Prisma } from '@prisma/client';
 
-// GET /api/mistakes — 获取错题列表
+interface MistakeAnalysis {
+  mistakeType?: string;
+  analysis?: string;
+  relatedKnowledge?: string[];
+  suggestion?: string;
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const userId = await resolveUserIdFromRequest(req);
     const resolved = searchParams.get('resolved');
 
-    const where: any = { userId };
+    const where: Prisma.MistakeWhereInput = { userId };
     if (resolved !== null && resolved !== undefined) {
       where.resolved = resolved === 'true';
     }
@@ -24,78 +36,63 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json(mistakes);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 
-// POST /api/mistakes — 录入错题并AI分析
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const {
-      subjectId,
-      knowledgeNodeId,
-      questionText,
-      wrongAnswer,
-      correctAnswer,
-    } = body;
+    const subjectId = asString(body?.subjectId) || null;
+    const knowledgeNodeId = asString(body?.knowledgeNodeId) || null;
+    const questionText = asString(body?.questionText);
+    const wrongAnswer = asString(body?.wrongAnswer);
+    const correctAnswer = asString(body?.correctAnswer);
     const userId = await resolveUserIdFromRequest(req);
 
     if (!questionText || !correctAnswer) {
       return NextResponse.json({ error: '缺少题目或正确答案' }, { status: 400 });
     }
 
-    // 1. 尝试从 subjectId 获取学科名
     let subjectName = '未知学科';
     if (subjectId) {
       const subject = await prisma.subject.findUnique({ where: { id: subjectId } });
       if (subject) subjectName = subject.name;
     }
 
-    // 2. AI分析错因
-    let analysis: any = {};
+    let analysis: MistakeAnalysis = {};
     try {
-      analysis = await analyzeMistake(subjectName, questionText, wrongAnswer, correctAnswer);
+      analysis = await analyzeMistake(
+        subjectName,
+        questionText,
+        wrongAnswer,
+        correctAnswer,
+      ) as MistakeAnalysis;
     } catch {
       analysis = {
         mistakeType: 'conceptual',
-        analysis: 'AI分析暂不可用',
+        analysis: 'AI 分析暂不可用',
         relatedKnowledge: [],
         suggestion: '请稍后重试',
       };
     }
 
-    // 3. 创建错题记录
     const mistake = await prisma.mistake.create({
       data: {
         userId,
         knowledgeNodeId,
         subjectId,
         questionText,
-        wrongAnswer: wrongAnswer || '',
+        wrongAnswer,
         correctAnswer,
         mistakeType: analysis.mistakeType || 'conceptual',
         analysis: analysis.analysis || '',
       },
     });
 
-    // 4. 如果有知识点关联且分析出错因类型，更新掌握度
-    if (knowledgeNodeId) {
-      const node = await prisma.knowledgeNode.findUnique({ where: { id: knowledgeNodeId } });
-      if (node) {
-        const penalty = analysis.mistakeType === 'careless' ? 3 : 8;
-        const newMastery = Math.max(0, (node.masteryLevel || 0) - penalty);
-        await prisma.knowledgeNode.update({
-          where: { id: knowledgeNodeId },
-          data: { masteryLevel: newMastery },
-        });
-      }
-    }
-
     return NextResponse.json({ success: true, mistake, analysis });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
-

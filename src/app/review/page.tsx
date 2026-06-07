@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
 import { useCallback, useEffect, useState, useMemo, type ComponentProps } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -10,10 +11,22 @@ import { CognitiveLoadManager } from '@/components/review/CognitiveLoadManager';
 import { DensityProvider, useDensity } from '@/components/ui/DensityProvider';
 import { REVIEW_MODE_CONFIG } from '@/types';
 import type { ReviewMode } from '@/types';
-import { useAuth, useUserId } from '@/components/auth/AuthProvider';
+import { useUserId } from '@/components/auth/AuthProvider';
 import type { ActionableStep } from '@/lib/learner-model';
 
 type ReviewTask = ComponentProps<typeof ReviewTaskCard>['task'];
+type ReviewSubmitResult = {
+  success?: boolean;
+  state?: {
+    repetitions?: number;
+    easeFactor?: number;
+    intervalDays?: number;
+    nextReviewAt?: string | null;
+    lastReviewAt?: string | null;
+    forgetRisk?: number;
+    masteryLevel?: number;
+  };
+};
 
 export default function ReviewPage() {
   return (
@@ -25,7 +38,6 @@ export default function ReviewPage() {
 
 function ReviewContent() {
   const router = useRouter();
-  const { user } = useAuth();
   const userId = useUserId() || '';
   const [tasks, setTasks] = useState<ReviewTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +71,7 @@ function ReviewContent() {
   const loadTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/review?mode=${mode}`);
+      const res = await authFetch(`/api/review?mode=${mode}`);
       const data = await res.json();
       setTasks(data.tasks || []);
       setCompletedCount((data.tasks || []).filter((task: ReviewTask) => task.completed).length);
@@ -73,7 +85,9 @@ function ReviewContent() {
   useEffect(() => { document.title = '每日复习 - 知图复习'; }, []);
 
   useEffect(() => {
-    void loadTasks();
+    queueMicrotask(() => {
+      void loadTasks();
+    });
   }, [loadTasks]);
 
   // Fetch learner profile and apply recommended settings
@@ -81,7 +95,7 @@ function ReviewContent() {
     async function applyProfile() {
       if (profileApplied) return;
       try {
-        const res = await fetch(`/api/learner/profile?userId=${encodeURIComponent(userId)}`);
+        const res = await authFetch(`/api/learner/profile?userId=${encodeURIComponent(userId)}`);
         if (!res.ok) return;
         const data = await res.json();
         const recs = data.recommendations;
@@ -114,23 +128,50 @@ function ReviewContent() {
     applyProfile();
   }, [userId, profileApplied]);
 
-  const handleComplete = async (taskId: string, quality: number, knowledgeNodeId: string) => {
+  const handleComplete = async (taskId: string, quality: number, knowledgeNodeId: string): Promise<ReviewSubmitResult> => {
     try {
-      await fetch('/api/review', {
+      const res = await authFetch('/api/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           taskId,
           quality,
           knowledgeNodeId,
-          userId,
         }),
       });
-      setCompletedCount(prev => prev + 1);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Review save failed: ${res.status}`);
+      }
+      const data = await res.json() as ReviewSubmitResult;
+      setTasks((prev) =>
+        prev.map((task) =>
+          task.id === taskId
+            ? {
+                ...task,
+                completed: true,
+                score: Math.round(quality * 20),
+                knowledgeNode: {
+                  ...task.knowledgeNode,
+                  masteryLevel: data.state?.masteryLevel ?? task.knowledgeNode.masteryLevel,
+                  repetitions: data.state?.repetitions ?? task.knowledgeNode.repetitions,
+                  easeFactor: data.state?.easeFactor ?? task.knowledgeNode.easeFactor,
+                  intervalDays: data.state?.intervalDays ?? task.knowledgeNode.intervalDays,
+                  nextReviewAt: data.state?.nextReviewAt ?? task.knowledgeNode.nextReviewAt,
+                  lastReviewAt: data.state?.lastReviewAt ?? task.knowledgeNode.lastReviewAt,
+                  forgetRisk: data.state?.forgetRisk ?? task.knowledgeNode.forgetRisk,
+                },
+              }
+            : task,
+        ),
+      );
+      setCompletedCount(prev => Math.min(tasks.length, prev + 1));
       if (quality < 3) setRecentErrors(prev => prev + 1);
       else setRecentErrors(prev => Math.max(0, prev - 1));
+      return data;
     } catch (err) {
       console.error(err);
+      throw err;
     }
   };
 
@@ -145,7 +186,7 @@ function ReviewContent() {
     setTutorHistory(newHistory);
     setTutorMessage('');
     try {
-      const res = await fetch('/api/tutor/chat', {
+      const res = await authFetch('/api/tutor/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -373,7 +414,7 @@ function ReviewContent() {
                     setTutorReply('');
                     setTutorMessage('');
                     setTutorHistory([]);
-                    fetch(`/api/tutor/history?sessionId=${encodeURIComponent(sessionId)}`)
+                    authFetch(`/api/tutor/history?sessionId=${encodeURIComponent(sessionId)}`)
                       .then(r => r.json())
                       .then(data => {
                         if (data.messages && Array.isArray(data.messages)) {

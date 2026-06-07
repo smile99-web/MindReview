@@ -22,6 +22,7 @@ model User {
   reviewLogs    ReviewLog[]
   mistakes      Mistake[]
   mistakeLogs   MistakeLog[]
+  knowledgeProgress UserKnowledgeProgress[]
   audioAssets   AudioAsset[]
   refreshTokens RefreshToken[]
 }
@@ -102,6 +103,7 @@ model KnowledgeNode {
   mistakeLogs        MistakeLog[]
   reviewLogs        ReviewLog[]
   reviewTasks       ReviewTask[]
+  userProgress      UserKnowledgeProgress[]
 }
 
 model KnowledgeEdge {
@@ -219,6 +221,28 @@ model MistakeLog {
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   knowledgeNode   KnowledgeNode?  @relation(fields: [knowledgeNodeId], references: [id])
   reviewLog       ReviewLog?      @relation(fields: [reviewLogId], references: [id])
+}
+
+model UserKnowledgeProgress {
+  id              String   @id @default(cuid())
+  userId          String
+  knowledgeNodeId String
+  masteryLevel    Int      @default(0)
+  repetitions     Int      @default(0)
+  easeFactor      Float    @default(2.5)
+  intervalDays    Int      @default(0)
+  nextReviewAt    DateTime?
+  lastReviewAt    DateTime?
+  forgetRisk      Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  knowledgeNode   KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, knowledgeNodeId])
+  @@index([userId, nextReviewAt])
+  @@index([knowledgeNodeId])
 }
 
 model AiGenerationLog {

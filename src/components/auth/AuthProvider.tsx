@@ -14,6 +14,7 @@ import {
   logout as apiLogout,
   getCurrentUser,
   isAuthenticated,
+  authFetch,
   getValidToken,
 } from "@/lib/auth";
 
@@ -144,7 +145,7 @@ export function useAuthFetch() {
       if (userId) {
         headers.set('X-User-Id', userId);
       }
-      return fetch(input, { ...init, headers });
+      return authFetch(input, { ...init, headers });
     },
     [getToken, userId],
   );

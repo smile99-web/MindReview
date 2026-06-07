@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { authFetch } from '@/lib/auth';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { KnowledgeCardView } from '@/components/knowledge/KnowledgeCardView';
@@ -9,34 +10,125 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { LatexText } from '@/components/ui/LatexText';
-import { useUserId } from '@/components/auth/AuthProvider';
+
+interface RelatedKnowledgeNode {
+  id: string;
+  title: string;
+  summary?: string | null;
+  subject?: { name: string };
+  chapter?: { id?: string; title: string };
+  chapterId?: string | null;
+}
+
+interface KnowledgeEdge {
+  id?: string;
+  fromId?: string;
+  toId?: string;
+  relationType?: string;
+  label?: string | null;
+  from: RelatedKnowledgeNode;
+  to: RelatedKnowledgeNode;
+}
+
+interface KnowledgeCardNode extends RelatedKnowledgeNode {
+  subjectId: string;
+  chapterId?: string | null;
+  summary: string;
+  keywords: string[];
+  difficulty: number;
+  cognitiveLoad: number;
+  icapLevel: string;
+  masteryLevel: number;
+  commonMistakes: string[];
+  typicalQuestions: string[];
+  prerequisites: string[];
+  knowledgeCards: unknown[];
+  questions?: PracticeQuestion[];
+  outgoingEdges?: KnowledgeEdge[];
+  incomingEdges?: KnowledgeEdge[];
+  representationType?: string | null;
+  representationData?: unknown;
+  navigation?: CardNavigation;
+}
+
+interface PracticeQuestionOption {
+  label: string;
+  text?: string;
+}
+
+interface PracticeQuestion {
+  id?: string;
+  stem?: string;
+  options?: PracticeQuestionOption[];
+  answer?: string;
+  explanation?: string;
+}
+
+interface SchemaSuggestion {
+  id: string;
+  title?: string;
+  name?: string;
+  summary?: string | null;
+  nodesCount?: number;
+}
+
+interface UnmetPrerequisite {
+  nodeId: string;
+  title: string;
+  masteryLevel: number;
+  requiredLevel: number;
+}
+
+interface CardNavigationItem {
+  id: string;
+  title: string;
+}
+
+interface CardNavigation {
+  previous: CardNavigationItem | null;
+  next: CardNavigationItem | null;
+  index: number;
+  total: number;
+  scopeLabel: string;
+}
 
 export default function KnowledgeCardPage() {
   const params = useParams();
   const router = useRouter();
-  const userId = useUserId() || '';
   const id = params.id as string;
 
-  const [node, setNode] = useState<any>(null);
+  const [node, setNode] = useState<KnowledgeCardNode | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'card' | 'mindmap' | 'practice'>('card');
   const [practiceAnswers, setPracticeAnswers] = useState<Record<string, string>>({});
   const [practiceChecked, setPracticeChecked] = useState<Record<string, boolean>>({});
-  const [questions, setQuestions] = useState<any[]>([]);
+  const [questions, setQuestions] = useState<PracticeQuestion[]>([]);
   const [generatingQuestions, setGeneratingQuestions] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
-  const [schemas, setSchemas] = useState<any[]>([]);
+  const [schemas, setSchemas] = useState<SchemaSuggestion[]>([]);
   const [schemasLoading, setSchemasLoading] = useState(false);
   const [selectedSchemaIds, setSelectedSchemaIds] = useState<Set<string>>(new Set());
   const [buildingSchema, setBuildingSchema] = useState(false);
-  const [unmetPrerequisites, setUnmetPrerequisites] = useState<any[]>([]);
+  const [unmetPrerequisites, setUnmetPrerequisites] = useState<UnmetPrerequisite[]>([]);
+
+  const navigateToCard = useCallback((targetId?: string | null) => {
+    if (!targetId || targetId === id) return;
+    router.push(`/cards/${targetId}`);
+  }, [id, router]);
 
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch(`/api/knowledge/${id}`);
+        setLoading(true);
+        setNode(null);
+        setQuestions([]);
+        setPracticeAnswers({});
+        setPracticeChecked({});
+        setUnmetPrerequisites([]);
+        const res = await authFetch(`/api/knowledge/${id}`);
         if (!res.ok) throw new Error('知识点不存在');
         const data = await res.json();
         setNode(data);
@@ -44,7 +136,7 @@ export default function KnowledgeCardPage() {
 
         // Check prerequisites for this node
         try {
-          const prereqRes = await fetch('/api/path/prerequisites', {
+          const prereqRes = await authFetch('/api/path/prerequisites', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nodeIds: [id] }),
@@ -63,7 +155,7 @@ export default function KnowledgeCardPage() {
 
     async function loadImage() {
       try {
-        const res = await fetch(`/api/image?contentRefId=${id}&status=success&limit=1`);
+        const res = await authFetch(`/api/image?contentRefId=${id}&status=success&limit=1`);
         const images = await res.json();
         if (Array.isArray(images) && images.length > 0 && images[0].imageUrl) {
           setImageUrl(images[0].imageUrl);
@@ -73,15 +165,59 @@ export default function KnowledgeCardPage() {
       }
     }
 
+    async function loadAudio() {
+      try {
+        const res = await authFetch(`/api/tts?contentType=card&contentRefId=${id}&limit=1`);
+        const assets = await res.json();
+        if (Array.isArray(assets) && assets.length > 0 && assets[0].audioUrl) {
+          setAudioUrl(assets[0].audioUrl);
+        }
+      } catch {
+        // no existing audio
+      }
+    }
+
     load();
     loadImage();
+    loadAudio();
   }, [id]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      const isEditing =
+        tagName === 'input' ||
+        tagName === 'textarea' ||
+        tagName === 'select' ||
+        target?.isContentEditable;
+
+      if (isEditing || !node?.navigation) return;
+
+      if (event.key === 'ArrowUp' || event.key === 'ArrowLeft' || event.key === 'PageUp') {
+        if (node.navigation.previous) {
+          event.preventDefault();
+          navigateToCard(node.navigation.previous.id);
+        }
+      }
+
+      if (event.key === 'ArrowDown' || event.key === 'ArrowRight' || event.key === 'PageDown') {
+        if (node.navigation.next) {
+          event.preventDefault();
+          navigateToCard(node.navigation.next.id);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [navigateToCard, node?.navigation]);
 
   useEffect(() => {
     async function loadSchemas() {
       setSchemasLoading(true);
       try {
-        const res = await fetch(`/api/schema/suggest?knowledgeNodeId=${id}`);
+        const res = await authFetch(`/api/schema/suggest?knowledgeNodeId=${id}`);
         const data = await res.json();
         setSchemas(data.suggestions || []);
       } catch { /* ignore */ }
@@ -93,7 +229,7 @@ export default function KnowledgeCardPage() {
   const handleGenerateQuestions = async () => {
     setGeneratingQuestions(true);
     try {
-      const res = await fetch('/api/ai', {
+      const res = await authFetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -119,7 +255,7 @@ export default function KnowledgeCardPage() {
     setGeneratingImage(true);
     setImageError(null);
     try {
-      const res = await fetch('/api/image', {
+      const res = await authFetch('/api/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -129,10 +265,17 @@ export default function KnowledgeCardPage() {
         }),
       });
       const data = await res.json();
-      if (data.imageUrl) {
+      if (res.ok && data.imageUrl) {
         setImageUrl(data.imageUrl);
       } else if (data.error || data.errorMessage) {
-        setImageError(data.error || data.errorMessage);
+        const rawMessage = data.error || data.errorMessage;
+        setImageError(
+          String(rawMessage).includes('SEEDREAM_API_KEY')
+            ? '配图生成失败：请先在设置页配置图片生成 API Key。'
+            : `配图生成失败：${rawMessage}`,
+        );
+      } else {
+        setImageError(`配图生成失败：服务返回 ${res.status}`);
       }
     } catch (err) {
       setImageError('图片生成失败，请重试');
@@ -201,6 +344,49 @@ export default function KnowledgeCardPage() {
         <span className="text-slate-600 truncate font-medium">{node.title}</span>
       </div>
 
+      {node.navigation && node.navigation.total > 1 && (
+        <div className="mb-6 rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-slate-400">连续浏览</p>
+              <p className="mt-0.5 truncate text-sm text-slate-600">
+                {node.navigation.scopeLabel} · 第 {node.navigation.index} / {node.navigation.total} 个知识点
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={!node.navigation.previous}
+                onClick={() => navigateToCard(node.navigation?.previous?.id)}
+                title={node.navigation.previous ? `上一页：${node.navigation.previous.title}` : '已经是第一个知识点'}
+              >
+                ↑ 上一页
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={!node.navigation.next}
+                onClick={() => navigateToCard(node.navigation?.next?.id)}
+                title={node.navigation.next ? `下一页：${node.navigation.next.title}` : '已经是最后一个知识点'}
+              >
+                下一页 ↓
+              </Button>
+            </div>
+          </div>
+          <div className="mt-2 grid gap-2 text-xs text-slate-400 sm:grid-cols-2">
+            <span className="truncate">
+              上一页：{node.navigation.previous?.title || '无'}
+            </span>
+            <span className="truncate sm:text-right">
+              下一页：{node.navigation.next?.title || '无'}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Prerequisite warning banner */}
       {unmetPrerequisites.length > 0 && (
         <div className="mb-6 p-4 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50/80 to-yellow-50/80">
@@ -209,7 +395,7 @@ export default function KnowledgeCardPage() {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-amber-800">建议先复习以下前置知识点：</p>
               <div className="flex flex-wrap gap-1.5 mt-2">
-                {unmetPrerequisites.map((p: any) => (
+                {unmetPrerequisites.map((p) => (
                   <Link
                     key={p.nodeId}
                     href={`/cards/${p.nodeId}`}
@@ -249,6 +435,7 @@ export default function KnowledgeCardPage() {
             node={node}
             onGenerateImage={handleGenerateImage}
             generatingImage={generatingImage}
+            initialAudioUrl={audioUrl}
           />
           {imageUrl && (
             <Card className="mt-4">
@@ -266,7 +453,14 @@ export default function KnowledgeCardPage() {
                   重新生成
                 </Button>
               </div>
-              <img src={imageUrl} alt={node.title} className="w-full rounded-xl" />
+              <div className="relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-slate-100">
+                {/* eslint-disable-next-line @next/next/no-img-element -- AI providers return temporary external URLs that are not known at build time. */}
+                <img
+                  src={imageUrl}
+                  alt={node.title}
+                  className="h-full w-full object-contain"
+                />
+              </div>
             </Card>
           )}
           {imageError && (
@@ -290,7 +484,7 @@ export default function KnowledgeCardPage() {
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-3">
-                  {schemas.map((s: any) => {
+                  {schemas.map((s) => {
                     const isSelected = selectedSchemaIds.has(s.id);
                     return (
                       <Card
@@ -323,17 +517,16 @@ export default function KnowledgeCardPage() {
                   onClick={async () => {
                     setBuildingSchema(true);
                     try {
-                      await fetch('/api/schema/build', {
+                      await authFetch('/api/schema/build', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                          knowledgeNodeIds: Array.from(selectedSchemaIds),
-                          userId,
+                          nodeIds: Array.from(selectedSchemaIds),
                         }),
                       });
                       setSelectedSchemaIds(new Set());
                       // reload schemas
-                      const res = await fetch(`/api/schema/suggest?knowledgeNodeId=${id}`);
+                      const res = await authFetch(`/api/schema/suggest?knowledgeNodeId=${id}`);
                       const data = await res.json();
                       setSchemas(data.suggestions || []);
                     } catch { /* ignore */ }
@@ -351,7 +544,7 @@ export default function KnowledgeCardPage() {
       {activeTab === 'mindmap' && (
         <div>
           <MindMap
-            nodes={[node, ...(node.outgoingEdges?.map((e: any) => e.to) || []), ...(node.incomingEdges?.map((e: any) => e.from) || [])]}
+            nodes={[node, ...(node.outgoingEdges?.map((e) => e.to) || []), ...(node.incomingEdges?.map((e) => e.from) || [])]}
             edges={[...(node.outgoingEdges || []), ...(node.incomingEdges || [])]}
             onNodeClick={(nid) => router.push(`/cards/${nid}`)}
           />
@@ -378,7 +571,7 @@ export default function KnowledgeCardPage() {
               </div>
             </Card>
           ) : (
-            questions.map((q: any, i: number) => {
+            questions.map((q, i) => {
               const key = `${q.id || i}`;
               const selectedAnswer = practiceAnswers[key] || '';
               const isChecked = practiceChecked[key] || false;
@@ -397,7 +590,7 @@ export default function KnowledgeCardPage() {
 
                     {q.options && Array.isArray(q.options) && q.options.length > 0 && (
                       <div className="space-y-2 mb-4">
-                        {q.options.map((opt: any, j: number) => {
+                        {q.options.map((opt, j) => {
                           const isSelected = selectedAnswer === opt.label;
                           const showResult = isChecked;
                           let borderClass = 'border-slate-200/80 hover:bg-slate-50 hover:border-slate-300';

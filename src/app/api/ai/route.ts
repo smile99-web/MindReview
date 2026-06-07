@@ -1,8 +1,115 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { generateQuestions, analyzeMistake, generateSummary, generateWorkedExample } from '@/lib/llm-client';
+import {
+  analyzeMistake,
+  generateQuestions,
+  generateSummary,
+  generateWorkedExample,
+  llmCall,
+} from '@/lib/llm-client';
+import { sanitizeJsonString } from '@/lib/utils';
+import type { Prisma } from '@prisma/client';
 
-// GET /api/ai?action=list-logs — 查询 AI 生成日志
+type JsonRecord = Record<string, unknown>;
+type SchemaMember = { id: string; title: string; summary: string | null };
+type KnowledgePointForSummary = { title: string; summary: string; masteryLevel: number };
+
+function asRecord(value: unknown): JsonRecord {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as JsonRecord
+    : {};
+}
+
+function asString(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return fallback;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asString(item))
+    .filter((item) => item.length > 0);
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(numeric)));
+}
+
+function parseAiJsonObject(raw: string): JsonRecord {
+  return asRecord(JSON.parse(sanitizeJsonString(raw)) as unknown);
+}
+
+function normalizeKnowledgePoints(value: unknown): KnowledgePointForSummary[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(asRecord)
+    .map((item) => ({
+      title: asString(item.title),
+      summary: asString(item.summary),
+      masteryLevel: clampInt(item.masteryLevel, 0, 100, 0),
+    }))
+    .filter((item) => item.title.length > 0);
+}
+
+function normalizeMentalModelResult(value: unknown) {
+  const result = asRecord(value);
+  return {
+    completeness: clampInt(result.completeness, 0, 100, 50),
+    missingElements: asStringArray(result.missingElements),
+    suggestions: asString(result.suggestions),
+  };
+}
+
+function normalizeSchemaProblem(value: unknown, schemaName: string) {
+  const result = asRecord(value);
+  const steps = Array.isArray(result.steps)
+    ? result.steps
+        .map(asRecord)
+        .map((step, index) => ({
+          step: clampInt(step.step, 1, 20, index + 1),
+          label: asString(step.label, `Step ${index + 1}`),
+          description: asString(step.description),
+        }))
+        .filter((step) => step.label.length > 0 || step.description.length > 0)
+    : [];
+
+  return {
+    problemTitle: asString(result.problemTitle, 'Schema application practice'),
+    problemDescription: asString(result.problemDescription),
+    schemaApplies: asString(result.schemaApplies, schemaName),
+    steps,
+  };
+}
+
+function normalizeSchemaApplyFeedback(value: unknown) {
+  const result = asRecord(value);
+  const validStatuses = ['correct', 'partially-correct', 'incorrect'];
+  const stepFeedbacks = Array.isArray(result.stepFeedbacks)
+    ? result.stepFeedbacks
+        .map(asRecord)
+        .map((feedback, index) => {
+          const status = asString(feedback.status);
+          return {
+            step: clampInt(feedback.step, 1, 20, index + 1),
+            status: validStatuses.includes(status) ? status : 'partially-correct',
+            explanation: asString(feedback.explanation),
+            score: clampInt(feedback.score, 0, 100, 0),
+          };
+        })
+    : [];
+
+  return {
+    stepFeedbacks,
+    overallScore: clampInt(result.overallScore, 0, 100, 50),
+    overallComment: asString(result.overallComment),
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = req.nextUrl;
@@ -14,9 +121,7 @@ export async function GET(req: NextRequest) {
       const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
 
       const where: Record<string, string> = {};
-      if (generatorType !== 'all') {
-        where.generatorType = generatorType;
-      }
+      if (generatorType !== 'all') where.generatorType = generatorType;
 
       const [logs, total] = await Promise.all([
         prisma.aiGenerationLog.findMany({
@@ -31,14 +136,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ logs, total, page, limit });
     }
 
-    return NextResponse.json({ error: '未知操作' }, { status: 400 });
-  } catch (error: any) {
+    return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+  } catch (error: unknown) {
     console.error('[AI API GET] Error:', error);
-    return NextResponse.json({ error: error.message || '服务器内部错误' }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error, 'Internal server error') }, { status: 500 });
   }
 }
 
-// POST /api/ai/questions — 生成题目
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -46,73 +150,79 @@ export async function POST(req: NextRequest) {
 
     switch (action) {
       case 'generate-questions': {
-        const { knowledgeNodeId, questionType, icapLevel, count = 3 } = body;
+        const knowledgeNodeId = asString(body.knowledgeNodeId);
+        const questionType = asString(body.questionType, 'multiple_choice');
+        const icapLevel = asString(body.icapLevel, 'Active');
+        const count = clampInt(body.count, 1, 10, 3);
 
         const node = await prisma.knowledgeNode.findUnique({ where: { id: knowledgeNodeId } });
         if (!node) {
-          return NextResponse.json({ error: '知识点不存在' }, { status: 404 });
+          return NextResponse.json({ error: 'Knowledge node not found' }, { status: 404 });
         }
 
         const subject = await prisma.subject.findUnique({ where: { id: node.subjectId } });
         const result = await generateQuestions(
           node.title,
           node.summary || '',
-          subject?.name || '数学',
-          questionType || 'multiple_choice',
-          icapLevel || 'Active',
+          subject?.name || 'math',
+          questionType,
+          icapLevel,
           count,
         );
 
-        // 批量保存题目
         const questions = [];
-        if (result.questions) {
-          for (const q of result.questions) {
-            const question = await prisma.question.create({
-              data: {
-                knowledgeNodeId,
-                questionType: q.questionType || questionType || 'multiple_choice',
-                icapLevel: q.icapLevel || icapLevel || 'Active',
-                stem: q.stem || q.question || '',
-                options: q.options || [],
-                answer: q.answer || '',
-                explanation: q.explanation || '',
-                difficulty: q.difficulty || 3,
-                cognitiveLoad: q.cognitiveLoad || 3,
-              },
-            });
-            questions.push(question);
-          }
+        for (const questionData of result.questions || []) {
+          const question = await prisma.question.create({
+            data: {
+              knowledgeNodeId,
+              questionType: questionData.questionType || questionType,
+              icapLevel: questionData.icapLevel || icapLevel,
+              stem: questionData.stem || questionData.question || '',
+              options: questionData.options === undefined
+                ? undefined
+                : questionData.options as Prisma.InputJsonValue,
+              answer: questionData.answer || '',
+              explanation: questionData.explanation || '',
+              difficulty: questionData.difficulty || 3,
+              cognitiveLoad: questionData.cognitiveLoad || 3,
+            },
+          });
+          questions.push(question);
         }
 
         return NextResponse.json({ success: true, questions });
       }
 
       case 'analyze-mistake': {
-        const { subject, questionText, wrongAnswer, correctAnswer } = body;
-        const result = await analyzeMistake(subject, questionText, wrongAnswer, correctAnswer);
+        const result = await analyzeMistake(
+          asString(body.subject),
+          asString(body.questionText),
+          body.wrongAnswer === undefined ? undefined : asString(body.wrongAnswer),
+          asString(body.correctAnswer),
+        );
         return NextResponse.json(result);
       }
 
       case 'generate-summary': {
-        const { subject, knowledgePoints } = body;
-        const result = await generateSummary(subject, knowledgePoints);
+        const result = await generateSummary(
+          asString(body.subject),
+          normalizeKnowledgePoints(body.knowledgePoints),
+        );
         return NextResponse.json({ summary: result });
       }
 
       case 'generate-worked-example': {
-        const { knowledgeNodeId, subject: subjectName, difficulty } = body;
-
+        const knowledgeNodeId = asString(body.knowledgeNodeId);
         if (!knowledgeNodeId) {
-          return NextResponse.json({ error: '缺少 knowledgeNodeId' }, { status: 400 });
+          return NextResponse.json({ error: 'knowledgeNodeId is required' }, { status: 400 });
         }
 
         const workedExample = await generateWorkedExample(
           knowledgeNodeId,
-          subjectName || '',
-          difficulty || 3,
+          asString(body.subject),
+          clampInt(body.difficulty, 1, 5, 3),
         );
 
-        // Save as a KnowledgeCard so it appears in the node's card list
         const knowledgeCard = await prisma.knowledgeCard.create({
           data: {
             knowledgeNodeId,
@@ -135,10 +245,10 @@ export async function POST(req: NextRequest) {
       }
 
       case 'check-mental-model': {
-        const { knowledgeNodeId, studentText } = body;
-
+        const knowledgeNodeId = asString(body.knowledgeNodeId);
+        const studentText = asString(body.studentText);
         if (!knowledgeNodeId || !studentText) {
-          return NextResponse.json({ error: '缺少 knowledgeNodeId 或 studentText' }, { status: 400 });
+          return NextResponse.json({ error: 'knowledgeNodeId and studentText are required' }, { status: 400 });
         }
 
         const node = await prisma.knowledgeNode.findUnique({
@@ -146,67 +256,42 @@ export async function POST(req: NextRequest) {
           include: { subject: { select: { name: true } } },
         });
         if (!node) {
-          return NextResponse.json({ error: '知识点不存在' }, { status: 404 });
+          return NextResponse.json({ error: 'Knowledge node not found' }, { status: 404 });
         }
-
-        const subjectName = node.subject?.name || '通用';
-
-        const systemPrompt = `你是一位教育评估专家。你的任务是评估学生对知识点的理解完整性。
-
-学生需要用自己的话描述一个知识点的运作机制。请比较学生的描述与该知识点的实际内容，评估理解的完整度。
-
-评估标准：
-- 是否包含了核心概念和定义
-- 是否描述了各要素之间的关系/运作机制
-- 是否涵盖了关键的应用场景或边界条件
-- 是否避免了明显的误解
-
-输出严格JSON格式：
-{
-  "completeness": 0-100的整数，表示理解完整度百分比,
-  "missingElements": ["缺失的关键要素1", "缺失的关键要素2"],
-  "suggestions": "具体的改进建议，帮助学生完善心智模型（80-150字）"
-}`;
-
-        const userPrompt = `学科：${subjectName}
-知识点标题：${node.title}
-知识点摘要：${node.summary || '(无摘要)'}
-关键词：${(node.keywords || []).join('、')}
-
-学生的描述：
-${studentText}
-
-请评估学生对以上知识点的理解完整性。`;
-
-        const { llmCall } = await import('@/lib/llm-client');
-        const { sanitizeJsonString } = await import('@/lib/utils');
 
         const raw = await llmCall({
           messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
+            {
+              role: 'system',
+              content: `Evaluate how complete a student's mental model is.
+Return strict JSON: {"completeness":0-100,"missingElements":["..."],"suggestions":"..."}. Prefer Chinese feedback.`,
+            },
+            {
+              role: 'user',
+              content: `Subject: ${node.subject?.name || 'general'}
+Knowledge node: ${node.title}
+Summary: ${node.summary || '(no summary)'}
+Keywords: ${(node.keywords || []).join(', ')}
+
+Student text:
+${studentText}`,
+            },
           ],
           temperature: 0.3,
           maxTokens: 2048,
           jsonMode: true,
         });
 
-        const result = JSON.parse(sanitizeJsonString(raw));
-        return NextResponse.json({
-          completeness: Math.min(100, Math.max(0, result.completeness ?? 50)),
-          missingElements: result.missingElements ?? [],
-          suggestions: result.suggestions ?? '',
-        });
+        return NextResponse.json(normalizeMentalModelResult(parseAiJsonObject(raw)));
       }
 
       case 'generate-schema-problem': {
-        const { schemaId, schemaName, schemaDescription, schemaData, memberCount } = body;
-
+        const schemaId = asString(body.schemaId);
+        const schemaName = asString(body.schemaName);
         if (!schemaId || !schemaName) {
-          return NextResponse.json({ error: '缺少 schemaId 或 schemaName' }, { status: 400 });
+          return NextResponse.json({ error: 'schemaId and schemaName are required' }, { status: 400 });
         }
 
-        // Fetch schema node and its members
         const schemaNode = await prisma.knowledgeNode.findUnique({
           where: { id: schemaId },
           include: {
@@ -217,87 +302,51 @@ ${studentText}
             },
           },
         });
-
         if (!schemaNode) {
-          return NextResponse.json({ error: '图式不存在' }, { status: 404 });
+          return NextResponse.json({ error: 'Schema not found' }, { status: 404 });
         }
 
-        const members = schemaNode.outgoingEdges?.map((e: any) => e.to) ?? [];
-        const subjectName = schemaNode.subject?.name || '通用';
-        const repData = (schemaNode.representationData as any) || schemaData || {};
+        const members: SchemaMember[] = schemaNode.outgoingEdges?.map((edge) => edge.to) ?? [];
+        const repData = asRecord(schemaNode.representationData ?? body.schemaData);
         const memberLines = members
-          .map((m: any, i: number) => `${i + 1}. ${m.title}: ${m.summary || '(无描述)'}`)
+          .map((member, index) => `${index + 1}. ${member.title}: ${member.summary || '(no summary)'}`)
           .join('\n');
 
-        const systemPrompt = `你是一位教育设计专家，擅长设计"图式应用"练习题。
-
-图式（Schema）是一组相关知识点的结构化认知框架。你需要：
-1. 设计一个新颖的问题，适合用给定的图式来解决
-2. 将图式的应用步骤拆解为具体的操作步骤
-
-请生成：
-- problemTitle: 问题的简短标题（10字以内）
-- problemDescription: 问题的详细描述（50-100字），应当是一个具体的情境/场景
-- schemaApplies: 应用哪个图式（即图式的名字）
-- steps: 应用步骤数组，每个步骤包含 step（序号）、label（步骤名，8字以内）、description（该步骤的具体要求，20-60字）
-
-步骤数量：3-6步，根据图式的复杂度决定。每一步应该是对学生来说可操作的具体要求。
-
-输出严格JSON格式：
-{
-  "problemTitle": "...",
-  "problemDescription": "...",
-  "schemaApplies": "图式名称",
-  "steps": [
-    {"step": 1, "label": "步骤名", "description": "具体要求说明"}
-  ]
-}`;
-
-        const userPrompt = `学科：${subjectName}
-图式名称：${schemaName}
-图式描述：${schemaDescription || schemaNode.summary || '(无描述)'}
-图式类型：${repData.schemaType || '未指定'}
-核心洞见：${(repData.keyInsights || []).join('；') || '(无)'}
-应用范围：${repData.applicationScope || '未指定'}
-包含知识点（${members.length}个）：
-${memberLines || '(无)'}
-
-请为以上图式设计一个新颖的应用练习题。`;
-
-        const { llmCall: llmCall2 } = await import('@/lib/llm-client');
-        const { sanitizeJsonString: sanitize2 } = await import('@/lib/utils');
-
-        const raw2 = await llmCall2({
+        const raw = await llmCall({
           messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
+            {
+              role: 'system',
+              content: `Design a schema application practice problem.
+Return strict JSON: {"problemTitle":"...","problemDescription":"...","schemaApplies":"...","steps":[{"step":1,"label":"...","description":"..."}]}. Prefer Chinese content.`,
+            },
+            {
+              role: 'user',
+              content: `Subject: ${schemaNode.subject?.name || 'general'}
+Schema name: ${schemaName}
+Schema description: ${asString(body.schemaDescription, schemaNode.summary || '')}
+Schema type: ${asString(repData.schemaType, 'unknown')}
+Key insights: ${asStringArray(repData.keyInsights).join('; ') || '(none)'}
+Application scope: ${asString(repData.applicationScope, 'unknown')}
+Members:
+${memberLines || '(none)'}`,
+            },
           ],
           temperature: 0.4,
           maxTokens: 2048,
           jsonMode: true,
         });
 
-        const result2 = JSON.parse(sanitize2(raw2));
-        return NextResponse.json({
-          problemTitle: result2.problemTitle || '图式应用练习',
-          problemDescription: result2.problemDescription || '',
-          schemaApplies: result2.schemaApplies || schemaName,
-          steps: (result2.steps || []).map((s: any, i: number) => ({
-            step: s.step ?? i + 1,
-            label: s.label || `步骤${s.step ?? i + 1}`,
-            description: s.description || '',
-          })),
-        });
+        return NextResponse.json(normalizeSchemaProblem(parseAiJsonObject(raw), schemaName));
       }
 
       case 'check-schema-apply': {
-        const { schemaId, schemaName, problemTitle, problemDescription, steps } = body;
-
-        if (!schemaId || !steps || !Array.isArray(steps)) {
-          return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
+        const schemaId = asString(body.schemaId);
+        const schemaName = asString(body.schemaName);
+        const steps: JsonRecord[] = Array.isArray(body.steps) ? body.steps.map(asRecord) : [];
+        if (!schemaId || steps.length === 0) {
+          return NextResponse.json({ error: 'schemaId and steps are required' }, { status: 400 });
         }
 
-        // Fetch schema for context
         const schemaNode = await prisma.knowledgeNode.findUnique({
           where: { id: schemaId },
           include: {
@@ -308,92 +357,59 @@ ${memberLines || '(无)'}
             },
           },
         });
-
         if (!schemaNode) {
-          return NextResponse.json({ error: '图式不存在' }, { status: 404 });
+          return NextResponse.json({ error: 'Schema not found' }, { status: 404 });
         }
 
-        const members = schemaNode.outgoingEdges?.map((e: any) => e.to) ?? [];
-        const repData = (schemaNode.representationData as any) || {};
+        const members: SchemaMember[] = schemaNode.outgoingEdges?.map((edge) => edge.to) ?? [];
+        const repData = asRecord(schemaNode.representationData);
         const memberKnowledge = members
-          .map((m: any) => `- ${m.title}: ${m.summary || ''}`)
+          .map((member) => `- ${member.title}: ${member.summary || ''}`)
           .join('\n');
-
         const stepsContext = steps
-          .map((s: any) => `步骤${s.step} [${s.label}]: 要求=${s.description} | 学生回答=${s.answer || '(未填写)'}`)
+          .map((step) => {
+            const stepNo = clampInt(step.step, 1, 20, 1);
+            return `Step ${stepNo} [${asString(step.label)}]: requirement=${asString(step.description)} | student=${asString(step.answer, '(empty)')}`;
+          })
           .join('\n');
 
-        const systemPrompt = `你是一位严格但公正的教育评估专家。你的任务是根据学生的图式应用步骤回答，逐一评估每步的正确性。
-
-图式（Schema）是一个结构化的认知框架。给定图式名称、图式包含的知识点内容、问题描述和学生的分步回答，请对每步进行评估。
-
-对每一步，判断：
-- status: "correct"（完全正确，符合图式要求）| "partially-correct"（思路对但不完整或有小错）| "incorrect"（方向错误或严重误解）
-- explanation: 对学生的具体评价（20-50字），指出对在哪里或错在哪里
-- score: 该步得分 0-100
-
-同时给出：
-- overallScore: 所有步骤的综合得分 0-100
-- overallComment: 对整体应用情况的总结评价（40-80字）
-
-输出严格JSON格式：
-{
-  "stepFeedbacks": [
-    {"step": 1, "status": "correct|partially-correct|incorrect", "explanation": "...", "score": 85}
-  ],
-  "overallScore": 75,
-  "overallComment": "..."
-}`;
-
-        const userPrompt = `图式名称：${schemaName}
-图式描述：${schemaNode.summary || '(无描述)'}
-图式类型：${repData.schemaType || '未指定'}
-核心洞见：${(repData.keyInsights || []).join('；')}
-
-图式包含的知识点：
-${memberKnowledge || '(无)'}
-
-问题：${problemTitle}
-问题描述：${problemDescription}
-
-学生的分步回答：
-${stepsContext}
-
-请逐步骤评估学生的回答。`;
-
-        const { llmCall: llmCall3 } = await import('@/lib/llm-client');
-        const { sanitizeJsonString: sanitize3 } = await import('@/lib/utils');
-
-        const raw3 = await llmCall3({
+        const raw = await llmCall({
           messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
+            {
+              role: 'system',
+              content: `Evaluate a student's schema application steps.
+Return strict JSON: {"stepFeedbacks":[{"step":1,"status":"correct|partially-correct|incorrect","explanation":"...","score":85}],"overallScore":75,"overallComment":"..."}. Prefer Chinese feedback.`,
+            },
+            {
+              role: 'user',
+              content: `Schema name: ${schemaName}
+Schema description: ${schemaNode.summary || '(no summary)'}
+Schema type: ${asString(repData.schemaType, 'unknown')}
+Key insights: ${asStringArray(repData.keyInsights).join('; ')}
+
+Schema members:
+${memberKnowledge || '(none)'}
+
+Problem: ${asString(body.problemTitle)}
+Problem description: ${asString(body.problemDescription)}
+
+Student steps:
+${stepsContext}`,
+            },
           ],
           temperature: 0.3,
           maxTokens: 2048,
           jsonMode: true,
         });
 
-        const result3 = JSON.parse(sanitize3(raw3));
-        const stepFeedbacks = (result3.stepFeedbacks || []).map((sf: any) => ({
-          step: sf.step ?? 0,
-          status: ['correct', 'partially-correct', 'incorrect'].includes(sf.status) ? sf.status : 'partially-correct',
-          explanation: sf.explanation || '',
-          score: Math.min(100, Math.max(0, sf.score ?? 0)),
-        }));
-
-        return NextResponse.json({
-          stepFeedbacks,
-          overallScore: Math.min(100, Math.max(0, result3.overallScore ?? 50)),
-          overallComment: result3.overallComment || '',
-        });
+        return NextResponse.json(normalizeSchemaApplyFeedback(parseAiJsonObject(raw)));
       }
 
       default:
-        return NextResponse.json({ error: '未知操作' }, { status: 400 });
+        return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[AI API] Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }

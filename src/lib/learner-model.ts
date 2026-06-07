@@ -6,12 +6,30 @@
 // ---------------------------------------------------------------------------
 
 import type { PrismaClient } from '@prisma/client';
+import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
 
-type MasteryNode = { masteryLevel: number };
 type ReviewDelta = { masteryBefore: number | null; masteryAfter: number | null };
 type SessionDuration = { durationSeconds: number | null };
 type MistakeAggregate = { knowledgeNodeId: string | null };
 type PriorKnowledgeNode = { id: string; title: string; masteryLevel: number };
+type MasteryOverlayNode = { id: string; masteryLevel: number };
+
+async function withUserMastery<T extends MasteryOverlayNode>(
+  userId: string,
+  nodes: T[],
+  prisma: PrismaClient,
+): Promise<T[]> {
+  const progressByNodeId = await loadProgressByNodeId(
+    userId,
+    nodes.map((node) => node.id),
+    prisma,
+  );
+
+  return nodes.map((node) => ({
+    ...node,
+    masteryLevel: progressByNodeId.get(node.id)?.masteryLevel ?? node.masteryLevel,
+  }));
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -66,11 +84,10 @@ export async function buildLearnerProfile(
 ): Promise<LearnerProfile> {
   const [
     // Knowledge nodes aggregated
-    nodeStats,
-    masteryDistributionRaw,
+    allKnowledgeNodes,
+    userProgressRows,
     icapCounts,
     representationCounts,
-    subjectMastery,
     schemaCount,
 
     // Review logs
@@ -82,16 +99,21 @@ export async function buildLearnerProfile(
     mistakeCounts,
     subjectMistakeCounts,
   ] = await Promise.all([
-    // KnowledgeNode aggregates
-    prisma.knowledgeNode.aggregate({
-      _avg: { masteryLevel: true, difficulty: true },
-      _count: { id: true },
+    prisma.knowledgeNode.findMany({
+      select: {
+        id: true,
+        masteryLevel: true,
+        difficulty: true,
+        subject: { select: { name: true } },
+      },
     }),
-    Promise.all([
-      prisma.knowledgeNode.count({ where: { masteryLevel: { lt: 34 } } }),
-      prisma.knowledgeNode.count({ where: { masteryLevel: { gte: 34, lt: 67 } } }),
-      prisma.knowledgeNode.count({ where: { masteryLevel: { gte: 67 } } }),
-    ]),
+    prisma.userKnowledgeProgress.findMany({
+      where: { userId },
+      select: {
+        knowledgeNodeId: true,
+        masteryLevel: true,
+      },
+    }),
     prisma.knowledgeNode.groupBy({
       by: ['icapLevel'],
       _count: { id: true },
@@ -100,16 +122,6 @@ export async function buildLearnerProfile(
       by: ['representationType'],
       _count: { id: true },
       where: { representationType: { not: null } },
-    }),
-    // Subject-level mastery
-    prisma.subject.findMany({
-      select: {
-        name: true,
-        _count: { select: { knowledgeNodes: true } },
-        knowledgeNodes: {
-          select: { masteryLevel: true },
-        },
-      },
     }),
     prisma.knowledgeEdge.count(),
 
@@ -167,9 +179,21 @@ export async function buildLearnerProfile(
   ]);
 
   // ── Knowledge Graph Stats ──────────────────────────────────────────────
-  const totalNodes = nodeStats._count.id;
-  const averageMastery = Math.round(nodeStats._avg.masteryLevel ?? 0);
-  const [lowMastery, mediumMastery, highMastery] = masteryDistributionRaw;
+  const progressMasteryByNodeId = new Map(
+    userProgressRows.map((row) => [row.knowledgeNodeId, row.masteryLevel]),
+  );
+  const masteryNodes = allKnowledgeNodes.map((node) => ({
+    ...node,
+    masteryLevel: progressMasteryByNodeId.get(node.id) ?? node.masteryLevel,
+  }));
+  const totalNodes = masteryNodes.length;
+  const averageMastery =
+    totalNodes > 0
+      ? Math.round(masteryNodes.reduce((sum, node) => sum + node.masteryLevel, 0) / totalNodes)
+      : 0;
+  const lowMastery = masteryNodes.filter((node) => node.masteryLevel < 34).length;
+  const mediumMastery = masteryNodes.filter((node) => node.masteryLevel >= 34 && node.masteryLevel < 67).length;
+  const highMastery = masteryNodes.filter((node) => node.masteryLevel >= 67).length;
   const masteredNodes = highMastery + mediumMastery;
 
   // ── ICAP Distribution ──────────────────────────────────────────────────
@@ -211,16 +235,24 @@ export async function buildLearnerProfile(
 
   const strengthAreas: string[] = [];
   const weaknessAreas: string[] = [];
-  for (const s of subjectMastery) {
-    if (s.knowledgeNodes.length === 0) continue;
-    const avgM =
-      s.knowledgeNodes.reduce((sum: number, n: MasteryNode) => sum + n.masteryLevel, 0) / s.knowledgeNodes.length;
-    const mistakeRatio = (subjectMistakeCount[s.name] || 0) / s.knowledgeNodes.length;
+  const masteryBySubject = new Map<string, number[]>();
+  for (const node of masteryNodes) {
+    const subjectName = node.subject?.name;
+    if (!subjectName) continue;
+    const values = masteryBySubject.get(subjectName) ?? [];
+    values.push(node.masteryLevel);
+    masteryBySubject.set(subjectName, values);
+  }
+
+  for (const [subjectName, values] of masteryBySubject) {
+    if (values.length === 0) continue;
+    const avgM = values.reduce((sum, mastery) => sum + mastery, 0) / values.length;
+    const mistakeRatio = (subjectMistakeCount[subjectName] || 0) / values.length;
     if (avgM > 75) {
-      strengthAreas.push(s.name);
+      strengthAreas.push(subjectName);
     }
     if (avgM < 40 || mistakeRatio > 0.5) {
-      weaknessAreas.push(s.name);
+      weaknessAreas.push(subjectName);
     }
   }
 
@@ -262,8 +294,6 @@ export async function buildLearnerProfile(
   const breakFrequency = avgSessionMinutes > 30 ? 2 : 1;
 
   // ── Cognitive Preferences ──────────────────────────────────────────────
-  const totalNodesForDifficulty = totalNodes > 0 ? totalNodes : 1;
-  const avgDifficulty = Math.round((nodeStats._avg.difficulty ?? 3) * 10) / 10;
   // Optimal difficulty: slightly above current mastery, clamped to 1-5
   const optimalDifficulty = Math.min(5, Math.max(1, Math.round((averageMastery / 100) * 5 + 0.5)));
 
@@ -354,12 +384,16 @@ export async function generateActionableSteps(
     });
 
     for (const subj of weakSubjects) {
-      const lowNodes = await prisma.knowledgeNode.findMany({
-        where: { subjectId: subj.id, masteryLevel: { lt: 40 } },
+      const candidateNodes = await prisma.knowledgeNode.findMany({
+        where: { subjectId: subj.id },
         select: { id: true, title: true, masteryLevel: true },
-        orderBy: { masteryLevel: 'asc' },
-        take: 2,
+        orderBy: { createdAt: 'asc' },
+        take: 80,
       });
+      const lowNodes = (await withUserMastery(userId, candidateNodes, prisma))
+        .filter((node) => node.masteryLevel < 40)
+        .sort((a, b) => a.masteryLevel - b.masteryLevel)
+        .slice(0, 2);
 
       for (const node of lowNodes) {
         steps.push({
@@ -387,10 +421,11 @@ export async function generateActionableSteps(
 
   if (mistakeAgg.length > 0) {
     const nodeIds = mistakeAgg.map((m: MistakeAggregate) => m.knowledgeNodeId!).filter(Boolean);
-    const nodes = await prisma.knowledgeNode.findMany({
+    const mistakeNodes = await prisma.knowledgeNode.findMany({
       where: { id: { in: nodeIds } },
       select: { id: true, title: true, masteryLevel: true, subjectId: true, subject: { select: { name: true } } },
     });
+    const nodes = await withUserMastery(userId, mistakeNodes, prisma);
 
     for (const node of nodes) {
       steps.push({
@@ -428,15 +463,18 @@ export async function generateActionableSteps(
   }
 
   // ── 4. Practice ICAP: lowest mastery nodes to exercise ─────────────────
-  const lowMasteryNodes = await prisma.knowledgeNode.findMany({
-    where: { masteryLevel: { lt: 40 } },
+  const lowMasteryCandidates = await prisma.knowledgeNode.findMany({
     select: {
-      id: true, title: true, subjectId: true, icapLevel: true,
+      id: true, title: true, subjectId: true, icapLevel: true, masteryLevel: true,
       subject: { select: { name: true } },
     },
-    orderBy: { masteryLevel: 'asc' },
-    take: 3,
+    orderBy: { createdAt: 'asc' },
+    take: 120,
   });
+  const lowMasteryNodes = (await withUserMastery(userId, lowMasteryCandidates, prisma))
+    .filter((node) => node.masteryLevel < 40)
+    .sort((a, b) => a.masteryLevel - b.masteryLevel)
+    .slice(0, 3);
 
   for (const node of lowMasteryNodes) {
     steps.push({
@@ -579,7 +617,7 @@ export async function runOnboardingDiagnostic(
   }
 
   // 2. 获取该年级的前置/基础知识点作为诊断候选
-  const knowledgeNodes = await prisma.knowledgeNode.findMany({
+  const rawKnowledgeNodes = await prisma.knowledgeNode.findMany({
     where: {
       subjectId,
     },
@@ -595,6 +633,7 @@ export async function runOnboardingDiagnostic(
     orderBy: { difficulty: 'asc' },
     take: 30,
   });
+  const knowledgeNodes = await withUserMastery(userId, rawKnowledgeNodes, prisma);
 
   if (knowledgeNodes.length === 0) {
     // 没有知识点则跳过诊断
@@ -755,7 +794,7 @@ export async function assessPriorKnowledge(
   prisma: PrismaClient,
 ): Promise<PriorKnowledgeResult> {
   // Find all reviewed nodes in this subject
-  const nodesWithMastery = await prisma.knowledgeNode.findMany({
+  const reviewedNodes = await prisma.knowledgeNode.findMany({
     where: {
       subjectId,
       reviewLogs: { some: { userId } },
@@ -765,9 +804,10 @@ export async function assessPriorKnowledge(
       title: true,
       masteryLevel: true,
     },
-    orderBy: { masteryLevel: 'desc' },
     take: 20,
   });
+  const nodesWithMastery = (await withUserMastery(userId, reviewedNodes, prisma))
+    .sort((a, b) => b.masteryLevel - a.masteryLevel);
 
   const hasPriorKnowledge = nodesWithMastery.length > 0;
 

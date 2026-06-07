@@ -17,9 +17,56 @@ import { KnowledgeNodeCard } from './KnowledgeNodeCard';
 import { RELATION_COLORS, RELATION_LABELS } from '@/types';
 import type { RelationType } from '@/types';
 
+interface MindMapDataNode {
+  id: string;
+  title?: string | null;
+  subject?: {
+    name?: string | null;
+  } | null;
+  chapter?: {
+    id?: string | null;
+    title?: string | null;
+  } | null;
+  chapterId?: string | null;
+  difficulty?: number | null;
+  masteryLevel?: number | null;
+  icapLevel?: string | null;
+  summary?: string | null;
+  representationType?: string | null;
+}
+
+interface MindMapDataEdge {
+  id?: string;
+  fromId?: string | null;
+  toId?: string | null;
+  relationType?: string | null;
+}
+
+interface RenderableMindMapEdge extends MindMapDataEdge {
+  fromId: string;
+  toId: string;
+}
+
+interface MindMapFlowData extends Record<string, unknown> {
+  label: string;
+  subject: string;
+  difficulty: number;
+  masteryLevel: number;
+  icapLevel: string;
+  summary?: string;
+  representationType?: string;
+  isHighlighted: boolean;
+}
+
+interface MindMapTreeNodeData extends Record<string, unknown> {
+  label: string;
+  kind: 'root' | 'chapter';
+  count?: number;
+}
+
 interface MindMapProps {
-  nodes: any[];
-  edges: any[];
+  nodes: MindMapDataNode[];
+  edges: MindMapDataEdge[];
   onNodeClick?: (nodeId: string) => void;
   className?: string;
   /** When true, edges crossing chapter boundaries get a distinct dashed style */
@@ -34,6 +81,17 @@ const nodeTypes = {
   knowledgeNode: KnowledgeNodeCard,
 };
 
+const TREE_ROOT_ID = '__mindmap_root';
+const TREE_CHAPTER_PREFIX = '__mindmap_chapter__';
+
+function getRelationType(value?: string | null): RelationType | undefined {
+  return value && value in RELATION_LABELS ? value as RelationType : undefined;
+}
+
+function getEdgeKey(edge: RenderableMindMapEdge): string {
+  return edge.id || `${edge.fromId}:${edge.toId}:${edge.relationType || 'edge'}`;
+}
+
 export function MindMap({
   nodes: dataNodes,
   edges: dataEdges,
@@ -47,11 +105,32 @@ export function MindMap({
   const [internalFilter, setInternalFilter] = useState('');
   const activeFilter = relationTypeFilter || internalFilter;
 
+  const treeGroups = useMemo(() => {
+    const groups = new Map<string, { id: string; title: string; nodes: MindMapDataNode[] }>();
+    for (const node of dataNodes || []) {
+      if (node.representationType === 'schema') continue;
+      const chapterKey = node.chapter?.id || node.chapterId || 'uncategorized';
+      const chapterTitle = node.chapter?.title || '未分组知识';
+      const existing = groups.get(chapterKey);
+      if (existing) {
+        existing.nodes.push(node);
+      } else {
+        groups.set(chapterKey, { id: chapterKey, title: chapterTitle, nodes: [node] });
+      }
+    }
+    return Array.from(groups.values());
+  }, [dataNodes]);
+
+  const rootLabel = useMemo(() => {
+    if (!dataNodes || dataNodes.length === 0) return '思维导图';
+    return dataNodes[0]?.subject?.name || '知识主题';
+  }, [dataNodes]);
+
   // Build a quick lookup: nodeId -> chapterId
   const nodeChapterMap = useMemo(() => {
     const map = new Map<string, string>();
     if (dataNodes) {
-      dataNodes.forEach((n: any) => {
+      dataNodes.forEach((n) => {
         const cid = n.chapter?.id || n.chapterId || '';
         if (cid) map.set(n.id, cid);
       });
@@ -64,11 +143,12 @@ export function MindMap({
     if (!crossChapterEnabled) return new Set<string>();
     const ids = new Set<string>();
     if (dataEdges) {
-      dataEdges.forEach((e: any) => {
+      dataEdges.forEach((e) => {
+        if (!e.fromId || !e.toId) return;
         const fromChap = nodeChapterMap.get(e.fromId);
         const toChap = nodeChapterMap.get(e.toId);
         if (fromChap && toChap && fromChap !== toChap) {
-          ids.add(e.id);
+          ids.add(getEdgeKey({ ...e, fromId: e.fromId, toId: e.toId }));
         }
       });
     }
@@ -79,7 +159,8 @@ export function MindMap({
   const highlightedMemberIds = useMemo(() => {
     if (!hoveredSchemaNode || !dataEdges) return new Set<string>();
     const memberIds = new Set<string>();
-    dataEdges.forEach((edge: any) => {
+    dataEdges.forEach((edge) => {
+      if (!edge.fromId || !edge.toId) return;
       if (edge.relationType !== 'schema_member') return;
       if (edge.fromId === hoveredSchemaNode) memberIds.add(edge.toId);
       if (edge.toId === hoveredSchemaNode) memberIds.add(edge.fromId);
@@ -87,53 +168,186 @@ export function MindMap({
     return memberIds;
   }, [hoveredSchemaNode, dataEdges]);
 
-  // 转换为 ReactFlow 格式
-  const initialNodes: Node[] = useMemo(() => {
+  // Tree mind-map layout: center topic -> chapter branches -> knowledge leaves.
+  const initialNodes: Node<MindMapFlowData | MindMapTreeNodeData>[] = useMemo(() => {
     if (!dataNodes || dataNodes.length === 0) return [];
 
-    // 简单的网格布局 — schema nodes get extra spacing
-    const cols = Math.ceil(Math.sqrt(dataNodes.length));
-    const isSchema = (node: any) => node.representationType === 'schema';
-    const spacingX = 280;
-    const spacingY = 160;
+    const chapterX = 360;
+    const knowledgeX = 720;
+    const knowledgeColumnGap = 310;
+    const schemaX = 1720;
+    const childRowGap = 135;
+    const chapterGap = 85;
+    const maxChildrenPerRow = 3;
+    const treeHeight = treeGroups.reduce(
+      (sum, group) => {
+        const rows = Math.max(1, Math.ceil(group.nodes.length / maxChildrenPerRow));
+        return sum + rows * childRowGap + chapterGap;
+      },
+      0,
+    );
+    let cursorY = 40;
 
-    return dataNodes.map((node, i) => {
-      const row = Math.floor(i / cols);
-      const col = i % cols;
-      const schema = isSchema(node);
-      return {
-        id: node.id,
-        type: 'knowledgeNode',
-        position: { x: col * spacingX + 40, y: row * spacingY + 40 },
+    const flowNodes: Node<MindMapFlowData | MindMapTreeNodeData>[] = [
+      {
+        id: TREE_ROOT_ID,
+        type: 'input',
+        position: { x: 40, y: Math.max(120, treeHeight / 2 - 34) },
         data: {
-          label: node.title,
-          subject: node.subject?.name || '',
-          difficulty: node.difficulty,
-          masteryLevel: node.masteryLevel,
-          icapLevel: node.icapLevel,
-          summary: node.summary,
-          representationType: node.representationType,
-          isHighlighted: highlightedMemberIds.has(node.id),
+          label: rootLabel,
+          kind: 'root',
+          count: dataNodes.filter((node) => node.representationType !== 'schema').length,
         },
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
-      };
-    });
-  }, [dataNodes, highlightedMemberIds, onNodeClick]);
+        style: {
+          width: 220,
+          borderRadius: 18,
+          border: '1px solid #6366f1',
+          background: '#eef2ff',
+          color: '#312e81',
+          fontWeight: 700,
+          padding: 14,
+          boxShadow: '0 10px 24px rgba(99,102,241,0.14)',
+        },
+      },
+    ];
+
+    for (const group of treeGroups) {
+      const groupStartY = cursorY;
+      const children = group.nodes;
+      const childRows = Math.max(1, Math.ceil(children.length / maxChildrenPerRow));
+      const groupHeight = childRows * childRowGap;
+      children.forEach((node, index) => {
+        const col = index % maxChildrenPerRow;
+        const row = Math.floor(index / maxChildrenPerRow);
+        flowNodes.push({
+          id: node.id,
+          type: 'knowledgeNode',
+          position: {
+            x: knowledgeX + col * knowledgeColumnGap,
+            y: groupStartY + row * childRowGap,
+          },
+          data: {
+            label: node.title || 'Untitled',
+            subject: node.subject?.name || '',
+            difficulty: node.difficulty ?? 3,
+            masteryLevel: node.masteryLevel ?? 0,
+            icapLevel: node.icapLevel || 'Passive',
+            summary: node.summary || undefined,
+            representationType: node.representationType || undefined,
+            isHighlighted: highlightedMemberIds.has(node.id),
+          },
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+        });
+      });
+
+      flowNodes.push({
+        id: `${TREE_CHAPTER_PREFIX}${group.id}`,
+        type: 'default',
+        position: {
+          x: chapterX,
+          y: groupStartY + Math.max(0, groupHeight - childRowGap) / 2 + 18,
+        },
+        data: {
+          label: `${group.title} (${children.length})`,
+          kind: 'chapter',
+          count: children.length,
+        },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+        style: {
+          width: 220,
+          borderRadius: 14,
+          border: '1px solid #cbd5e1',
+          background: '#ffffff',
+          color: '#334155',
+          fontWeight: 650,
+          padding: 12,
+          boxShadow: '0 6px 18px rgba(15,23,42,0.06)',
+        },
+      });
+
+      cursorY += groupHeight + chapterGap;
+    }
+
+    dataNodes
+      .filter((node) => node.representationType === 'schema')
+      .forEach((node, index) => {
+        flowNodes.push({
+          id: node.id,
+          type: 'knowledgeNode',
+          position: { x: schemaX, y: 40 + index * childRowGap },
+          data: {
+            label: node.title || 'Untitled',
+            subject: node.subject?.name || '',
+            difficulty: node.difficulty ?? 3,
+            masteryLevel: node.masteryLevel ?? 0,
+            icapLevel: node.icapLevel || 'Passive',
+            summary: node.summary || undefined,
+            representationType: node.representationType || undefined,
+            isHighlighted: highlightedMemberIds.has(node.id),
+          },
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+        });
+      });
+
+    return flowNodes;
+  }, [dataNodes, highlightedMemberIds, rootLabel, treeGroups]);
+
+  const treeEdges: Edge[] = useMemo(() => {
+    const edges: Edge[] = [];
+
+    for (const group of treeGroups) {
+      const chapterNodeId = `${TREE_CHAPTER_PREFIX}${group.id}`;
+      edges.push({
+        id: `${TREE_ROOT_ID}:${chapterNodeId}`,
+        source: TREE_ROOT_ID,
+        target: chapterNodeId,
+        type: 'smoothstep',
+        style: { stroke: '#6366f1', strokeWidth: 2.2 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#6366f1' },
+      });
+
+      for (const node of group.nodes) {
+        edges.push({
+          id: `${chapterNodeId}:${node.id}`,
+          source: chapterNodeId,
+          target: node.id,
+          type: 'smoothstep',
+          style: { stroke: '#94a3b8', strokeWidth: 1.7 },
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' },
+        });
+      }
+    }
+
+    return edges;
+  }, [treeGroups]);
 
   // Filter edges by active relation type
   const filteredEdges = useMemo(() => {
     if (!dataEdges) return [];
     if (!activeFilter) return dataEdges;
-    return dataEdges.filter((e: any) => e.relationType === activeFilter);
+    return dataEdges.filter((e) => e.relationType === activeFilter);
   }, [dataEdges, activeFilter]);
 
   const initialEdges: Edge[] = useMemo(() => {
     if (!filteredEdges) return [];
-    return filteredEdges.map((edge) => {
+    const renderableEdges = filteredEdges.filter((edge): edge is RenderableMindMapEdge => (
+      typeof edge.fromId === 'string' &&
+      edge.fromId.length > 0 &&
+      typeof edge.toId === 'string' &&
+      edge.toId.length > 0
+    ));
+
+    return renderableEdges.map((edge) => {
       const isSchemaMember = edge.relationType === 'schema_member';
-      const isCrossChapter = crossChapterEdgeIds.has(edge.id);
-      const color = RELATION_COLORS[edge.relationType as RelationType] || '#94a3b8';
+      const edgeKey = getEdgeKey(edge);
+      const isCrossChapter = crossChapterEdgeIds.has(edgeKey);
+      const relationType = getRelationType(edge.relationType);
+      const color = relationType ? RELATION_COLORS[relationType] : '#94a3b8';
       const isHighlighted =
         !!hoveredSchemaNode &&
         isSchemaMember &&
@@ -143,10 +357,10 @@ export function MindMap({
       const dashArray = isCrossChapter ? '8 4' : (isSchemaMember ? '6 4' : undefined);
 
       return {
-        id: edge.id,
+        id: edgeKey,
         source: edge.fromId,
         target: edge.toId,
-        label: (isCrossChapter ? '[跨章] ' : '') + (RELATION_LABELS[edge.relationType as RelationType] || edge.relationType),
+        label: (isCrossChapter ? '[跨章] ' : '') + (relationType ? RELATION_LABELS[relationType] : edge.relationType || ''),
         style: {
           stroke: color,
           strokeWidth: isCrossChapter ? 2.5 : (isHighlighted ? 3 : 1.5),
@@ -169,24 +383,32 @@ export function MindMap({
     });
   }, [filteredEdges, crossChapterEdgeIds, hoveredSchemaNode]);
 
+  const relationEdges = useMemo(() => {
+    const treeEdgeIds = new Set(treeEdges.map((edge) => edge.id));
+    return initialEdges.filter((edge) => !treeEdgeIds.has(edge.id));
+  }, [initialEdges, treeEdges]);
+
+  const flowEdges = useMemo(() => [...treeEdges, ...relationEdges], [treeEdges, relationEdges]);
+
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(flowEdges);
 
   useEffect(() => {
     setNodes(initialNodes);
-    setEdges(initialEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges]);
+    setEdges(flowEdges);
+  }, [initialNodes, flowEdges, setNodes, setEdges]);
 
   const onNodeClickHandler = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
+    (_event: React.MouseEvent, node: Node<MindMapFlowData | MindMapTreeNodeData>) => {
+      if (node.id === TREE_ROOT_ID || node.id.startsWith(TREE_CHAPTER_PREFIX)) return;
       onNodeClick?.(node.id);
     },
     [onNodeClick],
   );
 
   const onNodeMouseEnter = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
-      const nodeData = dataNodes?.find((n: any) => n.id === node.id);
+    (_event: React.MouseEvent, node: Node<MindMapFlowData | MindMapTreeNodeData>) => {
+      const nodeData = dataNodes?.find((n) => n.id === node.id);
       if (nodeData?.representationType === 'schema') {
         setHoveredSchemaNode(node.id);
       }
@@ -202,7 +424,7 @@ export function MindMap({
   const availableRelationTypes = useMemo(() => {
     if (!dataEdges) return [];
     const types = new Set<string>();
-    dataEdges.forEach((e: any) => { if (e.relationType) types.add(e.relationType); });
+    dataEdges.forEach((e) => { if (e.relationType) types.add(e.relationType); });
     return Array.from(types);
   }, [dataEdges]);
 
@@ -321,8 +543,8 @@ export function MindMap({
           <Controls />
           <MiniMap
             nodeStrokeColor="#6366f1"
-            nodeColor={(n: any) => {
-              const data = n.data as any;
+            nodeColor={(n: Node) => {
+              const data = n.data as Partial<MindMapFlowData>;
               if (data?.representationType === 'schema') return '#d97706';
               const level = data?.masteryLevel || 0;
               if (level >= 80) return '#10b981';

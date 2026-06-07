@@ -1,3 +1,4 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { adaptPath, type LearningPath, type PerformanceEntry } from '@/lib/learning-path';
@@ -96,10 +97,10 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(result);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[path/adapt POST]', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: getErrorMessage(error, 'Internal server error') },
       { status: 500 },
     );
   }

@@ -1,3 +1,4 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { suggestSchemaNodes } from '@/lib/schema-builder';
@@ -32,8 +33,8 @@ export async function GET(req: NextRequest) {
     const suggestions = await suggestSchemaNodes(knowledgeNodeId, prisma);
 
     return NextResponse.json({ suggestions });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Schema Suggest API] Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }

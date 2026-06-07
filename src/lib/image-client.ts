@@ -1,3 +1,4 @@
+import { getErrorMessage } from '@/lib/errors';
 import { prisma } from '@/lib/prisma';
 import { decryptSecret } from '@/lib/secrets';
 import { assertSafeExternalBaseUrl } from '@/lib/url-security';
@@ -85,13 +86,13 @@ export async function generateImage(options: ImageGenerateOptions): Promise<Imag
       prompt: enhancedPrompt,
       status: 'success',
     };
-  } catch (error: any) {
-    console.error('[ImageGen] Error:', error.message);
+  } catch (error: unknown) {
+    console.error('[ImageGen] Error:', getErrorMessage(error));
     return {
       imageUrl: '',
       prompt,
       status: 'failed',
-      errorMessage: error.message,
+      errorMessage: getErrorMessage(error),
     };
   }
 }

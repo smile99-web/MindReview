@@ -1,5 +1,15 @@
-const { PrismaClient } = require('@prisma/client');
-const p = new PrismaClient();
-p.apiKey.deleteMany({ where: { service: 'embedding' } })
-  .then((r) => { console.log('cleared', r.count, 'records'); return p.$disconnect(); })
-  .catch((e) => { console.error(e); process.exit(1); });
+async function main() {
+  const { PrismaClient } = await import('@prisma/client');
+  const p = new PrismaClient();
+  try {
+    const result = await p.apiKey.deleteMany({ where: { service: 'embedding' } });
+    console.log('cleared', result.count, 'records');
+  } finally {
+    await p.$disconnect();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

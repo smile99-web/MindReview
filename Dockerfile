@@ -4,16 +4,25 @@ FROM node:22-alpine AS base
 FROM base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ENV PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
+ENV npm_config_audit=false
+ENV npm_config_fund=false
+ENV npm_config_registry=$NPM_REGISTRY
+ENV npm_config_fetch_retries=5
+ENV npm_config_fetch_retry_mintimeout=20000
+ENV npm_config_fetch_retry_maxtimeout=120000
 COPY package.json package-lock.json ./
-RUN npm install
+COPY prisma ./prisma
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund --prefer-offline
+RUN node ./node_modules/prisma/build/index.js generate
 
-# === builder: prisma generate + next build ===
+# === builder: next build ===
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npx prisma generate
 RUN npm run build
 
 # === runner: production image ===

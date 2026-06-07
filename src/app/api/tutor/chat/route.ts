@@ -1,3 +1,4 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { socraticDialogue } from '@/lib/ai-tutor';
@@ -70,10 +71,10 @@ export async function POST(req: NextRequest) {
       suggestedAction: result.suggestedAction,
       understandingLevel: result.understandingLevel,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Tutor Chat API] Error:', error);
     return NextResponse.json(
-      { error: error.message || '服务器内部错误' },
+      { error: getErrorMessage(error, '服务器内部错误') },
       { status: 500 },
     );
   }

@@ -1,3 +1,4 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { assessIcapLevel } from '@/lib/ai-tutor';
@@ -102,10 +103,10 @@ export async function POST(req: NextRequest) {
         mistakesFound: mistakes.length,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Tutor Assess API] Error:', error);
     return NextResponse.json(
-      { error: error.message || '服务器内部错误' },
+      { error: getErrorMessage(error, '服务器内部错误') },
       { status: 500 },
     );
   }

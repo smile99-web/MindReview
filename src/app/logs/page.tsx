@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
 import { useEffect, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -38,7 +39,7 @@ export default function AILogsPage() {
         page: String(currentPage),
         limit: String(PAGE_SIZE),
       });
-      const res = await fetch(`/api/ai?${params.toString()}`);
+      const res = await authFetch(`/api/ai?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setLogs(data.logs || []);
@@ -58,7 +59,9 @@ export default function AILogsPage() {
   useEffect(() => { document.title = 'AI生成记录 - 知图复习'; }, []);
 
   useEffect(() => {
-    void fetchLogs(filter, page);
+    queueMicrotask(() => {
+      void fetchLogs(filter, page);
+    });
   }, [filter, page, fetchLogs]);
 
   const handleFilterChange = (newFilter: string) => {
@@ -74,15 +77,19 @@ export default function AILogsPage() {
   };
 
   const filterOptions = [
-    { key: 'all', label: '全部', icon: '📋' },
-    { key: 'llm', label: 'LLM', icon: '🤖' },
-    { key: 'tts', label: 'TTS', icon: '🔊' },
-    { key: 'image', label: '图片', icon: '🎨' },
+    { key: 'all', label: '全部' },
+    { key: 'llm', label: 'LLM' },
+    { key: 'practice_answer_grading', label: '练习判分' },
+    { key: 'tts', label: 'TTS' },
+    { key: 'image', label: '图片' },
   ];
 
   const getTypeIcon = (type: string) => {
-    const opt = filterOptions.find(f => f.key === type);
-    return opt?.icon || '📋';
+    if (type === 'practice_answer_grading') return '判';
+    if (type === 'llm') return 'AI';
+    if (type === 'tts') return '声';
+    if (type === 'image') return '图';
+    return '记';
   };
 
   if (loading && logs.length === 0) {
@@ -137,7 +144,9 @@ export default function AILogsPage() {
             <Card key={log.id} padding="sm">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <span className="text-lg">{getTypeIcon(log.generatorType)}</span>
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-xs font-semibold text-slate-500">
+                    {getTypeIcon(log.generatorType)}
+                  </span>
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-slate-800">

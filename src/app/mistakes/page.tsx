@@ -5,11 +5,41 @@ import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import type { BadgeVariant } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { authFetch } from '@/lib/auth';
 
+interface SubjectOption {
+  id: string;
+  name: string;
+}
+
+interface MistakeItem {
+  id: string;
+  questionText: string;
+  wrongAnswer?: string | null;
+  correctAnswer: string;
+  mistakeType?: string | null;
+  analysis?: string | null;
+  resolved: boolean;
+  createdAt: string | Date;
+  knowledgeNode?: {
+    id: string;
+    title: string;
+  } | null;
+}
+
+interface CreateMistakeResponse {
+  success?: boolean;
+  mistake?: MistakeItem;
+}
+
+interface UpdateMistakeResponse {
+  resolved: boolean;
+}
+
 export default function MistakesPage() {
-  const [mistakes, setMistakes] = useState<any[]>([]);
+  const [mistakes, setMistakes] = useState<MistakeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
@@ -21,13 +51,13 @@ export default function MistakesPage() {
   const [submitting, setSubmitting] = useState(false);
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
-  const [subjects, setSubjects] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<SubjectOption[]>([]);
 
   const fetchMistakes = useCallback(() => {
     setLoading(true);
     Promise.all([
-      fetch('/api/mistakes').then(r => r.json()),
-      fetch('/api/subjects').then(r => r.json()),
+      authFetch('/api/mistakes').then(r => r.json()),
+      authFetch('/api/subjects').then(r => r.json()),
     ])
       .then(([mistakesData, subjectsData]) => {
         setMistakes(Array.isArray(mistakesData) ? mistakesData : []);
@@ -40,7 +70,9 @@ export default function MistakesPage() {
   useEffect(() => { document.title = '错题本 - 知图复习'; }, []);
 
   useEffect(() => {
-    fetchMistakes();
+    queueMicrotask(() => {
+      fetchMistakes();
+    });
   }, [fetchMistakes]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -49,14 +81,15 @@ export default function MistakesPage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/mistakes', {
+      const res = await authFetch('/api/mistakes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
-      const data = await res.json();
-      if (data.success) {
-        setMistakes(prev => [data.mistake, ...prev]);
+      const data = await res.json() as CreateMistakeResponse;
+      if (data.success && data.mistake) {
+        const mistake = data.mistake;
+        setMistakes(prev => [mistake, ...prev]);
         setShowForm(false);
         setForm({ subjectId: '', questionText: '', wrongAnswer: '', correctAnswer: '' });
       }
@@ -76,7 +109,7 @@ export default function MistakesPage() {
         body: JSON.stringify({ resolved: !currentResolved }),
       });
       if (res.ok) {
-        const updated = await res.json();
+        const updated = await res.json() as UpdateMistakeResponse;
         setMistakes(prev => prev.map(m => m.id === id ? { ...m, resolved: updated.resolved } : m));
       }
     } catch (err) {
@@ -107,7 +140,7 @@ export default function MistakesPage() {
     application: '应用问题',
   };
 
-  const mistakeTypeColors: Record<string, string> = {
+  const mistakeTypeColors: Record<string, BadgeVariant> = {
     conceptual: 'danger',
     calculation: 'warning',
     careless: 'default',
@@ -150,7 +183,7 @@ export default function MistakesPage() {
                 className="w-full rounded-xl border border-slate-200/80 px-3.5 py-2.5 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors"
               >
                 <option value="">选择学科</option>
-                {subjects.map((s: any) => (
+                {subjects.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
@@ -203,14 +236,14 @@ export default function MistakesPage() {
       )}
 
       <div className="space-y-4">
-        {mistakes.map((m: any) => (
+        {mistakes.map((m) => (
           <Card key={m.id} className={m.resolved ? 'opacity-70' : ''}>
             <div className="flex items-start justify-between mb-3">
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge
-                  variant={(mistakeTypeColors[m.mistakeType] || 'default') as any}
+                  variant={mistakeTypeColors[m.mistakeType || ''] || 'default'}
                 >
-                  {mistakeTypeLabels[m.mistakeType] || m.mistakeType || '未分类'}
+                  {mistakeTypeLabels[m.mistakeType || ''] || m.mistakeType || '未分类'}
                 </Badge>
                 {m.resolved && <Badge variant="success">已解决</Badge>}
                 {m.knowledgeNode && (

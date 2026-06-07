@@ -204,7 +204,7 @@ export interface ReviewTaskItem {
   knowledgeNodeId: string;
   knowledgeTitle: string;
   taskType: IcapLevel;
-  content: any;
+  content: unknown;
 }
 
 // ========== Worked Example (认知负荷理论) ==========

@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { authFetch } from '@/lib/auth';
+import { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { getErrorMessage } from '@/lib/errors';
 
 interface SchemaApplyExerciseProps {
   schemaId: string;
@@ -40,6 +42,10 @@ interface CheckResult {
   overallComment: string;
 }
 
+interface ApiErrorResponse {
+  error?: string;
+}
+
 export function SchemaApplyExercise({
   schemaId,
   schemaName,
@@ -58,16 +64,11 @@ export function SchemaApplyExercise({
   const [generating, setGenerating] = useState(true);
   const [showExpected, setShowExpected] = useState<Record<string, boolean>>({});
 
-  // Generate problem on mount
-  useEffect(() => {
-    generateProblem();
-  }, [schemaId]);
-
-  const generateProblem = async () => {
+  const generateProblem = useCallback(async () => {
     setGenerating(true);
     setError('');
     try {
-      const res = await fetch('/api/ai', {
+      const res = await authFetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -80,19 +81,26 @@ export function SchemaApplyExercise({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as ProblemSetup & ApiErrorResponse;
       if (!res.ok) {
         throw new Error(data.error || '生成题目失败');
       }
 
       setProblemSetup(data);
       setPhase('ready');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     } finally {
       setGenerating(false);
     }
-  };
+  }, [memberCount, schemaData, schemaDescription, schemaId, schemaName]);
+
+  // Generate problem on mount
+  useEffect(() => {
+    queueMicrotask(() => {
+      void generateProblem();
+    });
+  }, [generateProblem]);
 
   const handleSubmit = async () => {
     // Validate all steps are filled
@@ -109,7 +117,7 @@ export function SchemaApplyExercise({
     setError('');
 
     try {
-      const res = await fetch('/api/ai', {
+      const res = await authFetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -127,15 +135,15 @@ export function SchemaApplyExercise({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as CheckResult & ApiErrorResponse;
       if (!res.ok) {
         throw new Error(data.error || '验证失败');
       }
 
       setCheckResult(data);
       setPhase('submitted');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -147,7 +155,7 @@ export function SchemaApplyExercise({
     setShowExpected({});
     setPhase('ready');
     setError('');
-    generateProblem();
+    void generateProblem();
   };
 
   const handleComplete = () => {

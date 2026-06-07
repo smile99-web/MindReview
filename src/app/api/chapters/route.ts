@@ -1,5 +1,7 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 
 // GET /api/chapters?subjectId=xxx — 获取章节列表
 export async function GET(req: NextRequest) {
@@ -7,7 +9,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const subjectId = searchParams.get('subjectId');
 
-    const where: any = {};
+    const where: Prisma.ChapterWhereInput = {};
     if (subjectId) where.subjectId = subjectId;
 
     const chapters = await prisma.chapter.findMany({
@@ -20,8 +22,8 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json(chapters);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -47,7 +49,7 @@ export async function POST(req: NextRequest) {
 
     const chapter = await prisma.chapter.create({ data: body });
     return NextResponse.json(chapter);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }

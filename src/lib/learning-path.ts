@@ -152,7 +152,7 @@ function topologicalSortByLevel(
   let queue: NodeRecord[] = [];
 
   // Start with all zero-indegree nodes
-  for (const [id, gn] of nodeMap) {
+  for (const gn of nodeMap.values()) {
     if (gn.indegree === 0) {
       queue.push(gn.node);
     }
@@ -206,7 +206,7 @@ function topologicalSortByLevel(
       `[learning-path] ${nodes.length - processed} nodes in cycles, appending to end.`,
     );
     const remaining: NodeRecord[] = [];
-    for (const [id, gn] of nodeMap) {
+    for (const gn of nodeMap.values()) {
       if (gn.indegree > 0) {
         remaining.push(gn.node);
       }

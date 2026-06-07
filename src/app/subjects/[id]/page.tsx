@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -15,15 +15,81 @@ import { useUserId } from '@/components/auth/AuthProvider';
 import { SUBJECT_CONFIG } from '@/types';
 import type { SubjectName } from '@/types';
 
+interface SubjectDetail {
+  id: string;
+  name: string;
+  icon?: string | null;
+}
+
+interface ChapterItem {
+  id: string;
+  title: string;
+  children?: { id: string }[];
+  _count?: {
+    knowledgeNodes?: number;
+  };
+}
+
+interface KnowledgeNodeItem {
+  id: string;
+  title: string;
+  summary?: string | null;
+  masteryLevel: number;
+  chapter?: {
+    title?: string | null;
+  } | null;
+}
+
+interface LearningPathStep {
+  nodeId: string;
+  title: string;
+  summary?: string | null;
+  icapLevel: string;
+  estimatedMinutes?: number;
+  difficulty: number;
+  masteryLevel: number;
+  locked?: boolean;
+}
+
+interface LearningPath {
+  steps?: LearningPathStep[];
+  totalSteps?: number;
+  totalEstimatedMinutes?: number;
+}
+
+interface BlockedByNode {
+  nodeId: string;
+  title: string;
+  masteryLevel: number;
+  requiredLevel: number;
+}
+
+interface BlockedNode {
+  nodeId: string;
+  blockedBy: BlockedByNode[];
+}
+
+type SubjectsResponseItem = SubjectDetail;
+
+interface KnowledgeResponse {
+  nodes?: KnowledgeNodeItem[];
+}
+
+interface GeneratePathResponse {
+  path?: LearningPath;
+  blockedNodes?: BlockedNode[];
+}
+
 export default function SubjectDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const userId = useUserId() || '';
   const router = useRouter();
   const id = params.id as string;
 
-  const [subject, setSubject] = useState<any>(null);
-  const [chapters, setChapters] = useState<any[]>([]);
-  const [nodes, setNodes] = useState<any[]>([]);
+  const [subject, setSubject] = useState<SubjectDetail | null>(null);
+  const [chapters, setChapters] = useState<ChapterItem[]>([]);
+  const [nodes, setNodes] = useState<KnowledgeNodeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDecompose, setShowDecompose] = useState(false);
   const [showTextbookGenerate, setShowTextbookGenerate] = useState(false);
@@ -31,8 +97,8 @@ export default function SubjectDetailPage() {
   const [deletingChapter, setDeletingChapter] = useState<string | null>(null);
   const [deletingNode, setDeletingNode] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'chapter' | 'node'; id: string; title: string } | null>(null);
-  const [learningPath, setLearningPath] = useState<any>(null);
-  const [blockedNodes, setBlockedNodes] = useState<any[]>([]);
+  const [learningPath, setLearningPath] = useState<LearningPath | null>(null);
+  const [blockedNodes, setBlockedNodes] = useState<BlockedNode[]>([]);
   const [pathLoading, setPathLoading] = useState(false);
   const [showPath, setShowPath] = useState(false);
 
@@ -40,16 +106,17 @@ export default function SubjectDetailPage() {
     setLoading(true);
     try {
       const [subjRes, chRes, nodeRes] = await Promise.all([
-        fetch(`/api/subjects`),
-        fetch(`/api/chapters?subjectId=${id}`),
-        fetch(`/api/knowledge?subjectId=${id}&limit=100`),
+        authFetch(`/api/subjects`),
+        authFetch(`/api/chapters?subjectId=${id}`),
+        authFetch(`/api/knowledge?subjectId=${id}&limit=100`),
       ]);
 
-      const subjects = await subjRes.json();
-      const currentSubject = subjects.find((s: any) => s.id === id);
+      const subjects = await subjRes.json() as SubjectsResponseItem[];
+      const currentSubject = subjects.find((s) => s.id === id);
       setSubject(currentSubject || null);
-      setChapters(await chRes.json());
-      setNodes((await nodeRes.json()).nodes || []);
+      setChapters(await chRes.json() as ChapterItem[]);
+      const knowledgeResult = await nodeRes.json() as KnowledgeResponse;
+      setNodes(knowledgeResult.nodes || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -58,8 +125,19 @@ export default function SubjectDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    loadData();
+    queueMicrotask(() => {
+      void loadData();
+    });
   }, [loadData]);
+
+  useEffect(() => {
+    if (searchParams.get('generate') === 'textbook') {
+      queueMicrotask(() => {
+        setShowTextbookGenerate(true);
+        setShowDecompose(false);
+      });
+    }
+  }, [searchParams]);
 
   const handleDeleteChapter = async (chId: string) => {
     setDeletingChapter(chId);
@@ -97,20 +175,20 @@ export default function SubjectDetailPage() {
     setPathLoading(true);
     setShowPath(true);
     try {
-      const res = await fetch('/api/path/generate', {
+      const res = await authFetch('/api/path/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subjectId: id, userId }),
       });
-      const data = await res.json();
-      setLearningPath(data.path);
+      const data = await res.json() as GeneratePathResponse;
+      setLearningPath(data.path || null);
       setBlockedNodes(data.blockedNodes || []);
     } catch { /* ignore */ }
     setPathLoading(false);
   };
 
   // Build lookup: nodeId -> blockedBy info
-  const blockedMap = new Map<string, any[]>();
+  const blockedMap = new Map<string, BlockedByNode[]>();
   for (const bn of blockedNodes) {
     blockedMap.set(bn.nodeId, bn.blockedBy);
   }
@@ -197,7 +275,7 @@ export default function SubjectDetailPage() {
             initialSubject={subject.name as SubjectName}
             onGenerated={() => {
               setShowTextbookGenerate(false);
-              loadData(); router.refresh();
+              void loadData(); router.refresh();
             }}
           />
         </div>
@@ -206,9 +284,9 @@ export default function SubjectDetailPage() {
       {showDecompose && (
         <div className="mb-8">
           <DecomposeForm
-            onDecomposed={(result) => {
+              onDecomposed={() => {
               setShowDecompose(false);
-              loadData(); router.refresh();
+              void loadData(); router.refresh();
             }}
           />
         </div>
@@ -227,11 +305,11 @@ export default function SubjectDetailPage() {
               </div>
             ) : learningPath ? (
               <div className="space-y-0">
-                {learningPath.steps?.map((step: any, i: number) => {
+                {learningPath.steps?.map((step, i) => {
                   const isLocked = step.locked === true;
                   const blockedInfo = blockedMap.get(step.nodeId);
                   const lockTooltip = blockedInfo?.length
-                    ? `需要先掌握: ${blockedInfo.map((b: any) => b.title).join('、')}`
+                    ? `需要先掌握: ${blockedInfo.map((b) => b.title).join('、')}`
                     : '需要先掌握前置知识点';
 
                   return (
@@ -304,7 +382,7 @@ export default function SubjectDetailPage() {
 
       {activeTab === 'chapters' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {chapters.map((ch: any) => (
+          {chapters.map((ch) => (
             <Card key={ch.id} hover>
               <div className="flex items-start gap-3">
                 <Link href={`/chapters/${ch.id}`} className="flex items-start gap-3 flex-1 min-w-0">
@@ -314,9 +392,9 @@ export default function SubjectDetailPage() {
                     <p className="text-sm text-slate-500 mt-1">
                       {ch._count?.knowledgeNodes || 0} 个知识点
                     </p>
-                    {ch.children?.length > 0 && (
+                    {(ch.children?.length ?? 0) > 0 && (
                       <p className="text-xs text-slate-400 mt-1">
-                        含 {ch.children.length} 个子章节
+                        含 {ch.children?.length ?? 0} 个子章节
                       </p>
                     )}
                   </div>
@@ -342,7 +420,7 @@ export default function SubjectDetailPage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {nodes.map((node: any) => (
+          {nodes.map((node) => (
             <Card key={node.id} hover padding="sm">
               <div className="flex items-center justify-between">
                 <Link href={`/cards/${node.id}`} className="flex-1 min-w-0 flex items-center justify-between">

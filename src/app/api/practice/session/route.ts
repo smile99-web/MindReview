@@ -1,6 +1,8 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { applyProgressToNode } from '@/lib/user-knowledge-progress';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -44,6 +46,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // --- resolve user ---
+    const uid = await resolveUserIdFromRequest(req);
+
     // --- fetch knowledge node (sanity check) ---
     const knowledgeNode = await prisma.knowledgeNode.findUnique({
       where: { id: knowledgeNodeId },
@@ -53,7 +58,17 @@ export async function POST(req: NextRequest) {
         summary: true,
         difficulty: true,
         masteryLevel: true,
+        repetitions: true,
+        easeFactor: true,
+        intervalDays: true,
+        nextReviewAt: true,
+        lastReviewAt: true,
+        forgetRisk: true,
         icapLevel: true,
+        userProgress: {
+          where: { userId: uid },
+          take: 1,
+        },
         subject: { select: { id: true, name: true } },
       },
     });
@@ -65,8 +80,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // --- resolve user ---
-    const uid = await resolveUserIdFromRequest(req);
+    const progressAwareNode = applyProgressToNode(knowledgeNode, knowledgeNode.userProgress[0]);
 
     // --- check for existing active session ---
     const existingIncomplete = await prisma.reviewTask.findMany({
@@ -95,7 +109,7 @@ export async function POST(req: NextRequest) {
           orderBy: { createdAt: 'asc' },
         });
 
-        return NextResponse.json(buildSessionResponse(knowledgeNode, tasks, 'active'));
+        return NextResponse.json(buildSessionResponse(progressAwareNode, tasks, 'active'));
       }
     }
 
@@ -125,11 +139,11 @@ export async function POST(req: NextRequest) {
       ),
     );
 
-    return NextResponse.json(buildSessionResponse(knowledgeNode, tasks, 'active'));
-  } catch (error: any) {
+    return NextResponse.json(buildSessionResponse(progressAwareNode, tasks, 'active'));
+  } catch (error: unknown) {
     console.error('[practice/session POST]', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: getErrorMessage(error, 'Internal server error') },
       { status: 500 },
     );
   }

@@ -1,8 +1,8 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 
-// PATCH /api/mistakes/[id] — 切换错题解决状态
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -11,29 +11,28 @@ export async function PATCH(
     const { id } = await params;
     const userId = await resolveUserIdFromRequest(req);
     const body = await req.json();
-    const { resolved } = body;
+    const resolved = body?.resolved;
 
-    // 验证错题属于当前用户
-    const existing = await prisma.mistake.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json({ error: '错题不存在' }, { status: 404 });
-    }
-    if (existing.userId !== userId) {
-      return NextResponse.json({ error: '无权操作此错题' }, { status: 403 });
+    if (typeof resolved !== 'boolean') {
+      return NextResponse.json({ error: 'resolved must be a boolean' }, { status: 400 });
     }
 
-    const mistake = await prisma.mistake.update({
-      where: { id },
+    const updated = await prisma.mistake.updateMany({
+      where: { id, userId },
       data: { resolved },
     });
 
+    if (updated.count === 0) {
+      return NextResponse.json({ error: 'Mistake not found' }, { status: 404 });
+    }
+
+    const mistake = await prisma.mistake.findUnique({ where: { id } });
     return NextResponse.json(mistake);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 
-// DELETE /api/mistakes/[id] — 删除错题
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -42,17 +41,16 @@ export async function DELETE(
     const { id } = await params;
     const userId = await resolveUserIdFromRequest(req);
 
-    const existing = await prisma.mistake.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json({ error: '错题不存在' }, { status: 404 });
-    }
-    if (existing.userId !== userId) {
-      return NextResponse.json({ error: '无权操作此错题' }, { status: 403 });
+    const deleted = await prisma.mistake.deleteMany({
+      where: { id, userId },
+    });
+
+    if (deleted.count === 0) {
+      return NextResponse.json({ error: 'Mistake not found' }, { status: 404 });
     }
 
-    await prisma.mistake.delete({ where: { id } });
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }

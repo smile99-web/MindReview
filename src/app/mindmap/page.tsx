@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { MindMap } from '@/components/mindmap/MindMap';
@@ -8,18 +9,50 @@ import { Badge } from '@/components/ui/Badge';
 import { RELATION_LABELS, RELATION_COLORS } from '@/types';
 import type { RelationType } from '@/types';
 
+interface MindMapSubject {
+  id: string;
+  name: string;
+  icon?: string | null;
+  _count?: {
+    knowledgeNodes?: number;
+    chapters?: number;
+  };
+}
+
+interface MindMapNode {
+  id: string;
+  title?: string;
+  subject?: { name?: string | null } | null;
+  chapter?: { title?: string | null } | null;
+}
+
+interface MindMapEdge {
+  id: string;
+  fromId?: string;
+  toId?: string;
+  relationType?: string;
+  label?: string | null;
+}
+
+interface MindMapResponse {
+  nodes?: MindMapNode[];
+  edges?: MindMapEdge[];
+}
+
 function MindMapContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const subjectId = searchParams.get('subjectId');
   const chapterId = searchParams.get('chapterId');
 
-  const [data, setData] = useState<{ nodes: any[]; edges: any[] }>({ nodes: [], edges: [] });
+  const [data, setData] = useState<{ nodes: MindMapNode[]; edges: MindMapEdge[] }>({ nodes: [], edges: [] });
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('思维导图');
   const [showSchemas, setShowSchemas] = useState(false);
-  const [subjects, setSubjects] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<MindMapSubject[]>([]);
   const [subjectsLoading, setSubjectsLoading] = useState(false);
+  const [relationGenerating, setRelationGenerating] = useState(false);
+  const [relationMessage, setRelationMessage] = useState('');
 
   const loadData = useCallback(async (includeSchemas: boolean) => {
     if (!subjectId && !chapterId) {
@@ -33,15 +66,17 @@ function MindMapContent() {
       if (chapterId) params.set('chapterId', chapterId);
       if (includeSchemas) params.set('includeSchemas', 'true');
 
-      const res = await fetch(`/api/mindmap?${params.toString()}`);
-      const result = await res.json();
-      setData({ nodes: result.nodes || [], edges: result.edges || [] });
+      const res = await authFetch(`/api/mindmap?${params.toString()}`);
+      const result = await res.json() as MindMapResponse;
+      const nodes = result.nodes || [];
+      const edges = result.edges || [];
+      setData({ nodes, edges });
 
-      if (result.nodes?.length > 0) {
+      if (nodes.length > 0) {
         setTitle(
           chapterId
-            ? `${result.nodes[0].chapter?.title || '章节'} 思维导图`
-            : `${result.nodes[0].subject?.name || '学科'} 思维导图`,
+            ? `${nodes[0].chapter?.title || '章节'} 思维导图`
+            : `${nodes[0].subject?.name || '学科'} 思维导图`,
         );
       }
     } catch (err) {
@@ -54,18 +89,22 @@ function MindMapContent() {
   useEffect(() => { document.title = '思维导图 - 知图复习'; }, []);
 
   useEffect(() => {
-    loadData(showSchemas);
+    queueMicrotask(() => {
+      void loadData(showSchemas);
+    });
   }, [loadData, showSchemas]);
 
   // 无参数时加载学科列表
   useEffect(() => {
     if (!subjectId && !chapterId) {
-      setSubjectsLoading(true);
-      fetch('/api/subjects')
-        .then(res => res.json())
-        .then(data => setSubjects(Array.isArray(data) ? data : data.subjects || []))
-        .catch(() => {})
-        .finally(() => setSubjectsLoading(false));
+      queueMicrotask(() => {
+        setSubjectsLoading(true);
+        authFetch('/api/subjects')
+          .then(res => res.json())
+          .then(data => setSubjects(Array.isArray(data) ? data : data.subjects || []))
+          .catch(() => {})
+          .finally(() => setSubjectsLoading(false));
+      });
     }
   }, [subjectId, chapterId]);
 
@@ -74,6 +113,37 @@ function MindMapContent() {
 
   const handleNodeClick = (nodeId: string) => {
     router.push(`/cards/${nodeId}`);
+  };
+
+  const handleGenerateRelations = async () => {
+    if (!subjectId && !chapterId) return;
+    setRelationGenerating(true);
+    setRelationMessage('');
+    try {
+      const res = await authFetch('/api/mindmap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'generate-relations',
+          subjectId,
+          chapterId,
+        }),
+      });
+      const result = await res.json() as { created?: number; error?: string };
+      if (!res.ok) {
+        throw new Error(result.error || '导图关系生成失败');
+      }
+      setRelationMessage(
+        result.created && result.created > 0
+          ? `已补全 ${result.created} 条导图关系`
+          : '当前知识点关系已经是最新',
+      );
+      await loadData(showSchemas);
+    } catch (error) {
+      setRelationMessage(error instanceof Error ? error.message : '导图关系生成失败');
+    } finally {
+      setRelationGenerating(false);
+    }
   };
 
   const legendItems = Object.entries(RELATION_LABELS);
@@ -107,12 +177,29 @@ function MindMapContent() {
             <span className="text-sm text-slate-600 font-medium">显示图式</span>
           </label>
           {subjectId && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleGenerateRelations}
+              loading={relationGenerating}
+              disabled={data.nodes.length === 0}
+            >
+              补全导图关系
+            </Button>
+          )}
+          {subjectId && (
             <Button variant="secondary" size="sm" onClick={() => router.push(`/subjects/${subjectId}`)}>
               返回学科
             </Button>
           )}
         </div>
       </div>
+
+      {relationMessage && (
+        <div className="mb-4 rounded-xl border border-indigo-100 bg-indigo-50/70 px-4 py-2 text-sm text-indigo-700">
+          {relationMessage}
+        </div>
+      )}
 
       {/* 图例 */}
       <div className="flex flex-wrap gap-2 mb-4">
@@ -151,7 +238,7 @@ function MindMapContent() {
             <div>
               <p className="text-slate-500 text-sm mb-4">选择一个学科查看思维导图：</p>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {subjects.map((s: any) => (
+                {subjects.map((s) => (
                   <button
                     key={s.id}
                     onClick={() => router.push(`/mindmap?subjectId=${s.id}`)}
@@ -188,6 +275,24 @@ function MindMapContent() {
       ) : loading ? (
         <div className="h-[600px] bg-slate-100 rounded-2xl animate-pulse flex items-center justify-center">
           <p className="text-slate-400">加载中...</p>
+        </div>
+      ) : data.nodes.length === 0 ? (
+        <div className="h-[600px] bg-white rounded-2xl border border-dashed border-slate-200/80 flex items-center justify-center px-6 text-center">
+          <div>
+            <p className="text-slate-700 font-semibold">还没有可展示的导图内容</p>
+            <p className="text-sm text-slate-500 mt-1.5 mb-5">
+              思维导图会根据已生成的章节、知识点和知识关系自动绘制。
+            </p>
+            {subjectId ? (
+              <Button onClick={() => router.push(`/subjects/${subjectId}?generate=textbook`)}>
+                去生成学科内容
+              </Button>
+            ) : (
+              <Button variant="secondary" onClick={() => router.push('/subjects')}>
+                前往学科页
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
         <MindMap

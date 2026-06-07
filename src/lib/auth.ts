@@ -24,6 +24,13 @@ const USER_KEY = "mindreview_user";
 const ACCESS_COOKIE = "mindreview_access_token";
 const COOKIE_MAX_AGE_SECONDS = 15 * 60;
 
+export class AuthExpiredError extends Error {
+  constructor(message = "Session expired") {
+    super(message);
+    this.name = "AuthExpiredError";
+  }
+}
+
 function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(ACCESS_KEY);
@@ -52,6 +59,15 @@ function clearTokens() {
   localStorage.removeItem(USER_KEY);
   document.cookie = `${ACCESS_COOKIE}=; path=/; max-age=0`;
   document.cookie = "auth_status=; path=/; max-age=0";
+}
+
+function redirectToLogin() {
+  if (typeof window === "undefined") return;
+  const next = `${window.location.pathname}${window.location.search}`;
+  const target = next && next !== "/"
+    ? `/auth/login?next=${encodeURIComponent(next)}`
+    : "/auth/login";
+  window.location.assign(target);
 }
 
 function getUser(): User | null {
@@ -113,12 +129,18 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
   const token = await getValidToken();
   if (!token) {
     clearTokens();
-    window.location.href = "/";
-    throw new Error("Session expired");
+    redirectToLogin();
+    throw new AuthExpiredError();
   }
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
+  const res = await fetch(input, { ...init, headers });
+  if (res.status === 401) {
+    clearTokens();
+    redirectToLogin();
+    throw new AuthExpiredError();
+  }
+  return res;
 }
 
 function parseError(err: unknown, fallback: string): string {

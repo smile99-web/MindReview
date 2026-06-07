@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-const VALID_CARD_TYPES = ['summary', 'formula', 'diagram', 'timeline', 'template', 'mistake'] as const;
+const VALID_CARD_TYPES = ['summary', 'formula', 'diagram', 'timeline', 'template', 'mistake', 'worked_example'] as const;
 
 export async function GET(req: NextRequest) {
   try {

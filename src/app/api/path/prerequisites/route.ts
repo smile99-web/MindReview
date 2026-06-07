@@ -1,3 +1,4 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { batchCheckPrerequisites } from '@/lib/learning-path';
@@ -36,10 +37,10 @@ export async function POST(req: NextRequest) {
     const results = await batchCheckPrerequisites(nodeIds, userId, prisma);
 
     return NextResponse.json({ results });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[path/prerequisites POST]', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: getErrorMessage(error, 'Internal server error') },
       { status: 500 },
     );
   }

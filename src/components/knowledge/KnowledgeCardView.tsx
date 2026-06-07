@@ -1,16 +1,81 @@
 'use client';
 
-import { useState } from 'react';
+import { authFetch } from '@/lib/auth';
+import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { getDifficultyLabel } from '@/lib/utils';
+import { getErrorMessage } from '@/lib/errors';
 import { ICAP_LABELS, SUBJECT_CONFIG } from '@/types';
 import type { IcapLevel, SubjectName, WorkedExample } from '@/types';
 import { RepresentationView } from './RepresentationView';
 import { LatexText } from '@/components/ui/LatexText';
 import { BoundaryCallout } from './BoundaryCallout';
 import { progressiveDisclosure } from '@/lib/ui-density';
+
+type RepresentationData = Record<string, unknown>;
+
+interface KnowledgeCard {
+  id: string;
+  cardType: string;
+  title: string;
+  content: string;
+}
+
+interface KnowledgeCardNode {
+  id: string;
+  title: string;
+  summary: string;
+  keywords: string[];
+  difficulty: number;
+  cognitiveLoad: number;
+  icapLevel: string;
+  masteryLevel: number;
+  subject?: { name: string };
+  chapter?: { title: string };
+  commonMistakes: string[];
+  typicalQuestions: string[];
+  prerequisites: string[];
+  knowledgeCards: unknown[];
+  representationType?: string | null;
+  representationData?: unknown;
+}
+
+interface WorkedExampleResponse {
+  error?: string;
+  workedExample?: WorkedExample;
+  knowledgeCard?: KnowledgeCard;
+}
+
+interface RepresentationResponse {
+  error?: string;
+  representationType?: string | null;
+  representationData?: RepresentationData | null;
+}
+
+interface TtsResponse {
+  audioUrl?: string;
+}
+
+function isKnowledgeCard(value: unknown): value is KnowledgeCard {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id' in value &&
+    'cardType' in value &&
+    'title' in value &&
+    'content' in value &&
+    typeof value.id === 'string' &&
+    typeof value.cardType === 'string' &&
+    typeof value.title === 'string' &&
+    typeof value.content === 'string'
+  );
+}
+
+function isRepresentationData(value: unknown): value is RepresentationData {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 // 所有可用的表征类型（用于下拉选择）
 const ALL_REPRESENTATION_TYPES = [
@@ -28,27 +93,11 @@ const ALL_REPRESENTATION_TYPES = [
 ];
 
 interface KnowledgeCardViewProps {
-  node: {
-    id: string;
-    title: string;
-    summary: string;
-    keywords: string[];
-    difficulty: number;
-    cognitiveLoad: number;
-    icapLevel: string;
-    masteryLevel: number;
-    subject?: { name: string };
-    chapter?: { title: string };
-    commonMistakes: string[];
-    typicalQuestions: string[];
-    prerequisites: string[];
-    knowledgeCards: any[];
-    representationType?: string | null;
-    representationData?: any;
-  };
+  node: KnowledgeCardNode;
   onTTS?: (text: string) => void;
   onGenerateImage?: (prompt: string) => void;
   generatingImage?: boolean;
+  initialAudioUrl?: string | null;
 }
 
 export function KnowledgeCardView({
@@ -56,9 +105,25 @@ export function KnowledgeCardView({
   onTTS,
   onGenerateImage,
   generatingImage = false,
+  initialAudioUrl = null,
 }: KnowledgeCardViewProps) {
   const [ttsPlaying, setTtsPlaying] = useState(false);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(initialAudioUrl);
+  const [savedKnowledgeCards, setSavedKnowledgeCards] = useState<KnowledgeCard[]>(
+    () => (node.knowledgeCards || []).filter(isKnowledgeCard),
+  );
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setAudioUrl(initialAudioUrl);
+    });
+  }, [initialAudioUrl, node.id]);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setSavedKnowledgeCards((node.knowledgeCards || []).filter(isKnowledgeCard));
+    });
+  }, [node.id, node.knowledgeCards]);
 
   // Progressive disclosure: chunk summary by cognitive load, show expand/collapse
   const summaryChunked = progressiveDisclosure(node.summary || '', node.cognitiveLoad);
@@ -67,9 +132,19 @@ export function KnowledgeCardView({
 
   // 表征状态 — 父组件统一管理
   const [repType, setRepType] = useState<string>(node.representationType || '');
-  const [repData, setRepData] = useState<any>(node.representationData || null);
+  const initialRepresentationData = isRepresentationData(node.representationData)
+    ? node.representationData
+    : null;
+  const [repData, setRepData] = useState<RepresentationData | null>(initialRepresentationData);
   const [repLoading, setRepLoading] = useState(false);
   const [repError, setRepError] = useState<string | null>(null);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setRepType(node.representationType || '');
+      setRepData(initialRepresentationData);
+    });
+  }, [initialRepresentationData, node.id, node.representationType]);
 
   // 合并表征数据到 node 形对象
   const repNode = {
@@ -78,7 +153,7 @@ export function KnowledgeCardView({
     summary: node.summary,
     subject: node.subject,
     representationType: repType || node.representationType || null,
-    representationData: repData ?? node.representationData ?? null,
+    representationData: repData ?? initialRepresentationData,
   };
 
   const subjectRepTypes =
@@ -94,6 +169,11 @@ export function KnowledgeCardView({
   const [weResult, setWeResult] = useState<WorkedExample | null>(null);
 
   const handleTTS = async () => {
+    if (onTTS) {
+      onTTS(`${node.title}。${node.summary}`);
+      return;
+    }
+
     if (audioUrl) {
       const audio = new Audio(audioUrl);
       audio.play();
@@ -102,7 +182,7 @@ export function KnowledgeCardView({
 
     setTtsPlaying(true);
     try {
-      const res = await fetch('/api/tts', {
+      const res = await authFetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -111,7 +191,7 @@ export function KnowledgeCardView({
           contentRefId: node.id,
         }),
       });
-      const data = await res.json();
+      const data = await res.json() as TtsResponse;
       if (data.audioUrl) {
         setAudioUrl(data.audioUrl);
         const audio = new Audio(data.audioUrl);
@@ -136,7 +216,7 @@ export function KnowledgeCardView({
     setWeError(null);
 
     try {
-      const res = await fetch('/api/ai', {
+      const res = await authFetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -148,16 +228,22 @@ export function KnowledgeCardView({
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
+        const errData = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(errData.error || `请求失败 (${res.status})`);
       }
 
-      const data = await res.json();
-      if (data.workedExample) {
+      const data = await res.json() as WorkedExampleResponse;
+      if (data.knowledgeCard && isKnowledgeCard(data.knowledgeCard)) {
+        setSavedKnowledgeCards(prev => [
+          data.knowledgeCard as KnowledgeCard,
+          ...prev.filter(card => card.id !== data.knowledgeCard?.id),
+        ]);
+        setWeResult(null);
+      } else if (data.workedExample) {
         setWeResult(data.workedExample);
       }
-    } catch (err: any) {
-      setWeError(err.message || '生成样例失败');
+    } catch (err: unknown) {
+      setWeError(getErrorMessage(err, 'Generate worked example failed'));
       console.error('[KnowledgeCardView] Generate worked example failed:', err);
     } finally {
       setWeGenerating(false);
@@ -174,11 +260,12 @@ export function KnowledgeCardView({
   };
 
   // Collect worked examples from existing cards + newly generated
-  const workedExampleCards = (node.knowledgeCards || []).filter(
-    (c: any) => c.cardType === 'worked_example',
+  const knowledgeCards = savedKnowledgeCards;
+  const workedExampleCards = knowledgeCards.filter(
+    (c) => c.cardType === 'worked_example',
   );
-  const otherCards = (node.knowledgeCards || []).filter(
-    (c: any) => c.cardType !== 'worked_example',
+  const otherCards = knowledgeCards.filter(
+    (c) => c.cardType !== 'worked_example',
   );
 
   /** 自动检测 + 生成表征（RepresentationView 的 onDetect 回调） */
@@ -187,22 +274,22 @@ export function KnowledgeCardView({
     setRepError(null);
 
     try {
-      const res = await fetch('/api/representation/detect', {
+      const res = await authFetch('/api/representation/detect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ knowledgeNodeId: node.id }),
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
+        const errData = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(errData.error || `请求失败 (${res.status})`);
       }
 
-      const result = await res.json();
-      setRepType(result.representationType);
-      setRepData(result.representationData);
-    } catch (err: any) {
-      setRepError(err.message || '生成失败');
+      const result = await res.json() as RepresentationResponse;
+      setRepType(result.representationType || '');
+      setRepData(result.representationData || null);
+    } catch (err: unknown) {
+      setRepError(getErrorMessage(err, 'Generate representation failed'));
       console.error('[KnowledgeCardView] Detect failed:', err);
     } finally {
       setRepLoading(false);
@@ -215,7 +302,7 @@ export function KnowledgeCardView({
     setRepError(null);
 
     try {
-      const res = await fetch('/api/representation/generate', {
+      const res = await authFetch('/api/representation/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -225,15 +312,15 @@ export function KnowledgeCardView({
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
+        const errData = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(errData.error || `请求失败 (${res.status})`);
       }
 
-      const result = await res.json();
-      setRepType(result.representationType);
-      setRepData(result.representationData);
-    } catch (err: any) {
-      setRepError(err.message || '重新生成失败');
+      const result = await res.json() as RepresentationResponse;
+      setRepType(result.representationType || '');
+      setRepData(result.representationData || null);
+    } catch (err: unknown) {
+      setRepError(getErrorMessage(err, 'Regenerate representation failed'));
       console.error('[KnowledgeCardView] Regenerate failed:', err);
     } finally {
       setRepLoading(false);
@@ -393,7 +480,6 @@ export function KnowledgeCardView({
       {weResult && (
         <WorkedExampleDisplay
           example={weResult}
-          cardId="new"
           solutionVisible={weSolutionVisible['new'] || false}
           stepsExpanded={weStepsExpanded['new'] || false}
           similarVisible={weSimilarVisible['new'] || false}
@@ -418,14 +504,13 @@ export function KnowledgeCardView({
       )}
 
       {/* Existing saved worked example cards */}
-      {workedExampleCards.map((card: any) => {
+      {workedExampleCards.map((card) => {
         const we = parseWorkedExample(card.content);
         if (!we) return null;
         return (
           <WorkedExampleDisplay
             key={card.id}
             example={we}
-            cardId={card.id}
             solutionVisible={weSolutionVisible[card.id] || false}
             stepsExpanded={weStepsExpanded[card.id] || false}
             similarVisible={weSimilarVisible[card.id] || false}
@@ -497,7 +582,7 @@ export function KnowledgeCardView({
 
         {/* 表征视图组件 — 由 KnowledgeCardView 管理所有状态 */}
         <RepresentationView
-          node={repNode as any}
+          node={repNode}
           autoDetect
           loading={repLoading}
           error={repError}
@@ -505,7 +590,7 @@ export function KnowledgeCardView({
           onRegenerate={handleRegenerate}
         />
 
-        {repData?.boundary && <BoundaryCallout boundary={repData.boundary as string} />}
+        {typeof repData?.boundary === 'string' && <BoundaryCallout boundary={repData.boundary} />}
       </Card>
 
       {/* 前置知识 */}
@@ -577,7 +662,7 @@ export function KnowledgeCardView({
       {/* 关联知识卡片 */}
       {otherCards.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {otherCards.map((card: any) => (
+          {otherCards.map((card) => (
             <Card key={card.id} padding="sm" hover>
               <div className="text-[11px] text-slate-400 mb-1 uppercase tracking-wide">
                 {card.cardType}
@@ -599,7 +684,6 @@ export function KnowledgeCardView({
 // ========== Worked Example Display (sub-component) ==========
 function WorkedExampleDisplay({
   example,
-  cardId,
   solutionVisible,
   stepsExpanded,
   similarVisible,
@@ -609,7 +693,6 @@ function WorkedExampleDisplay({
   onRevealAnswer,
 }: {
   example: WorkedExample;
-  cardId: string;
   solutionVisible: boolean;
   stepsExpanded: boolean;
   similarVisible: boolean;

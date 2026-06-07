@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button } from "@/components/ui/Button";
+import { getErrorMessage } from "@/lib/errors";
 
 const FEATURES = [
   {
@@ -110,8 +111,8 @@ export default function HomePage() {
     try {
       await login(username.trim(), password);
       router.push("/dashboard");
-    } catch (err: any) {
-      setError(err.message || "登录失败");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "登录失败"));
     } finally {
       setSubmitting(false);
     }

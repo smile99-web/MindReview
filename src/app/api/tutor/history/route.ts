@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { loadChatHistory, listSessions, deleteSession } from '@/lib/tutor-persistence';
+import { deleteSession, listSessions, loadChatHistory } from '@/lib/tutor-persistence';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const sessionId = searchParams.get('sessionId');
-    const userId = await resolveUserIdFromRequest(req);
     const action = searchParams.get('action');
     const knowledgeNodeId = searchParams.get('knowledgeNodeId') || undefined;
+    const userId = await resolveUserIdFromRequest(req);
 
     if (action === 'list') {
       const sessions = await listSessions(userId, knowledgeNodeId, prisma);
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (sessionId) {
-      const messages = await loadChatHistory(sessionId, prisma);
+      const messages = await loadChatHistory(sessionId, userId, prisma);
       return NextResponse.json({ sessionId, messages });
     }
 
@@ -38,7 +38,8 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: '缺少 sessionId' }, { status: 400 });
     }
 
-    const deleted = await deleteSession(sessionId, prisma);
+    const userId = await resolveUserIdFromRequest(req);
+    const deleted = await deleteSession(sessionId, userId, prisma);
     return NextResponse.json({ deleted });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '服务器内部错误';

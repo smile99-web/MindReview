@@ -51,12 +51,13 @@ export async function saveChatMessage(
 
 export async function loadChatHistory(
   sessionId: string,
+  userId: string,
   prisma: PrismaClient,
 ): Promise<ChatMessage[]> {
   const logs = await prisma.aiGenerationLog.findMany({
     where: {
       generatorType: 'tutor_chat',
-      prompt: { startsWith: `${sessionId}::` },
+      prompt: { startsWith: `${sessionId}::${userId}::` },
     },
     orderBy: { createdAt: 'asc' },
   });
@@ -112,12 +113,13 @@ export async function listSessions(
 
 export async function deleteSession(
   sessionId: string,
+  userId: string,
   prisma: PrismaClient,
 ): Promise<number> {
   const result = await prisma.aiGenerationLog.deleteMany({
     where: {
       generatorType: 'tutor_chat',
-      prompt: { startsWith: `${sessionId}::` },
+      prompt: { startsWith: `${sessionId}::${userId}::` },
     },
   });
   return result.count;

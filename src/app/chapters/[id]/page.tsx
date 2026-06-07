@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
@@ -8,45 +9,71 @@ import { Badge } from '@/components/ui/Badge';
 import { MasteryBar } from '@/components/ui/MasteryBar';
 import { Button } from '@/components/ui/Button';
 
+interface ChapterDetail {
+  id: string;
+  subjectId: string;
+  title: string;
+}
+
+interface KnowledgeNodeListItem {
+  id: string;
+  title: string;
+  summary?: string | null;
+  keywords: string[];
+  icapLevel: string;
+  difficulty: number;
+  masteryLevel: number;
+}
+
+interface BlockedPrerequisite {
+  nodeId: string;
+  title: string;
+}
+
+interface PrerequisiteCheck {
+  canAccess: boolean;
+  blockedBy?: BlockedPrerequisite[];
+}
+
 export default function ChapterDetailPage() {
   const params = useParams();
   const id = params.id as string;
 
-  const [chapter, setChapter] = useState<any>(null);
-  const [nodes, setNodes] = useState<any[]>([]);
+  const [chapter, setChapter] = useState<ChapterDetail | null>(null);
+  const [nodes, setNodes] = useState<KnowledgeNodeListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [blockedMap, setBlockedMap] = useState<Map<string, any[]>>(new Map());
+  const [blockedMap, setBlockedMap] = useState<Map<string, BlockedPrerequisite[]>>(new Map());
 
   useEffect(() => {
     async function load() {
       try {
         const [chRes, nodeRes] = await Promise.all([
-          fetch(`/api/chapters/${id}`),
-          fetch(`/api/knowledge?chapterId=${id}&limit=100`),
+          authFetch(`/api/chapters/${id}`),
+          authFetch(`/api/knowledge?chapterId=${id}&limit=100`),
         ]);
 
         if (chRes.ok) {
           setChapter(await chRes.json());
         }
 
-        const nodeData = (await nodeRes.json()).nodes || [];
+        const nodeData = ((await nodeRes.json()).nodes || []) as KnowledgeNodeListItem[];
         setNodes(nodeData);
 
         // Batch prerequisite check for all nodes in this chapter
         if (nodeData.length > 0) {
-          const nodeIds = nodeData.map((n: any) => n.id);
+          const nodeIds = nodeData.map((n) => n.id);
           try {
-            const prereqRes = await fetch('/api/path/prerequisites', {
+            const prereqRes = await authFetch('/api/path/prerequisites', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ nodeIds }),
             });
             const prereqData = await prereqRes.json();
-            const map = new Map<string, any[]>();
+            const map = new Map<string, BlockedPrerequisite[]>();
             if (prereqData.results) {
-              for (const [nid, check] of Object.entries(prereqData.results) as [string, any][]) {
+              for (const [nid, check] of Object.entries(prereqData.results) as [string, PrerequisiteCheck][]) {
                 if (!check.canAccess) {
-                  map.set(nid, check.blockedBy);
+                  map.set(nid, check.blockedBy || []);
                 }
               }
             }
@@ -100,11 +127,11 @@ export default function ChapterDetailPage() {
       </div>
 
       <div className="space-y-2">
-        {nodes.map((node: any) => {
+        {nodes.map((node) => {
           const blockedBy = blockedMap.get(node.id);
           const isLocked = blockedBy && blockedBy.length > 0;
           const lockTooltip = isLocked
-            ? `需要先掌握: ${blockedBy.map((b: any) => b.title).join('、')}`
+            ? `需要先掌握: ${blockedBy.map((b) => b.title).join('、')}`
             : '';
 
           const cardContent = (

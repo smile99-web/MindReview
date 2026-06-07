@@ -1,13 +1,21 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { getErrorMessage } from '@/lib/errors';
 import { SUBJECTS } from '@/types';
 import type { SubjectName } from '@/types';
 
+interface DecomposeResponse {
+  error?: string;
+  nodes?: unknown[];
+  edges?: unknown[];
+}
+
 interface DecomposeFormProps {
-  onDecomposed?: (result: any) => void;
+  onDecomposed?: (result: DecomposeResponse) => void;
 }
 
 export function DecomposeForm({ onDecomposed }: DecomposeFormProps) {
@@ -29,20 +37,20 @@ export function DecomposeForm({ onDecomposed }: DecomposeFormProps) {
     setError('');
 
     try {
-      const res = await fetch('/api/knowledge/decompose', {
+      const res = await authFetch('/api/knowledge/decompose', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subject, grade, chapter, content }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as DecomposeResponse;
       if (!res.ok) throw new Error(data.error || '拆解失败');
 
       onDecomposed?.(data);
       setContent('');
       setChapter('');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }

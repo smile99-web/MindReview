@@ -84,15 +84,6 @@ export function sm2(quality: number, previous: SM2Input["previous"]): SM2Result 
   const intervalBefore = previous.intervalDays;
 
   // 计算距上次复习的天数
-  let daysSinceLast: number;
-  if (previous.lastReviewAt) {
-    daysSinceLast = Math.max(1, Math.round(
-      (now.getTime() - previous.lastReviewAt.getTime()) / (1000 * 3600 * 24)
-    ));
-  } else {
-    daysSinceLast = 1;
-  }
-
   let newReps: number;
   let newInterval: number;
   let newEF: number;

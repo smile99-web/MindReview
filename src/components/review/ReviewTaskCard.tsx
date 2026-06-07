@@ -1,14 +1,37 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
+import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { LatexText } from "@/components/ui/LatexText";
 import { MasteryBar } from "@/components/ui/MasteryBar";
-import { ICAP_LABELS } from "@/types";
-import { getQualityColor, getHintLevel, adjustQualityForHint, HINT_LEVEL_LABELS, HINT_LEVEL_DESCRIPTIONS } from "@/lib/sm2";
+import { getQualityColor, getHintLevel, adjustQualityForHint } from "@/lib/sm2";
 import type { HintLevel } from "@/lib/sm2";
-import type { IcapLevel } from "@/types";
+
+type ReviewTrigger =
+  | "new_node"
+  | "due_now"
+  | "high_forget_risk"
+  | "low_mastery"
+  | "icap_passive"
+  | "icap_active"
+  | "icap_constructive"
+  | "icap_interactive";
+
+interface ReviewCompletionResult {
+  success?: boolean;
+  state?: {
+    repetitions?: number;
+    easeFactor?: number;
+    intervalDays?: number;
+    nextReviewAt?: string | Date | null;
+    lastReviewAt?: string | Date | null;
+    forgetRisk?: number;
+    masteryLevel?: number;
+  };
+}
 
 interface ReviewTaskCardProps {
   task: {
@@ -31,106 +54,185 @@ interface ReviewTaskCardProps {
     };
     completed?: boolean;
     score?: number;
+    reviewReason?: {
+      label: string;
+      detail: string;
+      riskPercent: number;
+      dueInDays: number | null;
+      triggers: string[];
+      taskType: string;
+    };
   };
   onComplete?: (
     taskId: string,
     quality: number,
     knowledgeNodeId: string
-  ) => void;
+  ) => Promise<ReviewCompletionResult | void> | ReviewCompletionResult | void;
 }
 
 const QUALITY_OPTIONS = [
-  { value: 0, label: "完全忘记", emoji: "😰" },
-  { value: 1, label: "很不熟悉", emoji: "😣" },
-  { value: 2, label: "看到才想起", emoji: "🤔" },
-  { value: 3, label: "有困难但对", emoji: "💪" },
-  { value: 4, label: "基本掌握", emoji: "👍" },
-  { value: 5, label: "完全掌握", emoji: "🎯" },
+  { value: 0, label: "完全忘记", description: "需要重新学习" },
+  { value: 1, label: "很不熟悉", description: "看答案仍吃力" },
+  { value: 2, label: "看到才想起", description: "需要尽快练习" },
+  { value: 3, label: "有困难但正确", description: "可以短间隔复习" },
+  { value: 4, label: "基本掌握", description: "按计划推进" },
+  { value: 5, label: "完全掌握", description: "可以拉长间隔" },
 ];
+
+const ICAP_LABELS_CN: Record<string, string> = {
+  passive: "被动复习",
+  active: "主动回忆",
+  constructive: "建构练习",
+  interactive: "互动迁移",
+  Passive: "被动复习",
+  Active: "主动回忆",
+  Constructive: "建构练习",
+  Interactive: "互动迁移",
+};
+
+const HINT_LABELS_CN: Record<HintLevel, string> = {
+  1: "完整引导",
+  2: "部分提示",
+  3: "最小提示",
+};
+
+const HINT_DESCRIPTIONS_CN: Record<HintLevel, string> = {
+  1: "显示完整解释和结构，适合首次回忆",
+  2: "只给关键概念，帮助你自己补全",
+  3: "只给方向，不打断独立回忆",
+};
+
+const REVIEW_TRIGGER_LABELS: Record<ReviewTrigger, { label: string; variant: BadgeVariant }> = {
+  new_node: { label: "首次回忆", variant: "info" },
+  due_now: { label: "今日到期", variant: "warning" },
+  high_forget_risk: { label: "遗忘风险高", variant: "danger" },
+  low_mastery: { label: "掌握度低", variant: "warning" },
+  icap_passive: { label: "被动复习", variant: "default" },
+  icap_active: { label: "主动回忆", variant: "info" },
+  icap_constructive: { label: "建构练习", variant: "purple" },
+  icap_interactive: { label: "互动迁移", variant: "purple" },
+};
+
+function formatDate(value?: string | Date | null): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("zh-CN", {
+    month: "short",
+    day: "numeric",
+    weekday: "short",
+  });
+}
+
+function normalizeTriggers(triggers: string[] = []) {
+  return triggers
+    .filter((trigger): trigger is ReviewTrigger => trigger in REVIEW_TRIGGER_LABELS)
+    .map((trigger) => REVIEW_TRIGGER_LABELS[trigger]);
+}
 
 export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
   const [showQuality, setShowQuality] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [completed, setCompleted] = useState(task.completed || false);
   const [selectedQuality, setSelectedQuality] = useState<number | null>(null);
+  const [lastAttemptQuality, setLastAttemptQuality] = useState<number | null>(null);
   const [hintUsed, setHintUsed] = useState(false);
   const [hintRevealed, setHintRevealed] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [completionResult, setCompletionResult] = useState<ReviewCompletionResult | null>(null);
 
   const node = task.knowledgeNode;
-  const reps = node.repetitions ?? 0;
-  const mastery = node.masteryLevel ?? 0;
+  const reps = completionResult?.state?.repetitions ?? node.repetitions ?? 0;
+  const mastery = completionResult?.state?.masteryLevel ?? node.masteryLevel ?? 0;
+  const nextReviewAt = completionResult?.state?.nextReviewAt ?? node.nextReviewAt;
+  const forgetRisk = completionResult?.state?.forgetRisk ?? node.forgetRisk;
   const hintLevel: HintLevel = getHintLevel(reps, mastery);
+  const icapLabel = ICAP_LABELS_CN[task.taskType] || ICAP_LABELS_CN[node.icapLevel] || task.taskType;
+  const triggerLabels = useMemo(
+    () => normalizeTriggers(task.reviewReason?.triggers),
+    [task.reviewReason?.triggers],
+  );
+  const finalQuality = selectedQuality ?? (typeof task.score === "number" ? Math.round(task.score / 20) : null);
+  const isLowQuality = finalQuality !== null && finalQuality < 3;
+  const formattedNextReview = formatDate(nextReviewAt);
+  const practiceHref = `/practice?nodeId=${encodeURIComponent(node.id)}&icapLevel=Active`;
+  const icapHref = `/practice?nodeId=${encodeURIComponent(node.id)}&icapLevel=Constructive&pipeline=1`;
 
-  if (completed) {
-    return (
-      <Card className="opacity-50">
-        <div className="flex items-center gap-2 mb-2">
-          <Badge variant="success">已完成</Badge>
-          <span className="text-sm text-slate-500">
-            {task.taskType === "passive"
-              ? "已阅读"
-              : `质量: ${task.score ? task.score / 20 : "?"}/5`}
-          </span>
-        </div>
-        <h4 className="font-medium text-slate-700">
-          {task.knowledgeNode.title}
-        </h4>
-      </Card>
-    );
-  }
-
-  const icapLabel =
-    ICAP_LABELS[task.taskType as IcapLevel] || task.taskType;
-
-  const handleSelectQuality = async (q: number) => {
-    // 使用提示 → 扣减质量分
+  const handleSubmitQuality = async (q: number) => {
     const adjustedQuality = hintUsed ? adjustQualityForHint(q, hintLevel) : q;
     setSelectedQuality(adjustedQuality);
+    setLastAttemptQuality(adjustedQuality);
     setSubmitting(true);
+    setSubmitError(null);
 
     try {
-      await new Promise((r) => setTimeout(r, 300)); // 视觉反馈
-      onComplete?.(task.id, adjustedQuality, node.id);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const result = await onComplete?.(task.id, adjustedQuality, node.id);
+      setCompletionResult(result || null);
       setCompleted(true);
-    } catch {
+    } catch (error) {
+      console.error(error);
+      setSubmitError("保存失败，请检查网络后重试。");
       setSubmitting(false);
     }
   };
 
+  if (completed) {
+    return (
+      <Card className="border-emerald-100 bg-emerald-50/40">
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <Badge variant="success">已完成</Badge>
+          {finalQuality !== null && (
+            <Badge variant={isLowQuality ? "warning" : "info"}>质量 {finalQuality}/5</Badge>
+          )}
+          {formattedNextReview && (
+            <span className="text-xs text-slate-500">预计下次复习：{formattedNextReview}</span>
+          )}
+        </div>
+        <h4 className="font-medium text-slate-800">{node.title}</h4>
+        {isLowQuality && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-3">
+            <p className="text-sm font-medium text-amber-800">这次回忆不稳，建议马上补一组练习。</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link href={practiceHref}>
+                <Button size="sm" variant="secondary">去 Practice 练习</Button>
+              </Link>
+              <Link href={icapHref}>
+                <Button size="sm">做 ICAP 训练</Button>
+              </Link>
+            </div>
+          </div>
+        )}
+      </Card>
+    );
+  }
+
   return (
     <Card className="animate-fade-in">
-      {/* 头部 */}
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1.5">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
             <Badge variant="purple">{icapLabel}</Badge>
-            <span className="text-xs text-slate-400">
-              难度: {"★".repeat(node.difficulty)}
-            </span>
-            {node.repetitions !== undefined && node.repetitions > 0 && (
-              <span className="text-xs text-slate-400">
-                · 第 {node.repetitions + 1} 次复习
-              </span>
-            )}
+            <span className="text-xs text-slate-400">难度：{"★".repeat(Math.max(1, node.difficulty))}</span>
+            {reps > 0 && <span className="text-xs text-slate-400">第 {reps + 1} 次复习</span>}
           </div>
           <h4 className="font-semibold text-slate-800">{node.title}</h4>
         </div>
 
-        {/* SM-2 状态指示器 */}
-        <div className="flex items-center gap-2 shrink-0">
-          {node.forgetRisk !== undefined && (
+        <div className="flex items-center gap-3 shrink-0">
+          {forgetRisk !== undefined && (
             <div className="text-right">
               <div className="text-[11px] text-slate-400">遗忘风险</div>
               <div
                 className={`text-sm font-semibold tabular-nums ${
-                  node.forgetRisk > 0.3
+                  forgetRisk > 0.3
                     ? "text-red-500"
-                    : node.forgetRisk > 0.15
+                    : forgetRisk > 0.15
                       ? "text-amber-500"
                       : "text-emerald-500"
                 }`}
               >
-                {(node.forgetRisk * 100).toFixed(0)}%
+                {(forgetRisk * 100).toFixed(0)}%
               </div>
             </div>
           )}
@@ -145,29 +247,43 @@ export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
         </div>
       </div>
 
-      <p className="text-sm text-slate-600 mb-4 leading-relaxed">
-        {node.summary}
-      </p>
+      <LatexText
+        text={node.summary || ""}
+        className="text-sm text-slate-600 mb-4 leading-relaxed"
+      />
 
-      <MasteryBar level={node.masteryLevel} />
+      {task.reviewReason && (
+        <div className="mb-4 rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-indigo-700">为什么今天复习</p>
+            <span className="text-[11px] font-medium text-indigo-600 bg-white/80 rounded-full px-2 py-0.5">
+              遗忘风险 {task.reviewReason.riskPercent}%
+            </span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {triggerLabels.length > 0 ? (
+              triggerLabels.map((trigger) => (
+                <Badge key={trigger.label} variant={trigger.variant}>{trigger.label}</Badge>
+              ))
+            ) : (
+              <Badge variant="default">按计划复习</Badge>
+            )}
+          </div>
+          <p className="text-sm text-slate-700 mt-2">{task.reviewReason.label}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{task.reviewReason.detail}</p>
+        </div>
+      )}
 
-      {/* SM-2 调度信息 */}
-      <div className="flex gap-3 mt-3 mb-1 text-xs text-slate-400">
-        {node.nextReviewAt && (
-          <span>
-            下次复习:{" "}
-            {new Date(node.nextReviewAt).toLocaleDateString("zh-CN")}
-          </span>
-        )}
-        {(node.intervalDays ?? 0) > 0 && (
-          <span>间隔: {node.intervalDays} 天</span>
-        )}
+      <MasteryBar level={mastery} />
+
+      <div className="flex flex-wrap gap-3 mt-3 mb-1 text-xs text-slate-400">
+        {formattedNextReview && <span>当前计划：{formattedNextReview}</span>}
+        {(node.intervalDays ?? 0) > 0 && <span>间隔：{node.intervalDays} 天</span>}
       </div>
 
-      {/* 提示系统 — 引导渐隐 (认知负荷理论) */}
       <div className="mt-3">
         {!hintRevealed ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               variant="ghost"
@@ -176,67 +292,48 @@ export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
                 setHintUsed(true);
               }}
             >
-              <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
               显示提示
             </Button>
             <span className="text-[11px] text-slate-400">
-              {HINT_LEVEL_LABELS[hintLevel]} · {HINT_LEVEL_DESCRIPTIONS[hintLevel]}
+              {HINT_LABELS_CN[hintLevel]}：{HINT_DESCRIPTIONS_CN[hintLevel]}
             </span>
           </div>
         ) : (
           <div className="p-3 rounded-xl bg-amber-50/60 border border-amber-200/60">
             <div className="flex items-center gap-1.5 mb-1">
-              <span className="text-[11px] font-semibold text-amber-600 bg-amber-100/70 px-1.5 py-0.5 rounded">
-                {HINT_LEVEL_LABELS[hintLevel]}
+              <span className="text-[11px] font-semibold text-amber-700 bg-amber-100/80 px-1.5 py-0.5 rounded">
+                {HINT_LABELS_CN[hintLevel]}
               </span>
-              <span className="text-[11px] text-amber-600/70">
-                {hintUsed && "使用提示会在评分时适当扣减"}
-              </span>
+              <span className="text-[11px] text-amber-700/70">使用提示会在评分时适当扣减</span>
             </div>
-            {hintLevel === 1 && (
-              <div className="text-sm text-amber-900 mt-1">
-                <p className="font-medium">完整引导：</p>
-                <p className="mt-0.5 text-amber-800/80">
-                  {node.title} — {node.summary}
-                </p>
-                <p className="mt-1 text-xs text-amber-700/60">
-                  试着在脑中还原完整的知识结构和解答步骤
-                </p>
-              </div>
-            )}
-            {hintLevel === 2 && (
-              <div className="text-sm text-amber-900 mt-1">
-                <p className="font-medium">部分引导：</p>
-                <p className="mt-0.5 text-amber-800/80">
-                  核心概念：「{node.title}」
-                </p>
-                <p className="mt-1 text-xs text-amber-700/60">
-                  从这个关键概念出发，尝试自己完成整个推导
-                </p>
-              </div>
-            )}
-            {hintLevel === 3 && (
-              <div className="text-sm text-amber-900 mt-1">
-                <p className="font-medium">最小引导：</p>
-                <p className="mt-0.5 text-amber-800/80">
-                  思考这个知识点属于什么领域？它与哪些概念相关？
-                </p>
-                <p className="mt-1 text-xs text-amber-700/60">
-                  你已经掌握了基础，试着完全独立回忆
-                </p>
-              </div>
-            )}
+            <div className="text-sm text-amber-900 mt-1">
+              {hintLevel === 1 && (
+                <>
+                  <p className="font-medium">完整引导：</p>
+                  <LatexText text={`${node.title}：${node.summary || ""}`} className="mt-0.5 text-amber-800/80" />
+                </>
+              )}
+              {hintLevel === 2 && (
+                <>
+                  <p className="font-medium">关键概念：</p>
+                  <p className="mt-0.5 text-amber-800/80">{node.title}</p>
+                </>
+              )}
+              {hintLevel === 3 && (
+                <>
+                  <p className="font-medium">回忆方向：</p>
+                  <p className="mt-0.5 text-amber-800/80">先说出它属于哪个领域，再回忆相关公式、步骤或典型错误。</p>
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      {/* 质量评分按钮 */}
       {!showQuality ? (
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
           {task.taskType === "passive" && (
-            <Button size="sm" onClick={() => handleSelectQuality(3)}>
+            <Button size="sm" onClick={() => handleSubmitQuality(3)} loading={submitting}>
               我已阅读
             </Button>
           )}
@@ -250,27 +347,21 @@ export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
         </div>
       ) : (
         <div className="mt-4">
-          <p className="text-sm font-medium text-slate-700 mb-3">
-            回忆质量评分 (0-5)
-          </p>
-          <div className="grid grid-cols-3 gap-2">
+          <p className="text-sm font-medium text-slate-700 mb-3">回忆质量评分</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {QUALITY_OPTIONS.map((opt) => {
               const isSelected = selectedQuality === opt.value;
               return (
                 <button
                   key={opt.value}
                   disabled={submitting}
-                  onClick={() => handleSelectQuality(opt.value)}
-                  className={`flex flex-col items-center gap-1 p-2.5 rounded-xl border transition-all duration-200 ${
+                  onClick={() => handleSubmitQuality(opt.value)}
+                  className={`flex min-h-[82px] flex-col items-start gap-1 p-2.5 rounded-xl border text-left transition-all duration-200 ${
                     isSelected
                       ? "border-indigo-300 bg-indigo-50 shadow-sm"
                       : "border-slate-200/80 hover:border-slate-300 hover:bg-slate-50"
                   } disabled:opacity-50`}
                 >
-                  <span className="text-lg">{opt.emoji}</span>
-                  <span className="text-xs font-medium text-slate-600">
-                    {opt.label}
-                  </span>
                   <span
                     className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${
                       getQualityColor(opt.value)
@@ -278,14 +369,31 @@ export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
                   >
                     {opt.value}
                   </span>
+                  <span className="text-xs font-medium text-slate-700">{opt.label}</span>
+                  <span className="text-[11px] text-slate-400">{opt.description}</span>
                 </button>
               );
             })}
           </div>
+
           {submitting && (
             <div className="flex items-center justify-center gap-2 mt-3 text-sm text-indigo-500">
               <div className="animate-spin h-4 w-4 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full" />
               正在保存...
+            </div>
+          )}
+
+          {submitError && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2">
+              <p className="text-xs text-red-600 flex-1 min-w-[180px]">{submitError}</p>
+              <Button
+                size="sm"
+                variant="danger"
+                loading={submitting}
+                onClick={() => lastAttemptQuality !== null && handleSubmitQuality(lastAttemptQuality)}
+              >
+                重试提交
+              </Button>
             </div>
           )}
         </div>

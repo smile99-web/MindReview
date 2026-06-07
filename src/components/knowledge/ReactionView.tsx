@@ -92,7 +92,7 @@ function parseAtoms(formula: string): Record<string, number> {
   const counts: Record<string, number> = {};
 
   // Normalize subscripts to plain digits
-  let cleaned = formula
+  const cleaned = formula
     // LaTeX grouped subscript: _{2}, _{10}
     .replace(/_{(\d+)}/g, '$1')
     // LaTeX inline subscript before a digit: _2, _3 (only when followed by a digit)
@@ -202,7 +202,9 @@ export function ReactionView({
 
   // Reset coefficients when the equation changes
   useEffect(() => {
-    setCoeffs({});
+    queueMicrotask(() => {
+      setCoeffs({});
+    });
   }, [equation]);
 
   // Real-time balance check
@@ -225,7 +227,8 @@ export function ReactionView({
         const next = Math.max(0, Math.min(20, current + delta));
         if (next === base) {
           // Remove override so it resets to default
-          const { [key]: _, ...rest } = prev;
+          const rest = { ...prev };
+          delete rest[key];
           return rest;
         }
         return { ...prev, [key]: next };

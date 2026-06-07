@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -19,8 +20,10 @@ interface TextbookGenerateResult {
     chapters?: number;
     knowledgeNodes?: number;
     cards?: number;
+    edges?: number;
   };
   editionNote?: string;
+  failedChapters?: string[];
 }
 
 export function TextbookGenerateForm({ initialSubject, onGenerated }: TextbookGenerateFormProps) {
@@ -38,7 +41,7 @@ export function TextbookGenerateForm({ initialSubject, onGenerated }: TextbookGe
     setResult(null);
 
     try {
-      const res = await fetch('/api/textbook/generate', {
+      const res = await authFetch('/api/textbook/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subject, grade, volume }),
@@ -112,13 +115,24 @@ export function TextbookGenerateForm({ initialSubject, onGenerated }: TextbookGe
 
         {result && (
           <div className="bg-emerald-50/80 border border-emerald-200/60 rounded-xl px-4 py-3 text-sm text-emerald-700">
-            已生成 {result.counts?.chapters || 0} 个章节、{result.counts?.knowledgeNodes || 0} 个知识点、{result.counts?.cards || 0} 张教程卡片
+            已生成 {result.counts?.chapters || 0} 个章节、{result.counts?.knowledgeNodes || 0} 个知识点、{result.counts?.cards || 0} 张教程卡片、{result.counts?.edges || 0} 条导图关系
             {result.editionNote ? `。${result.editionNote}` : ''}
+            {result.failedChapters && result.failedChapters.length > 0 ? (
+              <p className="mt-1.5 text-amber-700">
+                部分章节生成较慢，已先导入章节概览：{result.failedChapters.join('、')}。可以再次点击生成补齐知识点。
+              </p>
+            ) : null}
           </div>
         )}
 
+        {loading && (
+          <p className="text-xs text-slate-500">
+            正在按章节分批生成，耗时会比连接测试更长，请不要重复点击或刷新页面。
+          </p>
+        )}
+
         <Button type="submit" loading={loading}>
-          生成人教版内容
+          {loading ? '正在分章生成...' : '生成人教版内容'}
         </Button>
       </form>
     </Card>

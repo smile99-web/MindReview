@@ -2,6 +2,7 @@ import { llmCall } from '@/lib/llm-client';
 import { prisma } from '@/lib/prisma';
 import { sanitizeJsonString } from '@/lib/utils';
 import { SUBJECT_CONFIG, type SubjectName } from '@/types';
+import type { Prisma, PrismaClient } from '@prisma/client';
 
 // ========== 表征类型 ==========
 export type RepresentationType =
@@ -16,6 +17,175 @@ export type RepresentationType =
   | 'template'
   | 'comparison'
   | 'concept_map';
+
+const REPRESENTATION_TYPES: RepresentationType[] = [
+  'formula',
+  'image',
+  'step',
+  'timeline',
+  'causal',
+  'force',
+  'reaction',
+  'mindmap',
+  'template',
+  'comparison',
+  'concept_map',
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return fallback;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asString(item))
+    .filter((item) => item.length > 0);
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(numeric)));
+}
+
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function normalizeBoundary(value: unknown): string {
+  return asString(value, 'This representation is a simplified learning aid and may not cover edge cases.');
+}
+
+function normalizeIndexedRelations(value: unknown, itemCount: number): Prisma.JsonArray {
+  return asRecordArray(value)
+    .map((relation) => ({
+      from: clampInt(relation.from, 0, Math.max(0, itemCount - 1), 0),
+      to: clampInt(relation.to, 0, Math.max(0, itemCount - 1), 0),
+      label: asString(relation.label),
+    }))
+    .filter((relation) => relation.from !== relation.to);
+}
+
+function normalizeRepresentationContent(
+  repType: string,
+  value: unknown,
+  nodeTitle: string,
+  nodeSummary: string,
+): Prisma.InputJsonValue {
+  const data = isRecord(value) ? value : {};
+
+  if (repType === 'formula') {
+    return {
+      latex: asString(data.latex, nodeTitle),
+      variables: asRecordArray(data.variables).map((variable) => ({
+        symbol: asString(variable.symbol),
+        name: asString(variable.name),
+        unit: asString(variable.unit),
+      })),
+      steps: asStringArray(data.steps),
+      notes: asString(data.notes),
+      boundary: normalizeBoundary(data.boundary),
+    };
+  }
+
+  if (repType === 'force') {
+    return {
+      body: asString(data.body, nodeTitle),
+      forces: asRecordArray(data.forces).map((force) => ({
+        name: asString(force.name),
+        direction: asString(force.direction),
+        magnitude: asString(force.magnitude),
+      })),
+      coordinateSystem: asString(data.coordinateSystem),
+      boundary: normalizeBoundary(data.boundary),
+    };
+  }
+
+  if (repType === 'timeline') {
+    return {
+      period: asString(data.period, nodeTitle),
+      events: asRecordArray(data.events).map((event) => ({
+        date: asString(event.date),
+        title: asString(event.title),
+        description: asString(event.description),
+        importance: clampInt(event.importance, 1, 5, 3),
+      })),
+      boundary: normalizeBoundary(data.boundary),
+    };
+  }
+
+  if (repType === 'causal') {
+    const nodes = asRecordArray(data.nodes).map((node) => ({
+      event: asString(node.event || node.name, nodeTitle),
+      description: asString(node.description),
+    }));
+    return {
+      nodes: nodes.length > 0 ? nodes : [{ event: nodeTitle, description: nodeSummary }],
+      edges: normalizeIndexedRelations(data.edges, nodes.length || 1),
+      boundary: normalizeBoundary(data.boundary),
+    };
+  }
+
+  if (repType === 'reaction') {
+    return {
+      equation: asString(data.equation, nodeTitle),
+      reactants: asStringArray(data.reactants),
+      products: asStringArray(data.products),
+      conditions: asString(data.conditions),
+      type: asString(data.type),
+      mechanism: asString(data.mechanism),
+      notes: asString(data.notes),
+      boundary: normalizeBoundary(data.boundary),
+    };
+  }
+
+  if (repType === 'template') {
+    return {
+      template: asString(data.template, nodeSummary || nodeTitle),
+      slots: asStringArray(data.slots),
+      examples: asStringArray(data.examples),
+      boundary: normalizeBoundary(data.boundary),
+    };
+  }
+
+  if (repType === 'comparison') {
+    return {
+      dimensions: asStringArray(data.dimensions),
+      items: asRecordArray(data.items).map((item) => ({
+        name: asString(item.name),
+        values: asStringArray(item.values),
+      })),
+      boundary: normalizeBoundary(data.boundary),
+    };
+  }
+
+  if (repType === 'step') {
+    return {
+      formula: asString(data.formula, nodeTitle),
+      steps: asStringArray(data.steps),
+      notes: asString(data.notes),
+      boundary: normalizeBoundary(data.boundary),
+    };
+  }
+
+  const concepts = asRecordArray(data.concepts).map((concept) => ({
+    name: asString(concept.name, nodeTitle),
+    description: asString(concept.description),
+  }));
+
+  return {
+    concepts: concepts.length > 0 ? concepts : [{ name: nodeTitle, description: nodeSummary }],
+    relations: normalizeIndexedRelations(data.relations, concepts.length || 1),
+    boundary: normalizeBoundary(data.boundary),
+  };
+}
 
 
 // ========== 自动检测表征类型 ==========
@@ -67,10 +237,12 @@ export async function detectRepresentationType(
       jsonMode: true,
     });
 
-    const parsed = JSON.parse(sanitizeJsonString(result));
-    const type = parsed.type?.trim() || 'concept_map';
+    const parsed = JSON.parse(sanitizeJsonString(result)) as unknown;
+    const type = isRecord(parsed) && typeof parsed.type === 'string'
+      ? parsed.type.trim()
+      : 'concept_map';
 
-    return type;
+    return REPRESENTATION_TYPES.includes(type as RepresentationType) ? type : 'concept_map';
   } catch (error) {
     console.error('[detectRepresentationType] AI call failed, fallback to concept_map:', error);
     return 'concept_map';
@@ -213,7 +385,7 @@ export async function generateRepresentationContent(
   nodeSummary: string,
   subject: string,
   repType: string,
-): Promise<any> {
+): Promise<Prisma.InputJsonValue> {
   const promptConfig =
     REPRESENTATION_PROMPTS[repType] || REPRESENTATION_PROMPTS.concept_map;
 
@@ -243,8 +415,8 @@ ${promptConfig.exampleJson}
       jsonMode: true,
     });
 
-    const parsed = JSON.parse(sanitizeJsonString(result));
-    return parsed;
+    const parsed = JSON.parse(sanitizeJsonString(result)) as unknown;
+    return normalizeRepresentationContent(repType, parsed, nodeTitle, nodeSummary);
   } catch (error) {
     console.error('[generateRepresentationContent] AI generation failed:', error);
 
@@ -280,8 +452,8 @@ ${promptConfig.exampleJson}
 export async function saveRepresentation(
   nodeId: string,
   repType: string,
-  repData: any,
-  prismaClient?: any,
+  repData: Prisma.InputJsonValue,
+  prismaClient?: PrismaClient,
 ): Promise<void> {
   const db = prismaClient || prisma;
   await db.knowledgeNode.update({

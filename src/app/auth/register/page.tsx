@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { getErrorMessage } from "@/lib/errors";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -46,8 +47,8 @@ export default function RegisterPage() {
         name.trim() || undefined
       );
       router.push("/dashboard");
-    } catch (err: any) {
-      setError(err.message || "注册失败");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "注册失败"));
     } finally {
       setLoading(false);
     }

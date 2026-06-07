@@ -5,26 +5,29 @@ import { createAccessToken, createRefreshTokenValue, hashPassword } from '@/lib/
 export async function POST(request: Request) {
   try {
     const { username, password, email, name } = await request.json();
+    const normalizedUsername = typeof username === 'string' ? username.trim() : '';
+    const normalizedEmail = typeof email === 'string' ? email.trim() : '';
+    const normalizedName = typeof name === 'string' ? name.trim() : '';
 
-    if (!username || username.trim().length < 3 || username.trim().length > 30) {
-      return NextResponse.json({ detail: 'Username must be 3–30 characters' }, { status: 400 });
+    if (normalizedUsername.length < 3 || normalizedUsername.length > 30) {
+      return NextResponse.json({ detail: '用户名长度必须为 3-30 个字符' }, { status: 400 });
     }
-    if (!password || password.length < 6 || password.length > 128) {
-      return NextResponse.json({ detail: 'Password must be 6–128 characters' }, { status: 400 });
+    if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
+      return NextResponse.json({ detail: '密码长度必须为 6-128 个字符' }, { status: 400 });
     }
-    if (!/^[a-zA-Z0-9_一-鿿]+$/.test(username.trim())) {
-      return NextResponse.json({ detail: 'Username contains invalid characters' }, { status: 400 });
+    if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(normalizedUsername)) {
+      return NextResponse.json({ detail: '用户名只能包含中文、字母、数字和下划线' }, { status: 400 });
     }
 
-    const existing = await prisma.user.findUnique({ where: { username: username.trim() } });
+    const existing = await prisma.user.findUnique({ where: { username: normalizedUsername } });
     if (existing) {
-      return NextResponse.json({ detail: 'Username already exists' }, { status: 409 });
+      return NextResponse.json({ detail: '用户名已存在' }, { status: 409 });
     }
 
-    if (email) {
-      const emailExists = await prisma.user.findUnique({ where: { email: email.trim() || undefined } });
+    if (normalizedEmail) {
+      const emailExists = await prisma.user.findUnique({ where: { email: normalizedEmail } });
       if (emailExists) {
-        return NextResponse.json({ detail: 'Email already exists' }, { status: 409 });
+        return NextResponse.json({ detail: '邮箱已存在' }, { status: 409 });
       }
     }
 
@@ -34,10 +37,10 @@ export async function POST(request: Request) {
     const user = await prisma.user.create({
       data: {
         id: crypto.randomUUID(),
-        username: username.trim(),
-        email: email?.trim() || null,
+        username: normalizedUsername,
+        email: normalizedEmail || null,
         passwordHash: hashed,
-        name: name?.trim() || null,
+        name: normalizedName || null,
         grade: null,
         updatedAt: now,
       },
@@ -65,6 +68,6 @@ export async function POST(request: Request) {
       user,
     });
   } catch {
-    return NextResponse.json({ detail: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ detail: '服务器内部错误' }, { status: 500 });
   }
 }

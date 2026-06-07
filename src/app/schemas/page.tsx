@@ -1,11 +1,11 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
 import { MasteryBar } from '@/components/ui/MasteryBar';
 import { EmptyState } from '@/components/ui/EmptyState';
 
@@ -40,6 +40,20 @@ interface SchemaItem {
   createdAt: string;
 }
 
+interface KnowledgeNodeOption {
+  id: string;
+  title: string;
+  summary?: string | null;
+  masteryLevel: number;
+  representationType?: string | null;
+  subject?: {
+    name?: string | null;
+  } | null;
+  chapter?: {
+    title?: string | null;
+  } | null;
+}
+
 function formatDate(dateStr: string): string {
   try {
     const d = new Date(dateStr);
@@ -56,13 +70,26 @@ export default function SchemasPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [subjectFilter, setSubjectFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNodeOption[]>([]);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
+  const [schemaName, setSchemaName] = useState('');
+  const [building, setBuilding] = useState(false);
+  const [buildError, setBuildError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch('/api/schema/list');
-        const data = await res.json();
-        setSchemas(data.schemas || []);
+        const [schemasRes, nodesRes] = await Promise.all([
+          authFetch('/api/schema/list'),
+          authFetch('/api/knowledge?limit=200'),
+        ]);
+        const schemasData = await schemasRes.json();
+        const nodesData = await nodesRes.json();
+        setSchemas(schemasData.schemas || []);
+        setKnowledgeNodes(
+          ((nodesData.nodes || []) as KnowledgeNodeOption[])
+            .filter((node) => node.representationType !== 'schema'),
+        );
       } catch {
         // silent
       } finally {
@@ -98,6 +125,156 @@ export default function SchemasPage() {
     }
     return counts;
   }, [schemas]);
+
+  const builderNodes = useMemo(() => {
+    if (!subjectFilter) return knowledgeNodes;
+    return knowledgeNodes.filter((node) => node.subject?.name === subjectFilter);
+  }, [knowledgeNodes, subjectFilter]);
+
+  const selectedNodes = useMemo(
+    () => knowledgeNodes.filter((node) => selectedNodeIds.has(node.id)),
+    [knowledgeNodes, selectedNodeIds],
+  );
+
+  const toggleNodeSelection = (nodeId: string) => {
+    setSelectedNodeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  };
+
+  const reloadSchemas = async () => {
+    const res = await authFetch('/api/schema/list');
+    const data = await res.json();
+    setSchemas(data.schemas || []);
+  };
+
+  const handleBuildSchema = async () => {
+    if (selectedNodeIds.size < 2) {
+      setBuildError('请至少选择 2 个知识点再构建图式。');
+      return;
+    }
+
+    setBuilding(true);
+    setBuildError(null);
+    try {
+      const res = await authFetch('/api/schema/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nodeIds: Array.from(selectedNodeIds),
+          name: schemaName.trim() || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `构建失败 (${res.status})`);
+      }
+      setSelectedNodeIds(new Set());
+      setSchemaName('');
+      await reloadSchemas();
+    } catch (error: unknown) {
+      setBuildError(error instanceof Error ? error.message : '图式构建失败，请稍后重试。');
+    } finally {
+      setBuilding(false);
+    }
+  };
+
+  const builderPanel = (
+    <Card className="mb-6">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-slate-800">构建知识图式</h2>
+            <p className="text-sm text-slate-500 mt-1">
+              选择 2 个以上相关知识点，AI 会把它们组织成一个可迁移的知识框架。
+            </p>
+          </div>
+          <button
+            onClick={handleBuildSchema}
+            disabled={selectedNodeIds.size < 2 || building}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              selectedNodeIds.size >= 2 && !building
+                ? 'bg-indigo-500 text-white hover:bg-indigo-600'
+                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+            }`}
+          >
+            {building ? '正在构建...' : `构建图式 (${selectedNodeIds.size})`}
+          </button>
+        </div>
+
+        <input
+          value={schemaName}
+          onChange={(event) => setSchemaName(event.target.value)}
+          placeholder="图式名称，可留空由 AI 命名"
+          className="w-full max-w-md rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
+        />
+
+        {selectedNodes.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {selectedNodes.map((node) => (
+              <button
+                key={node.id}
+                onClick={() => toggleNodeSelection(node.id)}
+                className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
+              >
+                {node.title} ×
+              </button>
+            ))}
+          </div>
+        )}
+
+        {buildError && (
+          <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-600">
+            {buildError}
+          </div>
+        )}
+
+        {builderNodes.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+            当前筛选下还没有可用于构建图式的知识点。
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            {builderNodes.slice(0, 24).map((node) => {
+              const selected = selectedNodeIds.has(node.id);
+              return (
+                <button
+                  key={node.id}
+                  onClick={() => toggleNodeSelection(node.id)}
+                  className={`rounded-xl border px-3 py-2 text-left transition-colors ${
+                    selected
+                      ? 'border-indigo-300 bg-indigo-50'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-slate-800">{node.title}</p>
+                      <p className="mt-0.5 truncate text-xs text-slate-400">
+                        {node.subject?.name || '未分学科'}
+                        {node.chapter?.title ? ` · ${node.chapter.title}` : ''}
+                      </p>
+                    </div>
+                    <span className={`mt-0.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      selected ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500'
+                    }`}>
+                      {selected ? '已选' : '选择'}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
 
   // ─── Loading state ───
   if (loading) {
@@ -137,11 +314,12 @@ export default function SchemasPage() {
         <p className="text-slate-500 text-[15px] mb-8">
           浏览和管理你的知识图式，将多个知识点组织成结构化的知识框架
         </p>
+        {builderPanel}
         <Card>
           <EmptyState
             icon="🧠"
             title="还没有构建图式"
-            description="去知识卡片页构建第一个图式"
+            description="在上方选择 2 个以上相关知识点，就可以创建第一个图式"
             action={{
               label: '前往知识卡片',
               href: '/subjects',
@@ -187,6 +365,8 @@ export default function SchemasPage() {
           );
         })}
       </div>
+
+      {builderPanel}
 
       {/* Search input */}
       <div className="relative max-w-md mb-6">

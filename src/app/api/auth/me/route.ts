@@ -1,11 +1,11 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUserId } from '@/lib/server-auth';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     // Use canonical JWT verification with HMAC-SHA256 signature check
-    const userId = getAuthenticatedUserId(request as any);
+    const userId = getAuthenticatedUserId(request);
 
     if (!userId) {
       return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });

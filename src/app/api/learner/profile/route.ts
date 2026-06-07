@@ -1,3 +1,4 @@
+import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUserId } from '@/lib/server-auth';
@@ -54,10 +55,10 @@ export async function GET(req: NextRequest) {
       recommendations,
       actionableSteps,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[learner/profile]', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: getErrorMessage(error, 'Internal server error') },
       { status: 500 },
     );
   }
@@ -110,10 +111,10 @@ export async function POST(req: NextRequest) {
       user: { id: user.id, name: user.name, grade: user.grade },
       diagnostic,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[learner/profile/diagnostic]', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: getErrorMessage(error, 'Internal server error') },
       { status: 500 },
     );
   }

@@ -1,23 +1,16 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { authFetch } from '@/lib/auth';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useUserId } from '@/components/auth/AuthProvider';
-import {
-  designConstructiveTask,
-  designInteractiveTask,
-  validateExplanation,
-  type ConstructiveTask,
-  type SelfExplanationPrompt,
-  type EvaluationCriterion,
-  type InteractiveTask,
-  type SocraticQuestion,
-  type VariantQuestion,
-  type ScenarioChallenge,
-  type ValidationResult,
+import type {
+  ConstructiveTask,
+  InteractiveTask,
+  ValidationResult,
 } from '@/lib/icap-enhancer';
-import { detectCognitiveGaps, type DetectCognitiveGapsResult } from '@/lib/ai-tutor';
+import type { DetectCognitiveGapsResult } from '@/lib/ai-tutor';
 
 interface IcapPipelineProps {
   knowledgeNodeId: string;
@@ -58,8 +51,75 @@ const STAGES = [
   { key: 'interactive' as const, label: '互动深化', description: 'AI追问，变式练习', icon: '🤖', color: 'from-purple-500 to-purple-600' },
 ];
 
+type StageKey = typeof STAGES[number]['key'];
+
+const STAGE_GUIDANCE: Record<StageKey, { goal: string; action: string; done: string }> = {
+  passive: {
+    goal: '先建立初步心智模型，再进入答题。',
+    action: '阅读摘要和关键词，然后用一句话说出核心意思。',
+    done: '当主题、背景和主要术语已经能辨认时继续。',
+  },
+  active: {
+    goal: '在不回看解释的情况下检查回忆效果。',
+    action: '先独立回答每道题，再对照解析。',
+    done: '提交现有题目，或明确自己缺什么后继续。',
+  },
+  constructive: {
+    goal: '把记住的事实转化为自己的解释。',
+    action: '用自己的话解释原因、例子、对比和联系。',
+    done: '解释已经被检查，或已经知道需要补哪里时继续。',
+  },
+  interactive: {
+    goal: '把知识迁移到变化后的条件中。',
+    action: '通过 AI 追问、变式题和情境任务测试灵活理解。',
+    done: '至少完成一次对话、变式或情境任务后结束。',
+  },
+};
+
+async function postIcapAction<T>(payload: Record<string, unknown>): Promise<T> {
+  const res = await authFetch('/api/icap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : `ICAP request failed: ${res.status}`);
+  }
+
+  return data as T;
+}
+
+interface IcapDraft {
+  stage?: number;
+  userSummary?: string;
+  results?: IcapResults;
+  activeAnswers?: Record<string, string>;
+  submitted?: Record<string, boolean>;
+  showAnswer?: Record<string, boolean>;
+  aiFeedback?: string;
+  feedbackSubmitted?: boolean;
+  tutorChatMessages?: Array<{ role: string; content: string }>;
+  constructiveResponses?: Record<string, string>;
+  constructiveSubmitted?: Record<string, boolean>;
+  constructiveFeedbacks?: Record<string, ValidationResult | null>;
+  constructiveTask?: ConstructiveTask | null;
+  variantAnswers?: Record<string, string>;
+  variantSubmitted?: Record<string, boolean>;
+  variantShowAnswer?: Record<string, boolean>;
+  interactiveTask?: InteractiveTask | null;
+  scenarioResponses?: Record<string, string>;
+  scenarioSubmitted?: Record<string, boolean>;
+  scenarioFeedbacks?: Record<string, string>;
+}
+
 export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, onClose }: IcapPipelineProps) {
   const userId = useUserId() || '';
+  const draftStorageKey = useMemo(
+    () => `mindreview:icap-draft:${userId || 'anonymous'}:${knowledgeNodeId}`,
+    [userId, knowledgeNodeId],
+  );
   const [stage, setStage] = useState(0);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(false);
@@ -104,7 +164,102 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   const [showGapWarning, setShowGapWarning] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/knowledge/${knowledgeNodeId}`)
+    if (typeof window === 'undefined') return;
+
+    queueMicrotask(() => {
+      try {
+        const raw = window.localStorage.getItem(draftStorageKey);
+        if (!raw) return;
+        const draft = JSON.parse(raw) as IcapDraft;
+
+        if (typeof draft.stage === 'number' && draft.stage >= 0 && draft.stage < STAGES.length) setStage(draft.stage);
+        if (typeof draft.userSummary === 'string') setUserSummary(draft.userSummary);
+        if (draft.results) setResults(draft.results);
+        if (draft.activeAnswers) setActiveAnswers(draft.activeAnswers);
+        if (draft.submitted) setSubmitted(draft.submitted);
+        if (draft.showAnswer) setShowAnswer(draft.showAnswer);
+        if (typeof draft.aiFeedback === 'string') setAiFeedback(draft.aiFeedback);
+        if (typeof draft.feedbackSubmitted === 'boolean') setFeedbackSubmitted(draft.feedbackSubmitted);
+        if (draft.tutorChatMessages) setTutorChatMessages(draft.tutorChatMessages);
+        if (draft.constructiveResponses) setConstructiveResponses(draft.constructiveResponses);
+        if (draft.constructiveSubmitted) setConstructiveSubmitted(draft.constructiveSubmitted);
+        if (draft.constructiveFeedbacks) setConstructiveFeedbacks(draft.constructiveFeedbacks);
+        if (draft.constructiveTask) setConstructiveTask(draft.constructiveTask);
+        if (draft.variantAnswers) setVariantAnswers(draft.variantAnswers);
+        if (draft.variantSubmitted) setVariantSubmitted(draft.variantSubmitted);
+        if (draft.variantShowAnswer) setVariantShowAnswer(draft.variantShowAnswer);
+        if (draft.interactiveTask) setInteractiveTask(draft.interactiveTask);
+        if (draft.scenarioResponses) setScenarioResponses(draft.scenarioResponses);
+        if (draft.scenarioSubmitted) setScenarioSubmitted(draft.scenarioSubmitted);
+        if (draft.scenarioFeedbacks) setScenarioFeedbacks(draft.scenarioFeedbacks);
+      } catch {
+        window.localStorage.removeItem(draftStorageKey);
+      }
+    });
+  }, [draftStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    if (results.interactive.completed) {
+      queueMicrotask(() => {
+        window.localStorage.removeItem(draftStorageKey);
+      });
+      return;
+    }
+
+    const draft: IcapDraft = {
+      stage,
+      userSummary,
+      results,
+      activeAnswers,
+      submitted,
+      showAnswer,
+      aiFeedback,
+      feedbackSubmitted,
+      tutorChatMessages,
+      constructiveResponses,
+      constructiveSubmitted,
+      constructiveFeedbacks,
+      constructiveTask,
+      variantAnswers,
+      variantSubmitted,
+      variantShowAnswer,
+      interactiveTask,
+      scenarioResponses,
+      scenarioSubmitted,
+      scenarioFeedbacks,
+    };
+
+    queueMicrotask(() => {
+      window.localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    });
+  }, [
+    draftStorageKey,
+    stage,
+    userSummary,
+    results,
+    activeAnswers,
+    submitted,
+    showAnswer,
+    aiFeedback,
+    feedbackSubmitted,
+    tutorChatMessages,
+    constructiveResponses,
+    constructiveSubmitted,
+    constructiveFeedbacks,
+    constructiveTask,
+    variantAnswers,
+    variantSubmitted,
+    variantShowAnswer,
+    interactiveTask,
+    scenarioResponses,
+    scenarioSubmitted,
+    scenarioFeedbacks,
+  ]);
+
+  useEffect(() => {
+    authFetch(`/api/knowledge/${knowledgeNodeId}`)
       .then(r => r.json())
       .then(setNode)
       .catch(() => {});
@@ -114,16 +269,18 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   useEffect(() => {
     if (stage === 3 && !tutorSessionId) {
       const sessionId = `icap_tutor_${knowledgeNodeId}`;
-      setTutorSessionId(sessionId);
-      fetch(`/api/tutor/history?sessionId=${encodeURIComponent(sessionId)}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.messages && Array.isArray(data.messages)) {
-            setTutorChatMessages(data.messages.map((m: { role: string; content: string }) =>
-              ({ role: m.role, content: m.content })));
-          }
-        })
-        .catch(() => {});
+      queueMicrotask(() => {
+        setTutorSessionId(sessionId);
+        authFetch(`/api/tutor/history?sessionId=${encodeURIComponent(sessionId)}`)
+          .then(r => r.json())
+          .then(data => {
+            if (data.messages && Array.isArray(data.messages)) {
+              setTutorChatMessages(data.messages.map((m: { role: string; content: string }) =>
+                ({ role: m.role, content: m.content })));
+            }
+          })
+          .catch(() => {});
+      });
     }
   }, [stage, knowledgeNodeId, tutorSessionId]);
 
@@ -144,7 +301,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
       // Active stage - load questions
       setLoading(true);
       try {
-        const res = await fetch(`/api/practice?knowledgeNodeId=${knowledgeNodeId}&icapLevel=Active&count=3`);
+        const res = await authFetch(`/api/practice?knowledgeNodeId=${knowledgeNodeId}&icapLevel=Active&count=3`);
         const data = await res.json();
         setQuestions(data.questions || []);
       } catch { /* ignore */ }
@@ -155,9 +312,11 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
       // Constructive stage - load structured prompts
       setConstructiveTaskLoading(true);
       try {
-        const subject = node.subject?.name || '通用';
-        const task = await designConstructiveTask(node.title, node.summary || null, subject);
-        setConstructiveTask(task);
+        const data = await postIcapAction<{ constructiveTask: ConstructiveTask }>({
+          action: 'designConstructiveTask',
+          knowledgeNodeId,
+        });
+        setConstructiveTask(data.constructiveTask);
       } catch { /* ignore */ }
       setConstructiveTaskLoading(false);
     }
@@ -166,9 +325,12 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
       // Interactive stage - load structured tasks
       setInteractiveTaskLoading(true);
       try {
-        const subject = node.subject?.name || '通用';
-        const task = await designInteractiveTask(node.title, node.summary || null, 'intermediate', subject);
-        setInteractiveTask(task);
+        const data = await postIcapAction<{ interactiveTask: InteractiveTask }>({
+          action: 'designInteractiveTask',
+          knowledgeNodeId,
+          difficulty: 'intermediate',
+        });
+        setInteractiveTask(data.interactiveTask);
       } catch { /* ignore */ }
       setInteractiveTaskLoading(false);
     }
@@ -176,7 +338,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
 
   const handleSubmitAnswer = async (questionId: string, userAnswer: string) => {
     try {
-      const res = await fetch('/api/practice', {
+      const res = await authFetch('/api/practice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ questionId, userAnswer }),
@@ -200,14 +362,12 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
     if (!response?.trim()) return;
     setConstructiveFeedbackLoading(prev => ({ ...prev, [promptId]: true }));
     try {
-      const subject = node?.subject?.name || '通用';
-      const result = await validateExplanation(
+      const data = await postIcapAction<{ validation: ValidationResult }>({
+        action: 'validateExplanation',
+        knowledgeNodeId,
         response,
-        node?.title || knowledgeNodeTitle,
-        node?.summary || null,
-        subject,
-      );
-      setConstructiveFeedbacks(prev => ({ ...prev, [promptId]: result }));
+      });
+      setConstructiveFeedbacks(prev => ({ ...prev, [promptId]: data.validation }));
     } catch {
       setConstructiveFeedbacks(prev => ({ ...prev, [promptId]: null }));
     } finally {
@@ -216,7 +376,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
     }
   };
 
-  const handleSubmitVariantAnswer = (vqId: string, userAnswer: string) => {
+  const handleSubmitVariantAnswer = (vqId: string) => {
     setVariantSubmitted(prev => ({ ...prev, [vqId]: true }));
     setVariantShowAnswer(prev => ({ ...prev, [vqId]: true }));
     setResults(prev => ({
@@ -230,7 +390,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
     if (!response?.trim()) return;
     setScenarioFeedbackLoading(prev => ({ ...prev, [scId]: true }));
     try {
-      const res = await fetch('/api/tutor/chat', {
+      const res = await authFetch('/api/tutor/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -262,7 +422,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
     setFeedbackSubmitted(true);
     setFeedbackLoading(true);
     try {
-      const res = await fetch('/api/tutor/chat', {
+      const res = await authFetch('/api/tutor/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -288,7 +448,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
     setTutorChatMessages(newMessages);
     setTutorChatInput('');
     try {
-      const res = await fetch('/api/tutor/chat', {
+      const res = await authFetch('/api/tutor/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -338,13 +498,13 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
 
     setGapCheckLoading(true);
     try {
-      const gaps = await detectCognitiveGaps(
-        combined,
-        node?.title || knowledgeNodeTitle,
-        node?.summary || '',
-      );
-      setCognitiveGaps(gaps);
-      if (gaps.hasGaps && gaps.gaps.length > 0) {
+      const data = await postIcapAction<{ gaps: DetectCognitiveGapsResult }>({
+        action: 'detectCognitiveGaps',
+        knowledgeNodeId,
+        response: combined,
+      });
+      setCognitiveGaps(data.gaps);
+      if (data.gaps.hasGaps && data.gaps.gaps.length > 0) {
         setShowGapWarning(true);
       } else {
         goToStage(3);
@@ -358,6 +518,8 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   };
 
   const allDone = stage === 3 && results.interactive.completed;
+  const currentStage = STAGES[stage];
+  const stageGuidance = STAGE_GUIDANCE[currentStage.key];
 
   if (allDone) {
     const totalScore = results.active.score;
@@ -415,6 +577,23 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
       <h3 className="text-lg font-bold text-slate-800 mb-1">{knowledgeNodeTitle}</h3>
       <p className="text-sm text-slate-500 mb-4">{STAGES[stage].description}</p>
 
+      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div>
+            <p className="text-[11px] font-semibold text-slate-400 uppercase">目标</p>
+            <p className="text-xs text-slate-700 mt-1 leading-relaxed">{stageGuidance.goal}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-slate-400 uppercase">行动</p>
+            <p className="text-xs text-slate-700 mt-1 leading-relaxed">{stageGuidance.action}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-slate-400 uppercase">完成条件</p>
+            <p className="text-xs text-slate-700 mt-1 leading-relaxed">{stageGuidance.done}</p>
+          </div>
+        </div>
+      </div>
+
       {/* Stage 0: Passive */}
       {stage === 0 && node && (
         <div className="space-y-4">
@@ -469,7 +648,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                                 <input
                                   type="radio"
                                   name={`q-${q.id}`}
-                                  value={opt.text}
+                                  value={opt.label}
                                   onChange={e => setActiveAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
                                   className="text-indigo-600"
                                 />
@@ -922,7 +1101,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                             )}
                             <Button
                               size="sm"
-                              onClick={() => handleSubmitVariantAnswer(vq.id, userAnswer)}
+                              onClick={() => handleSubmitVariantAnswer(vq.id)}
                               disabled={!userAnswer.trim()}
                             >
                               提交答案
@@ -1094,6 +1273,9 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
             <Button onClick={() => {
               recordStageTime('interactive');
               setResults(prev => ({ ...prev, interactive: { ...prev.interactive, completed: true } }));
+              if (typeof window !== 'undefined') {
+                window.localStorage.removeItem(draftStorageKey);
+              }
             }}>
               完成训练
             </Button>

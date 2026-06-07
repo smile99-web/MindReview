@@ -1,5 +1,6 @@
 'use client';
 
+import { authFetch } from '@/lib/auth';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -9,6 +10,35 @@ import { MasteryBar } from '@/components/ui/MasteryBar';
 import LearnerProfileCard from '@/components/learner/LearnerProfileCard';
 import { useUserId } from '@/components/auth/AuthProvider';
 import type { ActionableStep } from '@/lib/learner-model';
+
+interface SubjectOverview {
+  id: string;
+  name: string;
+  icon?: string | null;
+  _count?: {
+    chapters?: number;
+    knowledgeNodes?: number;
+  };
+}
+
+interface RecentNode {
+  id: string;
+  title: string;
+  masteryLevel: number;
+  subject?: {
+    name?: string | null;
+  } | null;
+}
+
+interface DueTask {
+  id: string;
+  completed: boolean;
+  dueDate?: string | Date | null;
+  knowledgeNode?: {
+    title?: string | null;
+    masteryLevel?: number | null;
+  } | null;
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -20,9 +50,9 @@ export default function DashboardPage() {
     totalMistakes: 0,
     totalReviewCount: 0,
   });
-  const [subjects, setSubjects] = useState<any[]>([]);
-  const [recentNodes, setRecentNodes] = useState<any[]>([]);
-  const [dueTasks, setDueTasks] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<SubjectOverview[]>([]);
+  const [recentNodes, setRecentNodes] = useState<RecentNode[]>([]);
+  const [dueTasks, setDueTasks] = useState<DueTask[]>([]);
   const [actionableSteps, setActionableSteps] = useState<ActionableStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [profileLoaded, setProfileLoaded] = useState(false);
@@ -41,7 +71,7 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch('/api/dashboard');
+        const res = await authFetch('/api/dashboard');
         const data = await res.json();
 
         setSubjects(data.subjects || []);
@@ -69,7 +99,7 @@ export default function DashboardPage() {
     async function loadSteps() {
       if (!userId) return;
       try {
-        const res = await fetch(`/api/learner/profile?userId=${encodeURIComponent(userId)}`);
+        const res = await authFetch(`/api/learner/profile?userId=${encodeURIComponent(userId)}`);
         if (!res.ok) return;
         const data = await res.json();
         setActionableSteps((data.actionableSteps as ActionableStep[]) || []);
@@ -85,7 +115,9 @@ export default function DashboardPage() {
   // Auto-show diagnostic for new users with zero review history
   useEffect(() => {
     if (profileLoaded && stats.totalReviewCount === 0 && !diagnosticResult && !showDiagnostic) {
-      setShowDiagnostic(true);
+      queueMicrotask(() => {
+        setShowDiagnostic(true);
+      });
     }
   }, [profileLoaded, stats.totalReviewCount, diagnosticResult, showDiagnostic]);
 
@@ -95,7 +127,7 @@ export default function DashboardPage() {
     try {
       const firstSubject = subjects[0];
       const grade = '初一'; // 默认年级；实际应用中可从用户 profile 获取
-      const res = await fetch('/api/learner/profile', {
+      const res = await authFetch('/api/learner/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -192,6 +224,8 @@ export default function DashboardPage() {
       textColor: 'text-emerald-700',
     },
   ];
+
+  const pendingDueTasks = dueTasks.filter((task) => !task.completed);
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
@@ -419,7 +453,7 @@ export default function DashboardPage() {
             <h3 className="font-semibold text-slate-800 tracking-tight text-[15px]">学科概览</h3>
           </CardHeader>
           <div className="space-y-2">
-            {subjects.map((subject: any) => (
+            {subjects.map((subject) => (
               <Link
                 key={subject.id}
                 href={`/subjects/${subject.id}`}
@@ -456,7 +490,7 @@ export default function DashboardPage() {
             <h3 className="font-semibold text-slate-800 tracking-tight text-[15px]">最近知识点</h3>
           </CardHeader>
           <div className="space-y-1">
-            {recentNodes.slice(0, 5).map((node: any) => (
+            {recentNodes.slice(0, 5).map((node) => (
               <Link
                 key={node.id}
                 href={`/cards/${node.id}`}
@@ -483,7 +517,7 @@ export default function DashboardPage() {
             <h3 className="font-semibold text-slate-800 tracking-tight text-[15px]">待复习</h3>
           </CardHeader>
           <div className="space-y-1">
-            {dueTasks.filter((t: any) => !t.completed).slice(0, 5).map((task: any) => (
+            {pendingDueTasks.slice(0, 5).map((task) => (
               <Link
                 key={task.id}
                 href="/review"
@@ -500,7 +534,7 @@ export default function DashboardPage() {
                 </div>
               </Link>
             ))}
-            {dueTasks.filter((t: any) => !t.completed).length === 0 && (
+            {pendingDueTasks.length === 0 && (
               <div className="text-center py-6">
                 <p className="text-sm text-slate-400 mb-2">没有待复习的任务</p>
                 <Link href="/review" className="text-indigo-500 text-sm font-medium hover:text-indigo-600 transition-colors">
@@ -509,7 +543,7 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-          {dueTasks.filter((t: any) => !t.completed).length > 0 && (
+          {pendingDueTasks.length > 0 && (
             <Link
               href="/review"
               className="flex items-center justify-center gap-1.5 mt-3 py-2.5 text-sm text-indigo-600 font-medium hover:bg-indigo-50/60 rounded-xl transition-colors duration-200"

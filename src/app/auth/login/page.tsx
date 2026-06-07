@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { getErrorMessage } from "@/lib/errors";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,8 +33,8 @@ export default function LoginPage() {
     try {
       await login(username.trim(), password);
       router.push("/dashboard");
-    } catch (err: any) {
-      setError(err.message || "登录失败");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "登录失败"));
     } finally {
       setLoading(false);
     }
