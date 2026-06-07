@@ -14,6 +14,7 @@ const PROTECTED_PREFIXES = [
   "/chapters",
   "/schemas",
   "/search",
+  "/analytics",
 ];
 
 const AUTH_PAGES = ["/auth/login", "/auth/register"];

@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: "/review", label: "复习", icon: "📝" },
   { href: "/mistakes", label: "错题本", icon: "❌" },
   { href: "/logs", label: "AI记录", icon: "🤖" },
+  { href: "/analytics", label: "分析", icon: "📊" },
 ];
 
 // 搜索独立于 NAV_ITEMS，在右侧用户区渲染
