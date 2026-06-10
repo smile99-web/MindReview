@@ -3,6 +3,7 @@
 import { authFetch } from '@/lib/auth';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card } from '@/components/ui/Card';
+import { LatexText } from '@/components/ui/LatexText';
 import { Button } from '@/components/ui/Button';
 import { LatexText } from '@/components/ui/LatexText';
 import { useUserId } from '@/components/auth/AuthProvider';
@@ -600,7 +601,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
         <div className="space-y-4">
           <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl p-5 border border-indigo-100/60">
             <h4 className="font-semibold text-slate-800 mb-2">{node.title}</h4>
-            <p className="text-sm text-slate-600 leading-relaxed">{node.summary || '暂无摘要'}</p>
+            <p className="text-sm text-slate-600 leading-relaxed"><LatexText text={node.summary || "暂无摘要"} /></p>
             {(node.keywords?.length ?? 0) > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-3">
                 {node.keywords?.map((kw: string, i: number) => (
@@ -638,7 +639,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                     {i + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-800 font-medium mb-3"><LatexText text={q.stem} /></p>
+                    <LatexText text={q.stem} className="text-sm text-slate-800 font-medium mb-3" />
 
                     {!submitted[q.id] ? (
                       <>
@@ -676,8 +677,8 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                       </>
                     ) : (
                       <div className={`p-3 rounded-lg text-sm ${showAnswer[q.id] ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50'}`}>
-                        <p className="font-semibold text-emerald-800">答案: <LatexText text={q.answer} /></p>
-                        {q.explanation && <p className="text-emerald-700/80 mt-1 text-xs"><LatexText text={q.explanation} /></p>}
+                        <p className="font-semibold text-emerald-800">答案: {q.answer}</p>
+                        {q.explanation && <LatexText text={q.explanation} className="text-emerald-700/80 mt-1 text-xs" />}
                       </div>
                     )}
                   </div>
@@ -785,7 +786,11 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                               <div className="mb-2">
                                 <p className="text-xs text-emerald-600 font-medium">做得好的方面：</p>
                                 <ul className="text-xs text-slate-600 list-disc list-inside">
-                                  {feedback.strengths.map((s, si) => <li key={si}>{s}</li>)}
+                                  {feedback.strengths.map((s, si) => (
+                                    <li key={si}>
+                                      <LatexText text={s} />
+                                    </li>
+                                  ))}
                                 </ul>
                               </div>
                             )}
@@ -796,7 +801,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                                   <div key={mi} className="text-xs mt-1">
                                     <span className="text-red-500 line-through">{m.studentSaid}</span>
                                     <span className="text-slate-500"> → </span>
-                                    <span className="text-emerald-600">{m.correction}</span>
+                                    <LatexText text={m.correction} className="text-emerald-600" />
                                   </div>
                                 ))}
                               </div>
@@ -805,7 +810,11 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                               <div>
                                 <p className="text-xs text-indigo-600 font-medium">改进建议：</p>
                                 <ul className="text-xs text-slate-600 list-disc list-inside">
-                                  {feedback.suggestions.map((s, si) => <li key={si}>{s}</li>)}
+                                  {feedback.suggestions.map((s, si) => (
+                                    <li key={si}>
+                                      <LatexText text={s} />
+                                    </li>
+                                  ))}
                                 </ul>
                               </div>
                             )}
@@ -1072,7 +1081,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                           </span>
                           <span className="text-xs text-slate-400">难度 {'★'.repeat(vq.difficulty)}</span>
                         </div>
-                        <p className="text-sm text-slate-800 font-medium mb-3"><LatexText text={vq.stem} /></p>
+                        <LatexText text={vq.stem} className="text-sm text-slate-800 font-medium mb-3" />
                         {!isSubmitted ? (
                           <>
                             {vq.options && vq.options.length > 0 ? (
@@ -1110,8 +1119,8 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                           </>
                         ) : (
                           <div className={`p-3 rounded-lg text-sm ${showAns ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50'}`}>
-                            <p className="font-semibold text-emerald-800">答案: <LatexText text={vq.answer} /></p>
-                            {vq.explanation && <p className="text-emerald-700/80 mt-1 text-xs"><LatexText text={vq.explanation} /></p>}
+                            <p className="font-semibold text-emerald-800">答案: {vq.answer}</p>
+                            {vq.explanation && <LatexText text={vq.explanation} className="text-emerald-700/80 mt-1 text-xs" />}
                             <button
                               onClick={() => {
                                 setVariantSubmitted(prev => ({ ...prev, [vq.id]: false }));
@@ -1199,7 +1208,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                             ) : feedback ? (
                               <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-xl p-3 border border-emerald-100/60">
                                 <p className="text-xs text-emerald-600 font-medium mb-1">AI反馈</p>
-                                <p className="text-sm text-slate-700 whitespace-pre-wrap">{feedback}</p>
+                                <LatexText text={feedback} className="text-sm text-slate-700 leading-relaxed" />
                               </div>
                             ) : (
                               <div className="text-xs text-slate-400 py-2">提交失败，请重试</div>
@@ -1244,7 +1253,11 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
             {tutorChatMessages.map((msg, i) => (
               <div key={i} className={`p-3 rounded-xl text-sm ${msg.role === 'user' ? 'bg-indigo-50 ml-6' : 'bg-slate-50 mr-6'}`}>
                 <p className="text-xs text-slate-400 mb-0.5">{msg.role === 'user' ? '你' : 'AI'}</p>
-                <p className="text-slate-700 whitespace-pre-wrap">{msg.content}</p>
+                {msg.role === 'user' ? (
+                  <p className="text-slate-700 whitespace-pre-wrap">{msg.content}</p>
+                ) : (
+                  <LatexText text={msg.content} className="text-slate-700 leading-relaxed" />
+                )}
               </div>
             ))}
             {tutorChatLoading && (

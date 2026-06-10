@@ -670,9 +670,9 @@ export function KnowledgeCardView({
               <div className="font-medium text-sm text-slate-800">
                 {card.title}
               </div>
-              <p className="text-xs text-slate-500 mt-1 line-clamp-2">
-                {card.content}
-              </p>
+              <div className="text-xs text-slate-500 mt-1 line-clamp-2">
+                <LatexText text={card.content || ''} />
+              </div>
             </Card>
           ))}
         </div>

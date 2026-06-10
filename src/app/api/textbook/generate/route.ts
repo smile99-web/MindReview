@@ -9,6 +9,75 @@ const GRADES = new Set(['初一', '初二', '初三', '高一', '高二', '高�
 const VOLUMES = new Set(['上册', '下册', '全册']);
 const ICAP_LEVELS = new Set(['Passive', 'Active', 'Constructive', 'Interactive']);
 
+// 跨年级禁词表：key=当前用户选定的 grade+volume，value=若章节命中这些词就拒绝
+// 用来阻止 AI 把别的年级/册别的核心概念混到当前生成里（例如初二全册出现"一元二次方程"）
+const FORBIDDEN_KEYWORDS_BY_GRADE_VOLUME: Record<string, string[]> = {
+  '初一上册': ['一元二次方程', '二次函数', '反比例函数', '相似', '锐角三角函数', '圆', '投影', '视图'],
+  '初一下册': ['一元二次方程', '二次函数', '相似', '锐角三角函数', '圆', '投影', '视图', '全等三角形', '轴对称', '分式', '二次根式', '勾股定理', '平行四边形', '一次函数', '数据分析'],
+  '初二上册': ['一元二次方程', '二次函数', '反比例函数', '相似', '锐角三角函数', '圆', '投影', '视图'],
+  '初二下册': ['一元二次方程', '二次函数', '反比例函数', '相似', '锐角三角函数', '圆', '投影'],
+  '初三上册': ['相交线与平行线', '实数', '二元一次方程组', '不等式', '整式', '三角形全等', '轴对称', '分式', '二次根式', '勾股定理'],
+  '初三十册': ['相交线与平行线', '实数', '二元一次方程组', '不等式', '整式', '三角形全等', '轴对称', '分式', '二次根式', '勾股定理'],
+  '初三下册': ['一元二次方程', '二次函数', '旋转', '圆', '概率初步'],
+  '初三十一册': ['一元二次方程', '二次函数', '旋转', '圆', '概率初步'],
+  '初一全册': ['一元二次方程', '二次函数', '反比例函数', '相似', '锐角三角函数', '圆', '投影', '视图', '全等三角形', '轴对称', '分式', '二次根式', '勾股定理', '平行四边形', '一次函数', '数据分析'],
+  '初二全册': ['一元二次方程', '二次函数', '反比例函数', '相似', '锐角三角函数', '圆', '投影', '视图'],
+  '初三全册': ['相交线与平行线', '实数', '二元一次方程组', '不等式', '整式', '三角形全等', '轴对称', '分式', '二次根式', '勾股定理'],
+  '高一下册': ['一元二次方程'],
+  '高二下册': ['一元二次方程'],
+  '高三十册': ['一元二次方程'],
+  '高三十一册': ['一元二次方程'],
+};
+
+function getForbiddenKeywords(grade: string, volume: string): string[] {
+  // 规范化 volume 表达，避免脚本写"十册"导致命中失败
+  const normVolume = volume === '上册' ? '上册' : volume === '下册' ? '下册' : '全册';
+  return FORBIDDEN_KEYWORDS_BY_GRADE_VOLUME[`${grade}${normVolume}`] || [];
+}
+
+function chapterContainsForbiddenKeyword(
+  title: string,
+  overview: string,
+  forbidden: string[],
+): string | null {
+  if (forbidden.length === 0) return null;
+  const haystack = `${title}\n${overview}`;
+  for (const keyword of forbidden) {
+    if (haystack.includes(keyword)) {
+      return keyword;
+    }
+  }
+  return null;
+}
+
+// 年级章节约束：保证 AI 只生成指定年级的章节
+const GRADE_CHAPTER_RANGES: Record<string, Record<string, string>> = {
+  "初一": {
+    "数学": "七上第1-4章（有理数/整式的加减/一元一次方程/几何图形初步）、七下第5-10章（相交线与平行线/实数/平面直角坐标系/二元一次方程组/不等式与不等式组/数据的收集整理与描述）",
+    "物理": "",
+    "化学": "",
+    "历史": "",
+    "道法": "",
+  },
+  "初二": {
+    "数学": "八上第11-15章（三角形/全等三角形/轴对称/整式的乘法与因式分解/分式）、八下第16-20章（二次根式/勾股定理/平行四边形/一次函数/数据的分析）",
+    "物理": "",
+    "化学": "",
+    "历史": "",
+    "道法": "",
+  },
+  "初三": {
+    "数学": "九上第21-25章（一元二次方程/二次函数/旋转/圆/概率初步）、九下第26-29章（反比例函数/相似/锐角三角函数/投影与视图）",
+    "物理": "",
+    "化学": "",
+    "历史": "",
+    "道法": "",
+  },
+  "高一": { "数学": "", "物理": "", "化学": "", "历史": "", "道法": "" },
+  "高二": { "数学": "", "物理": "", "化学": "", "历史": "", "道法": "" },
+  "高三": { "数学": "", "物理": "", "化学": "", "历史": "", "道法": "" },
+};
+
 interface GeneratedNode {
   title?: string;
   summary?: string;
@@ -79,11 +148,17 @@ function parseJsonObject(raw: string): Record<string, unknown> {
 }
 
 function buildOutlinePrompt(subject: SubjectName, grade: string, volume: string) {
+  // 年级章节目录约束，防止 AI 跨年级生成
+  const gradeConstraint = GRADE_CHAPTER_RANGES[grade]?.[subject]
+    ? `【重要】${grade}${subject}人教版只包含以下章节：${GRADE_CHAPTER_RANGES[grade][subject]}。严禁生成上述范围之外的章节。`
+    : '';
+
   const systemPrompt = `你是一位熟悉人民教育出版社教材体系的中学${subject}教研员和一线教师。
 
-任务：根据“最新人教版/人民教育出版社”教材体系，为指定学科、年级和册别生成章节目录大纲。
+任务：根据"最新人教版/人民教育出版社"教材体系，为指定学科、年级和册别生成章节目录大纲。
 
 要求：
+- ${gradeConstraint}
 - 优先依据最新人教版教材目录、课程标准和常见教学顺序；如果版本或册别存在地区差异，请在 editionNote 中说明。
 - 只生成章节目录，不要生成知识点。
 - 上册/下册建议 5 到 8 章；全册建议 8 到 12 章。
@@ -294,6 +369,15 @@ export async function POST(req: NextRequest) {
       const title = cleanText(chapterItem.title);
       if (!title) continue;
 
+      const forbidden = getForbiddenKeywords(grade, volume);
+      const hitKeyword = chapterContainsForbiddenKeyword(title, cleanText(chapterItem.overview), forbidden);
+      if (hitKeyword) {
+        const reason = `章节"${title}"命中 ${grade}${volume} 禁词"${hitKeyword}"，疑似跨年级内容，已跳过`;
+        console.warn('[Textbook Generate]', reason);
+        failedChapters.push(reason);
+        continue;
+      }
+
       const sortOrder = clampNumber(chapterItem.sortOrder, chapterIndex + 1, 1, 99);
       const existingChapter = await prisma.chapter.findFirst({
         where: { subjectId: subjectRecord.id, parentId: null, title },
@@ -431,6 +515,6 @@ export async function POST(req: NextRequest) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '教材生成失败';
     console.error('[Textbook Generate] Error:', error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

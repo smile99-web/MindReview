@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
+import { LatexText } from '@/components/ui/LatexText';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { MasteryBar } from '@/components/ui/MasteryBar';
@@ -338,7 +339,7 @@ export default function SubjectDetailPage() {
                             {step.title}
                           </Link>
                         )}
-                        {step.summary && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{step.summary}</p>}
+                        {step.summary && <LatexText text={step.summary || ""} className="text-xs text-slate-500 mt-0.5 line-clamp-1" />}
                         <div className="flex items-center gap-2 mt-1.5">
                           <Badge variant={isLocked ? 'default' : 'info'} size="sm">{step.icapLevel}</Badge>
                           {step.estimatedMinutes && <span className="text-xs text-slate-400">{step.estimatedMinutes}分钟</span>}
@@ -430,7 +431,7 @@ export default function SubjectDetailPage() {
                       <h4 className="font-medium text-slate-800 truncate">{node.title}</h4>
                       <Badge variant="info" size="sm">{node.chapter?.title}</Badge>
                     </div>
-                    <p className="text-xs text-slate-500 line-clamp-1"><LatexText text={node.summary || ''} /></p>
+                    <LatexText text={node.summary || ""} className="text-xs text-slate-500 line-clamp-1" />
                   </div>
                   <div className="ml-4 flex items-center gap-3">
                     <div className="w-24">

@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { BoundaryCallout } from './BoundaryCallout';
+import { LatexText } from '@/components/ui/LatexText';
 
 // ========== Force vector type (shared by both formats) ==========
 interface ForceVector {
@@ -378,7 +379,7 @@ export function ForceDiagram({
       {coordinateSystem && (
         <div className="mt-4 bg-white rounded-lg border border-slate-200/60 p-3">
           <h5 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">坐标系</h5>
-          <p className="text-xs text-slate-600 leading-relaxed">{coordinateSystem}</p>
+          <LatexText text={coordinateSystem} className="text-xs text-slate-600 leading-relaxed" />
         </div>
       )}
 

@@ -47,6 +47,18 @@ export async function POST(req: NextRequest) {
     }
     // --- end validation ---
 
+    // 防止重复创建同名章节
+    const existing = await prisma.chapter.findFirst({
+      where: {
+        subjectId: body.subjectId,
+        title: body.title.trim(),
+        parentId: body.parentId ?? null,
+      },
+    });
+    if (existing) {
+      return NextResponse.json(existing);
+    }
+
     const chapter = await prisma.chapter.create({ data: body });
     return NextResponse.json(chapter);
   } catch (error: unknown) {

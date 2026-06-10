@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
+import { LatexText } from '@/components/ui/LatexText';
 import { Badge } from '@/components/ui/Badge';
 import { MasteryBar } from '@/components/ui/MasteryBar';
 import { Button } from '@/components/ui/Button';
@@ -147,7 +148,7 @@ export default function ChapterDetailPage() {
                       {'★'.repeat(node.difficulty)}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 line-clamp-1"><LatexText text={node.summary || ''} /></p>
+                  <LatexText text={node.summary || ""} className="text-xs text-slate-500 line-clamp-1" />
                   {node.keywords?.length > 0 && (
                     <div className="flex gap-1.5 mt-1.5">
                       {node.keywords.slice(0, 3).map((kw: string, i: number) => (

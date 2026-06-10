@@ -4,6 +4,7 @@ import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { getDifficultyLabel, getMasteryColor } from '@/lib/utils';
 import { ICAP_LABELS } from '@/types';
+import { LatexText } from '@/components/ui/LatexText';
 import type { IcapLevel } from '@/types';
 
 interface KnowledgeNodeCardProps {
@@ -71,9 +72,9 @@ export const KnowledgeNodeCard = memo(({ data, selected }: KnowledgeNodeCardProp
 
       {/* Summary preview */}
       {summary && (
-        <p className="text-[11px] text-slate-500 line-clamp-2 mb-2.5 leading-relaxed">
-          {summary}
-        </p>
+        <div className="text-[11px] text-slate-500 line-clamp-2 mb-2.5 leading-relaxed">
+          <LatexText text={summary} />
+        </div>
       )}
 
       {/* Mastery bar (only for non-schema nodes) */}

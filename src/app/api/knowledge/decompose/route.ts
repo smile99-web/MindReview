@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
 
     // 2. 查找或创建章节
     let chapter = await prisma.chapter.findFirst({
-      where: { subjectId: subjectRecord.id, title: chapterTitle || '未分类' },
+      where: { subjectId: subjectRecord.id, title: chapterTitle || '未分类', parentId: null },
     });
     if (!chapter) {
       chapter = await prisma.chapter.create({

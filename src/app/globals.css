@@ -7,6 +7,13 @@
 .katex-display > .katex { font-size: 1.2em; }
 .katex-display { overflow-x: auto; overflow-y: hidden; }
 .katex-display > .katex-html { padding: 4px 0; }
+/* Keep inline formulas on the text baseline and avoid breaking layout */
+.katex-display { margin: 0.6em 0; }
+.katex-html { line-height: inherit; }
+.katex .base { display: inline-block; }
+/* Allow long inline formulas to scroll inside their container */
+.katex-display::-webkit-scrollbar { height: 4px; }
+.katex-display::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.4); border-radius: 2px; }
 
 
 :root {

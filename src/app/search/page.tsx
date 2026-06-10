@@ -4,6 +4,7 @@ import { authFetch } from '@/lib/auth';
 import { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
+import { LatexText } from '@/components/ui/LatexText';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { getErrorMessage } from '@/lib/errors';
@@ -172,7 +173,7 @@ export default function SearchPage() {
                       )}
                     </div>
                     <p className="text-sm text-slate-500 line-clamp-2">
-                      {result.summary || '暂无摘要'}
+                      <LatexText text={result.summary || "暂无摘要"} />
                     </p>
                   </div>
                   <div className="text-right shrink-0">

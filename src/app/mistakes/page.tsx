@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
+import { LatexText } from '@/components/ui/LatexText';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import type { BadgeVariant } from '@/components/ui/Badge';
@@ -268,7 +269,7 @@ export default function MistakesPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </span>
-                    <span className="text-red-700"><LatexText text={m.wrongAnswer} /></span>
+                    <span className="text-red-700"><LatexText text={m.wrongAnswer || ""} /></span>
                   </div>
                 )}
                 <div className="flex items-start gap-1.5">
@@ -285,7 +286,7 @@ export default function MistakesPage() {
             {m.analysis && (
               <div className="p-4 bg-gradient-to-br from-indigo-50/80 to-blue-50/80 rounded-xl border border-indigo-100/60">
                 <p className="text-sm font-medium text-indigo-800 mb-1">AI错因分析</p>
-                <div className="text-sm text-indigo-700/80"><LatexText text={m.analysis} /></div>
+                <LatexText text={m.analysis || ""} className="text-sm text-indigo-700/80" />
               </div>
             )}
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { LatexText } from '@/components/ui/LatexText';
 
 interface BoundaryCalloutProps {
   boundary: string;
@@ -29,7 +30,7 @@ export function BoundaryCallout({ boundary }: BoundaryCalloutProps) {
       </button>
       {expanded && (
         <div className="mt-2 text-xs text-slate-500 bg-slate-50/80 rounded-lg p-2.5 border border-slate-200/60 leading-relaxed">
-          当{boundary}
+          <LatexText text={`当${boundary}`} />
         </div>
       )}
     </div>

@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { getErrorMessage } from '@/lib/errors';
+import { LatexText } from '@/components/ui/LatexText';
 
 interface SchemaApplyExerciseProps {
   schemaId: string;
@@ -327,7 +328,7 @@ export function SchemaApplyExercise({
                 </span>
               </div>
               <p className="text-sm text-slate-700 leading-relaxed">
-                {problemSetup.problemDescription}
+                <LatexText text={problemSetup.problemDescription} className="text-sm text-slate-700 leading-relaxed" />
               </p>
             </div>
 
@@ -386,7 +387,7 @@ export function SchemaApplyExercise({
                         <p className="text-sm font-medium text-slate-800 mb-1">
                           第{step.step}步: {step.label}
                         </p>
-                        <p className="text-xs text-slate-500 mb-2.5">{step.description}</p>
+                        <LatexText text={step.description} className="text-xs text-slate-500 mb-2.5" />
 
                         {!feedback ? (
                           <textarea
@@ -427,7 +428,7 @@ export function SchemaApplyExercise({
                               </span>
                             </div>
                             <p className="text-sm text-slate-600 leading-relaxed">
-                              {feedback.explanation}
+                              <LatexText text={feedback.explanation} className="text-sm text-slate-600 leading-relaxed" />
                             </p>
 
                             {/* Show expected answer toggle */}

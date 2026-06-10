@@ -5,6 +5,7 @@ import { getErrorMessage } from '@/lib/errors';
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { LatexText } from '@/components/ui/LatexText';
 
 interface MentalModelExerciseProps {
   knowledgeNodeId: string;
@@ -153,7 +154,7 @@ export function MentalModelExercise({
         {node?.summary && (
           <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl p-4 border border-indigo-100/60">
             <p className="text-xs text-indigo-500 font-medium mb-1">知识点参考</p>
-            <p className="text-sm text-slate-700 leading-relaxed">{node.summary}</p>
+            <LatexText text={node.summary} className="text-sm text-slate-700 leading-relaxed" />
             {node.keywords && node.keywords.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2.5">
                 {node.keywords.map((kw, i) => (

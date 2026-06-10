@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { ReviewTaskCard } from '@/components/review/ReviewTaskCard';
 import { CognitiveLoadManager } from '@/components/review/CognitiveLoadManager';
 import { DensityProvider, useDensity } from '@/components/ui/DensityProvider';
+import { LatexText } from '@/components/ui/LatexText';
 import { REVIEW_MODE_CONFIG } from '@/types';
 import type { ReviewMode } from '@/types';
 import { useUserId } from '@/components/auth/AuthProvider';
@@ -467,13 +468,17 @@ function ReviewContent() {
               {tutorHistory.map((msg, i) => (
                 <div key={i} className={`p-3 rounded-xl text-sm ${msg.role === 'user' ? 'bg-indigo-50 ml-8' : 'bg-slate-50 mr-8'}`}>
                   <p className="text-xs text-slate-400 mb-0.5">{msg.role === 'user' ? '你' : 'AI'}</p>
-                  <p className="text-slate-700 whitespace-pre-wrap">{msg.content}</p>
+                  {msg.role === 'user' ? (
+                    <p className="text-slate-700 whitespace-pre-wrap">{msg.content}</p>
+                  ) : (
+                    <LatexText text={msg.content} className="text-slate-700 leading-relaxed" />
+                  )}
                 </div>
               ))}
               {tutorReply && tutorHistory.length === 0 && (
                 <div className="p-3 rounded-xl text-sm bg-slate-50 mr-8">
                   <p className="text-xs text-slate-400 mb-0.5">AI</p>
-                  <p className="text-slate-700 whitespace-pre-wrap">{tutorReply}</p>
+                  <LatexText text={tutorReply} className="text-slate-700 leading-relaxed" />
                 </div>
               )}
             </div>
