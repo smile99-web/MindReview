@@ -4,6 +4,7 @@ import { authFetch } from '@/lib/auth';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { LatexText } from '@/components/ui/LatexText';
 import { useUserId } from '@/components/auth/AuthProvider';
 import type {
   ConstructiveTask,
@@ -637,7 +638,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                     {i + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-800 font-medium mb-3">{q.stem}</p>
+                    <p className="text-sm text-slate-800 font-medium mb-3"><LatexText text={q.stem} /></p>
 
                     {!submitted[q.id] ? (
                       <>
@@ -675,8 +676,8 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                       </>
                     ) : (
                       <div className={`p-3 rounded-lg text-sm ${showAnswer[q.id] ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50'}`}>
-                        <p className="font-semibold text-emerald-800">答案: {q.answer}</p>
-                        {q.explanation && <p className="text-emerald-700/80 mt-1 text-xs">{q.explanation}</p>}
+                        <p className="font-semibold text-emerald-800">答案: <LatexText text={q.answer} /></p>
+                        {q.explanation && <p className="text-emerald-700/80 mt-1 text-xs"><LatexText text={q.explanation} /></p>}
                       </div>
                     )}
                   </div>
@@ -1071,7 +1072,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                           </span>
                           <span className="text-xs text-slate-400">难度 {'★'.repeat(vq.difficulty)}</span>
                         </div>
-                        <p className="text-sm text-slate-800 font-medium mb-3">{vq.stem}</p>
+                        <p className="text-sm text-slate-800 font-medium mb-3"><LatexText text={vq.stem} /></p>
                         {!isSubmitted ? (
                           <>
                             {vq.options && vq.options.length > 0 ? (
@@ -1109,8 +1110,8 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                           </>
                         ) : (
                           <div className={`p-3 rounded-lg text-sm ${showAns ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50'}`}>
-                            <p className="font-semibold text-emerald-800">答案: {vq.answer}</p>
-                            {vq.explanation && <p className="text-emerald-700/80 mt-1 text-xs">{vq.explanation}</p>}
+                            <p className="font-semibold text-emerald-800">答案: <LatexText text={vq.answer} /></p>
+                            {vq.explanation && <p className="text-emerald-700/80 mt-1 text-xs"><LatexText text={vq.explanation} /></p>}
                             <button
                               onClick={() => {
                                 setVariantSubmitted(prev => ({ ...prev, [vq.id]: false }));

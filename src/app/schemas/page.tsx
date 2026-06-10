@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { MasteryBar } from '@/components/ui/MasteryBar';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { LatexText } from '@/components/ui/LatexText';
 
 const SUBJECT_FILTERS = [
   { id: '', label: '全部', icon: '📚' },
@@ -451,9 +452,9 @@ export default function SchemasPage() {
 
                 {/* Description — 2-line clamp */}
                 {schema.description && (
-                  <p className="text-sm text-slate-500 line-clamp-2 mb-3 leading-relaxed">
-                    {schema.description}
-                  </p>
+                  <div className="text-sm text-slate-500 line-clamp-2 mb-3 leading-relaxed">
+                    <LatexText text={schema.description} />
+                  </div>
                 )}
 
                 {/* Meta info */}

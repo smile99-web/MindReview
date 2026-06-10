@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { MasteryBar } from '@/components/ui/MasteryBar';
+import { LatexText } from '@/components/ui/LatexText';
 import LearnerProfileCard from '@/components/learner/LearnerProfileCard';
 import { useUserId } from '@/components/auth/AuthProvider';
 import type { ActionableStep } from '@/lib/learner-model';
@@ -432,7 +433,7 @@ export default function DashboardPage() {
                   {step.title}
                 </div>
                 <div className="text-xs text-slate-500 mt-1 line-clamp-2">
-                  {step.description}
+                  <LatexText text={step.description} />
                 </div>
                 <div className="flex items-center gap-1 mt-2.5 text-xs font-medium text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity">
                   前往

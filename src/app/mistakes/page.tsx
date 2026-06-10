@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import type { BadgeVariant } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { LatexText } from '@/components/ui/LatexText';
 import { authFetch } from '@/lib/auth';
 
 interface SubjectOption {
@@ -258,7 +259,7 @@ export default function MistakesPage() {
             </div>
 
             <div className="bg-slate-50/80 rounded-xl p-4 mb-3">
-              <p className="text-sm font-medium text-slate-800 mb-3">{m.questionText}</p>
+              <p className="text-sm font-medium text-slate-800 mb-3"><LatexText text={m.questionText} /></p>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {m.wrongAnswer && (
                   <div className="flex items-start gap-1.5">
@@ -267,7 +268,7 @@ export default function MistakesPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </span>
-                    <span className="text-red-700">{m.wrongAnswer}</span>
+                    <span className="text-red-700"><LatexText text={m.wrongAnswer} /></span>
                   </div>
                 )}
                 <div className="flex items-start gap-1.5">
@@ -276,7 +277,7 @@ export default function MistakesPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </span>
-                  <span className="text-emerald-700">{m.correctAnswer}</span>
+                  <span className="text-emerald-700"><LatexText text={m.correctAnswer} /></span>
                 </div>
               </div>
             </div>
@@ -284,7 +285,7 @@ export default function MistakesPage() {
             {m.analysis && (
               <div className="p-4 bg-gradient-to-br from-indigo-50/80 to-blue-50/80 rounded-xl border border-indigo-100/60">
                 <p className="text-sm font-medium text-indigo-800 mb-1">AI错因分析</p>
-                <p className="text-sm text-indigo-700/80">{m.analysis}</p>
+                <div className="text-sm text-indigo-700/80"><LatexText text={m.analysis} /></div>
               </div>
             )}
 

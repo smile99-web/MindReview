@@ -10,6 +10,7 @@ import { MasteryBar } from '@/components/ui/MasteryBar';
 import { DecomposeForm } from '@/components/knowledge/DecomposeForm';
 import { TextbookGenerateForm } from '@/components/knowledge/TextbookGenerateForm';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { LatexText } from '@/components/ui/LatexText';
 import { authFetch } from '@/lib/auth';
 import { useUserId } from '@/components/auth/AuthProvider';
 import { SUBJECT_CONFIG } from '@/types';
@@ -429,7 +430,7 @@ export default function SubjectDetailPage() {
                       <h4 className="font-medium text-slate-800 truncate">{node.title}</h4>
                       <Badge variant="info" size="sm">{node.chapter?.title}</Badge>
                     </div>
-                    <p className="text-xs text-slate-500 line-clamp-1">{node.summary}</p>
+                    <p className="text-xs text-slate-500 line-clamp-1"><LatexText text={node.summary || ''} /></p>
                   </div>
                   <div className="ml-4 flex items-center gap-3">
                     <div className="w-24">
