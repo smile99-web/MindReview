@@ -60,12 +60,22 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   const end = source.lastIndexOf('}');
 
   if (start === -1 || end === -1 || end <= start) {
-    throw new Error('AI返回内容不是JSON对象');
+    const preview = raw.slice(0, 200).replace(/\n/g, ' ');
+    throw new Error(
+      `AI返回内容不是JSON对象 (preview: "${preview}...") — 请检查 DEEPSEEK_API_KEY 是否有效或网络可达`,
+    );
   }
 
   source = source.slice(start, end + 1);
   source = sanitizeJsonString(source);
-  return JSON.parse(source);
+  try {
+    return JSON.parse(source);
+  } catch (err: unknown) {
+    const preview = source.slice(0, 200);
+    throw new Error(
+      `AI返回内容JSON解析失败 (preview: "${preview}..."): ${err instanceof Error ? err.message : 'unknown'}`,
+    );
+  }
 }
 
 function buildOutlinePrompt(subject: SubjectName, grade: string, volume: string) {
@@ -140,6 +150,9 @@ JSON格式：
 }
 
 async function generateChapterOutlines(subject: SubjectName, grade: string, volume: string) {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    throw new Error('DEEPSEEK_API_KEY 未配置 — 请到 设置 → AI Key 中添加');
+  }
   const { systemPrompt, userPrompt } = buildOutlinePrompt(subject, grade, volume);
   const raw = await llmCallWithLog(
     {
@@ -154,6 +167,10 @@ async function generateChapterOutlines(subject: SubjectName, grade: string, volu
     },
     prisma,
   );
+
+  if (!raw || !raw.trim()) {
+    throw new Error('AI 返回内容为空 — 请检查 API Key 和网络');
+  }
 
   const generated = parseJsonObject(raw);
   const maxChapters = volume === '全册' ? 12 : 8;
@@ -184,6 +201,9 @@ async function generateChapterKnowledge(
   volume: string,
   chapter: ChapterOutline,
 ): Promise<GeneratedChapter> {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    throw new Error('DEEPSEEK_API_KEY 未配置');
+  }
   const { systemPrompt, userPrompt } = buildChapterPrompt(subject, grade, volume, chapter);
   const raw = await llmCallWithLog(
     {
@@ -245,7 +265,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (chapters.length === 0) {
-      return NextResponse.json({ error: 'AI没有返回可导入的章节' }, { status: 500 });
+      return NextResponse.json(
+        {
+          error: 'AI没有返回可导入的章节',
+          hint: '请先在 设置 → AI Key 中配置 DEEPSEEK_API_KEY',
+          failedChapters,
+        },
+        { status: 500 },
+      );
     }
 
     const config = SUBJECT_CONFIG[subject];
