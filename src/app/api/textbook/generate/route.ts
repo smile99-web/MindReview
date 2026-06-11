@@ -150,9 +150,6 @@ JSON格式：
 }
 
 async function generateChapterOutlines(subject: SubjectName, grade: string, volume: string) {
-  if (!process.env.DEEPSEEK_API_KEY) {
-    throw new Error('DEEPSEEK_API_KEY 未配置 — 请到 设置 → AI Key 中添加');
-  }
   const { systemPrompt, userPrompt } = buildOutlinePrompt(subject, grade, volume);
   const raw = await llmCallWithLog(
     {
@@ -201,9 +198,6 @@ async function generateChapterKnowledge(
   volume: string,
   chapter: ChapterOutline,
 ): Promise<GeneratedChapter> {
-  if (!process.env.DEEPSEEK_API_KEY) {
-    throw new Error('DEEPSEEK_API_KEY 未配置');
-  }
   const { systemPrompt, userPrompt } = buildChapterPrompt(subject, grade, volume, chapter);
   const raw = await llmCallWithLog(
     {
