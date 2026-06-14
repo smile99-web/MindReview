@@ -1,6 +1,8 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
 import type { Prisma } from '@prisma/client';
 
 // GET /api/knowledge — 获取知识点列表
@@ -38,7 +40,27 @@ export async function GET(req: NextRequest) {
       prisma.knowledgeNode.count({ where }),
     ]);
 
-    return NextResponse.json({ nodes, total, page, limit });
+    // 用当前用户真实进度覆盖 KnowledgeNode.masteryLevel（默认 0），否则学过也显示 0%。
+    let progressByNodeId: Map<string, { masteryLevel: number }> | undefined;
+    try {
+      const userId = await resolveUserIdFromRequest(req);
+      progressByNodeId = await loadProgressByNodeId(
+        userId,
+        nodes.map((n) => n.id),
+        prisma,
+      );
+    } catch {
+      // 未登录或 resolveUserId 失败：保持原 masteryLevel（默认 0）
+    }
+
+    const nodesWithRealMastery = nodes.map((node) => {
+      const real = progressByNodeId?.get(node.id)?.masteryLevel;
+      return real != null && real > node.masteryLevel
+        ? { ...node, masteryLevel: real }
+        : node;
+    });
+
+    return NextResponse.json({ nodes: nodesWithRealMastery, total, page, limit });
   } catch (error: unknown) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
