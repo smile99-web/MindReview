@@ -46,29 +46,34 @@ echo "[2/4] Deploying to VPS..."
 # - .next/standalone/MindReview/.next  → PM2 实际加载的 build
 # - .next/standalone/.next            → 旧 deploy 用错 cp 路径的残留
 # - .next/static                      → 多次 tar 推送累积的客户端 chunks 源
+# 推送方式：scp 上传 tar 到 VPS 临时文件，再 VPS 端 tar -xzf。
+# 之前用 `tar | ssh tar -xzf -` 通过 SSH stdin pipe 推送 44MB tar.gz 在某个位置截断，
+# 导致 MindReview/.next/node_modules/（包含 prisma symlink）解压缺失，运行时找不到。
+TMP_TAR="/tmp/mindreview-deploy-$$.tar.gz"
+trap 'rm -f "$TMP_TAR"' EXIT
+tar --exclude='node_modules' \
+    --exclude='.git' \
+    --exclude='id_ed25519*' \
+    --exclude='.DS_Store' \
+    -czf "$TMP_TAR" .next/standalone .next/static public prisma package.json ecosystem.config.js
+echo "      tar size: $(du -h "$TMP_TAR" | awk '{print $1}'), files: $(tar -tzf "$TMP_TAR" | wc -l | tr -d ' ')"
+scp "${SSH_OPTS[@]}" "$TMP_TAR" "$SERVER:/tmp/mindreview-deploy.tar.gz"
 ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
       rm -rf .next/standalone/MindReview/.next \
              .next/standalone/.next \
              .next/static \
              2>/dev/null; \
-      echo '      (cleaned old build artifacts)'"
-tar --exclude='node_modules' \
-    --exclude='.git' \
-    --exclude='id_ed25519*' \
-    --exclude='.DS_Store' \
-    -czf - .next/standalone .next/static public prisma package.json ecosystem.config.js \
-  | ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && tar -xzf - && \
-        echo '      (after tar-xzf, check):' && \
-        ls -la .next/standalone/MindReview/.next/node_modules/ 2>&1 | head -5 && \
-        cp -r .next/static .next/standalone/MindReview/.next/static && \
-        cp -r public .next/standalone/ && \
-        # 把 @prisma/client 复制到符号链接指向的位置
-        # （Mac build 产物里 client-2d8ce578843d5dc0 是一个 symlink → MindReview/node_modules/@prisma/client）
-        mkdir -p .next/standalone/MindReview/node_modules/@prisma && \
-        cp -r node_modules/@prisma/client .next/standalone/MindReview/node_modules/@prisma/ && \
-        npx prisma migrate deploy 2>&1; \
-        pm2 delete mindreview 2>/dev/null; \
-        pm2 start ecosystem.config.js --update-env 2>&1"
+      tar -xzf /tmp/mindreview-deploy.tar.gz && \
+      rm -f /tmp/mindreview-deploy.tar.gz && \
+      cp -r .next/static .next/standalone/MindReview/.next/static && \
+      cp -r public .next/standalone/ && \
+      # 把 @prisma/client 复制到符号链接指向的位置
+      # （Mac build 产物里 client-2d8ce578843d5dc0 是一个 symlink → MindReview/node_modules/@prisma/client）
+      mkdir -p .next/standalone/MindReview/node_modules/@prisma && \
+      cp -r node_modules/@prisma/client .next/standalone/MindReview/node_modules/@prisma/ && \
+      npx prisma migrate deploy 2>&1; \
+      pm2 delete mindreview 2>/dev/null; \
+      pm2 start ecosystem.config.js --update-env 2>&1"
 echo "      VPS deploy OK"
 echo
 
