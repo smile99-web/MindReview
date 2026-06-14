@@ -1302,6 +1302,14 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
               if (typeof window !== 'undefined') {
                 window.localStorage.removeItem(draftStorageKey);
               }
+              // 通知父组件：构建 + 互动步骤已完成
+              // 之前只在 allDone 结果面板的"查看结果"按钮里调 onComplete，
+              // 导致 cards 页 markStep('constructive'/'interactive') 永远不跑，
+              // LearningChecklist 的 🏗️🤖 步骤不会亮。现在直接在完成时就通知。
+              onComplete?.({
+                ...results,
+                interactive: { ...results.interactive, completed: true },
+              });
             }}>
               完成训练
             </Button>
