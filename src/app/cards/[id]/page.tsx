@@ -306,6 +306,24 @@ export default function KnowledgeCardPage() {
     else if (step === 'constructive' || step === 'interactive') setActiveTab('icap');
   }, []);
 
+  // 提交答题到 /api/practice，写 ReviewLog + Mistake + SM-2 进度。
+  // cards 页面练习 tab 此前是纯 local 检查，不写库，导致 dashboard 看不到学习数据。
+  // 答错也要提交（写 mistake action + 错题本），让"今天学了"统计完整。
+  const submitPracticeAnswer = useCallback(
+    async (questionId: string, userAnswer: string) => {
+      try {
+        await authFetch('/api/practice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ questionId, userAnswer }),
+        });
+      } catch {
+        // ignore — 答题提交失败不阻塞 UI
+      }
+    },
+    [],
+  );
+
   // 切换 tab / 卸载时清掉 read timer，避免离页后还打点
   useEffect(() => {
     return () => {
@@ -739,7 +757,13 @@ export default function KnowledgeCardPage() {
 
                     {!isChecked && q.options && q.options.length > 0 && (
                       <button
-                        onClick={() => setPracticeChecked(prev => ({ ...prev, [key]: true }))}
+                        onClick={() => {
+                          setPracticeChecked(prev => ({ ...prev, [key]: true }));
+                          // 同步提交到后端，写 ReviewLog + Mistake + 错题本
+                          if (q.id && selectedAnswer) {
+                            void submitPracticeAnswer(q.id, selectedAnswer);
+                          }
+                        }}
                         disabled={!selectedAnswer}
                         className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
                           selectedAnswer

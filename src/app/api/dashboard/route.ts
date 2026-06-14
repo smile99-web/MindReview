@@ -29,12 +29,12 @@ export async function GET(req: NextRequest) {
       prisma.subject.count(),
       prisma.chapter.count(),
       prisma.reviewLog.count({
-        where: { userId, action: { in: ['reviewed', 'solved', 'mastered'] } },
+        where: { userId, action: { in: ['reviewed', 'solved', 'mastered', 'mistake'] } },
       }),
       prisma.reviewLog.count({
         where: {
           userId,
-          action: { in: ['reviewed', 'solved', 'mastered'] },
+          action: { in: ['reviewed', 'solved', 'mastered', 'mistake'] },
           createdAt: { gte: startOfToday, lt: endOfToday },
         },
       }),
