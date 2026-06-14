@@ -41,6 +41,15 @@ echo
 
 # ---------- 2. 上传 VPS 并重启 ----------
 echo "[2/4] Deploying to VPS..."
+# 先清理 VPS 上 build artifacts 的旧 chunks（tar 不会删除已存在的文件，会留下孤儿）。
+# 只清 build 产物目录（chunks/static/app server bundles），保留 .env / prisma / public 等配置资源。
+ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
+      rm -rf .next/standalone/MindReview/.next/server/chunks \
+             .next/standalone/MindReview/.next/server/app \
+             .next/standalone/MindReview/.next/static \
+             .next/standalone/MindReview/.next/cache \
+             2>/dev/null; \
+      echo '      (cleaned old build artifacts)'"
 tar --exclude='node_modules' \
     --exclude='.git' \
     --exclude='id_ed25519*' \
