@@ -5,6 +5,11 @@
   },
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=25.9.0",
+    "pnpm": ">=10.30.3"
+  },
+  "packageManager": "pnpm@10.30.3",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

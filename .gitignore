@@ -26,6 +26,11 @@
 __pycache__/
 *.py[cod]
 
+# local SSH keys (NEVER commit; .pub 也包含在内以防泄漏私钥路径)
+/id_ed25519*
+/id_rsa*
+/id_ecdsa*
+
 # debug
 npm-debug.log*
 yarn-debug.log*
