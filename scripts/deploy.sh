@@ -35,6 +35,9 @@ echo "  MindReview - Build + Deploy + Push"
 echo "============================================"
 echo
 echo "[1/4] Building Next.js..."
+# Prisma client 会写死 build 时的项目根路径。VPS 期望 /opt/mindreview，
+# 所以 deploy build 必须固定这个环境变量（与 next.config.ts 配合）。
+export NEXT_OUTPUT_FILE_TRACING_ROOT=/opt/mindreview
 npx next build
 echo "      Build OK"
 echo
