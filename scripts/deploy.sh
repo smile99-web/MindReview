@@ -49,7 +49,8 @@ tar --exclude='node_modules' \
   | ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && tar -xzf - && \
         cp -r .next/static .next/standalone/.next/static && \
         cp -r public .next/standalone/ && \
-        npx prisma generate 2>/dev/null; \
+        npx prisma generate 2>/dev/null && \
+        npx prisma migrate deploy 2>&1; \
         pm2 restart mindreview"
 echo "      VPS deploy OK"
 echo
