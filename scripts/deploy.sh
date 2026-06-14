@@ -56,7 +56,7 @@ tar --exclude='node_modules' \
     --exclude='.DS_Store' \
     -czf - .next/standalone .next/static public prisma package.json \
   | ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && tar -xzf - && \
-        cp -r .next/static .next/standalone/.next/static && \
+        cp -r .next/static .next/standalone/MindReview/.next/static && \
         cp -r public .next/standalone/ && \
         npx prisma generate 2>/dev/null && \
         npx prisma migrate deploy 2>&1; \
