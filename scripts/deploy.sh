@@ -41,12 +41,15 @@ echo
 
 # ---------- 2. 上传 VPS 并重启 ----------
 echo "[2/4] Deploying to VPS..."
-# 彻底清空 VPS 端 build 目录（保留顶层 server.js / package.json / .env / public）
-# 上一次的 bug 是只删了 .next/static，没删 .next/standalone/.next 嵌套路径的旧 chunks，
-# 留下 36 个孤儿 client chunk 覆盖不到。这次把整个 MindReview/.next 都清掉让 tar 重建。
+# 彻底清空 VPS 端 build 产物目录（保留 server.js / .env / public / package.json / prisma）
+# 必须在 tar 推送前清，tar 默认不删目标已存在的文件，会留下孤儿 chunks。
+# - .next/standalone/MindReview/.next  → PM2 实际加载的 build
+# - .next/standalone/.next            → 旧 deploy 用错 cp 路径的残留
+# - .next/static                      → 多次 tar 推送累积的客户端 chunks 源
 ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
       rm -rf .next/standalone/MindReview/.next \
              .next/standalone/.next \
+             .next/static \
              2>/dev/null; \
       echo '      (cleaned old build artifacts)'"
 tar --exclude='node_modules' \
