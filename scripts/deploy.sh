@@ -35,9 +35,6 @@ echo "  MindReview - Build + Deploy + Push"
 echo "============================================"
 echo
 echo "[1/4] Building Next.js..."
-# Prisma client 会写死 build 时的项目根路径。VPS 期望 /opt/mindreview，
-# 所以 deploy build 必须固定这个环境变量（与 next.config.ts 配合）。
-export NEXT_OUTPUT_FILE_TRACING_ROOT=/opt/mindreview
 npx next build
 echo "      Build OK"
 echo
@@ -65,6 +62,10 @@ ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
              .next/standalone/.next \
              .next/static \
              2>/dev/null; \
+      # Prisma client 二进制硬编码了 Mac 上的 build 路径 /Users/ai/MindReview
+      # （outputFileTracingRoot 不能在 projectPath 外）。在 VPS 上创建 symlink
+      # 让 prisma 找到对应 node_modules。
+      ln -sfn /opt/mindreview /Users/ai && \
       tar -xzf /tmp/mindreview-deploy.tar.gz && \
       rm -f /tmp/mindreview-deploy.tar.gz && \
       cp -r .next/static .next/standalone/MindReview/.next/static && \

@@ -1,5 +1,9 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // 跨平台 build：Mac 上 build 也要生成 linux binary engine，
+  // 否则 prisma client 在 VPS（debian-openssl-3.0.x）上跑不起来。
+  // 加上 native 让本地 dev 仍能用 mac 引擎。
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
