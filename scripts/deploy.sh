@@ -60,6 +60,10 @@ tar --exclude='node_modules' \
   | ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && tar -xzf - && \
         cp -r .next/static .next/standalone/MindReview/.next/static && \
         cp -r public .next/standalone/ && \
+        # 把 @prisma/client 复制到符号链接指向的位置
+        # （Mac build 产物里 client-2d8ce578843d5dc0 是一个 symlink → MindReview/node_modules/@prisma/client）
+        mkdir -p .next/standalone/MindReview/node_modules/@prisma && \
+        cp -r node_modules/@prisma/client .next/standalone/MindReview/node_modules/@prisma/ && \
         npx prisma migrate deploy 2>&1; \
         pm2 delete mindreview 2>/dev/null; \
         pm2 start ecosystem.config.js --update-env 2>&1"
