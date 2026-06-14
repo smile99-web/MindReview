@@ -315,23 +315,29 @@ export async function POST(req: NextRequest) {
     }
 
     const generated = await generateChapterOutlines(subject, grade, volume);
-    const chapters: GeneratedChapter[] = [];
     const failedChapters: string[] = [];
 
-    for (const chapter of generated.chapters) {
-      try {
-        chapters.push(await generateChapterKnowledge(subject, grade, volume, chapter));
-      } catch (chapterError: unknown) {
-        console.warn('[Textbook Generate] Chapter generation failed:', chapter.title, chapterError);
-        failedChapters.push(chapter.title);
-        chapters.push({
-          title: chapter.title,
-          overview: chapter.overview,
-          sortOrder: chapter.sortOrder,
-          knowledgeNodes: [],
-        });
+    // 并行生成每章知识点（之前是串行 for-of，4 章 × 30s = 120s+ 触发 Nginx 504）
+    const chapterResults = await Promise.allSettled(
+      generated.chapters.map((chapter) =>
+        generateChapterKnowledge(subject, grade, volume, chapter),
+      ),
+    );
+
+    const chapters: GeneratedChapter[] = chapterResults.map((result, idx) => {
+      const chapter = generated.chapters[idx];
+      if (result.status === 'fulfilled') {
+        return result.value;
       }
-    }
+      console.warn('[Textbook Generate] Chapter generation failed:', chapter.title, result.reason);
+      failedChapters.push(chapter.title);
+      return {
+        title: chapter.title,
+        overview: chapter.overview,
+        sortOrder: chapter.sortOrder,
+        knowledgeNodes: [],
+      };
+    });
 
     if (chapters.length === 0) {
       return NextResponse.json(
