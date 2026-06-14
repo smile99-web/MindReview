@@ -60,8 +60,13 @@ git add -A
 if git diff --cached --quiet; then
     echo "      Nothing to commit"
 else
-    read -r -p "      Enter commit message (or press Enter for default): " COMMIT_MSG
-    COMMIT_MSG="${COMMIT_MSG:-Update: code changes}"
+    # 交互式 TTY 才问；非 TTY 用 $DEPLOY_COMMIT_MSG 或默认消息
+    if [[ -t 0 && -z "${DEPLOY_COMMIT_MSG:-}" ]]; then
+        read -r -p "      Enter commit message (or press Enter for default): " COMMIT_MSG
+        COMMIT_MSG="${COMMIT_MSG:-Update: code changes}"
+    else
+        COMMIT_MSG="${DEPLOY_COMMIT_MSG:-chore: post-deploy code changes}"
+    fi
     git commit -m "$COMMIT_MSG"
     echo "      Committed"
 fi
