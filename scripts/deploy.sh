@@ -58,6 +58,8 @@ tar --exclude='node_modules' \
     --exclude='.DS_Store' \
     -czf - .next/standalone .next/static public prisma package.json ecosystem.config.js \
   | ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && tar -xzf - && \
+        echo '      (after tar-xzf, check):' && \
+        ls -la .next/standalone/MindReview/.next/node_modules/ 2>&1 | head -5 && \
         cp -r .next/static .next/standalone/MindReview/.next/static && \
         cp -r public .next/standalone/ && \
         # 把 @prisma/client 复制到符号链接指向的位置
