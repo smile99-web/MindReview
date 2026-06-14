@@ -1,7 +1,7 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { generateQuestions, gradeConstructedAnswer } from '@/lib/llm-client';
+import { analyzeMistake, generateQuestions, gradeConstructedAnswer } from '@/lib/llm-client';
 import { sm2 } from '@/lib/sm2';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import {
@@ -607,6 +607,7 @@ async function handleSubmitAnswer(body: PracticeRequestBody, uid: string) {
           easeFactor: true,
           intervalDays: true,
           lastReviewAt: true,
+          subject: { select: { id: true, name: true } },
         },
       },
     },
@@ -659,6 +660,37 @@ async function handleSubmitAnswer(body: PracticeRequestBody, uid: string) {
       durationSeconds: durationSeconds || null,
     },
   });
+
+  // --- if wrong, also record in Mistake (错题本) so the user can review it later ---
+  if (!isCorrect) {
+    try {
+      const subjectName = node.subject?.name || '通用';
+      const analysis = await analyzeMistake(
+        subjectName,
+        question.stem,
+        answerStr,
+        question.answer,
+      );
+      await prisma.mistake.create({
+        data: {
+          userId: uid,
+          knowledgeNodeId: node.id,
+          subjectId: node.subject?.id ?? null,
+          questionText: question.stem,
+          wrongAnswer: answerStr,
+          correctAnswer: question.answer,
+          mistakeType: analysis?.mistakeType || 'conceptual',
+          analysis: analysis?.analysis || '',
+        },
+      });
+    } catch (mistakeError) {
+      // Mistake 录入失败不应阻塞练习评分主流程；只记录警告
+      console.warn(
+        '[practice POST] Failed to record mistake:',
+        getErrorMessage(mistakeError),
+      );
+    }
+  }
 
   // --- build feedback ---
   const correctDisplay = question.answer;
