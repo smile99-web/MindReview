@@ -825,9 +825,10 @@ export default function KnowledgeCardPage() {
             knowledgeNodeTitle={node.title}
             onClose={() => setActiveTab('card')}
             onComplete={() => {
-              // ICAP 训练完成后，标记构建和互动步骤为已完成
+              // 标记构建 + 互动已完成，并切回知识卡 tab 让学习清单变化可见
               void markStep('constructive');
               void markStep('interactive');
+              setActiveTab('card');
             }}
           />
         </div>
