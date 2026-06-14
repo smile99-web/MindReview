@@ -122,8 +122,10 @@ export async function GET(req: NextRequest) {
     const progressByNodeId = await loadProgressByNodeId(userId, nodeIds, prisma);
 
     // --- 1. Daily Review Activity (30 days, inclusive of today) ---
-    // 之前 i < 30 漏掉今天（today），导致今天所有的学习活动全部归到 0。改为 < 31。
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // 用 UTC 算"今天"和"今日 0:00"：VPS 是 CST (UTC+8)，如果用本地 Date(y,m,d) 构造的
+    // 0:00 在 UTC 里是前一天，导致 toISOString 切出来的 key 少一天。
+    const todayUtcKey = now.toISOString().slice(0, 10);
+    const startOfToday = new Date(todayUtcKey + 'T00:00:00.000Z');
     const dailyActivityMap = new Map<string, { count: number; duration: number }>();
     for (let i = 0; i < 31; i++) {
       const d = new Date(startOfToday.getTime() - (30 - i) * 24 * 60 * 60 * 1000);
@@ -276,11 +278,11 @@ export async function GET(req: NextRequest) {
     }));
 
     // --- 8. Weekly Consistency ---
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // 用 UTC 0:00 锚定"今天"（VPS 是 CST，避免本地时区导致少算一天）
     const weekDays: { day: string; label: string; count: number }[] = [];
     const dayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date(todayStart.getTime() - i * 24 * 60 * 60 * 1000);
+      const d = new Date(startOfToday.getTime() - i * 24 * 60 * 60 * 1000);
       const key = d.toISOString().slice(0, 10);
       const dayLogs = reviewLogs30d.filter(
         (l) => l.createdAt.toISOString().slice(0, 10) === key,
