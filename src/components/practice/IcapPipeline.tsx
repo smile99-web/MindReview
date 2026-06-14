@@ -640,42 +640,55 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                   <div className="flex-1 min-w-0">
                     <LatexText text={q.stem} className="text-sm text-slate-800 font-medium mb-3" />
 
-                    {!submitted[q.id] ? (
-                      <>
-                        {q.options ? (
-                          <div className="space-y-1.5 mb-3">
-                            {q.options.map((opt, j) => (
-                              <label key={j} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 cursor-pointer text-sm">
-                                <input
-                                  type="radio"
-                                  name={`q-${q.id}`}
-                                  value={opt.label}
-                                  onChange={e => setActiveAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
-                                  className="text-indigo-600"
-                                />
-                                <span className="text-xs font-semibold text-slate-400">{opt.label}.</span>
-                                <span className="text-slate-700">{opt.text}</span>
-                              </label>
-                            ))}
-                          </div>
-                        ) : (
-                          <input
-                            type="text"
-                            placeholder="输入你的答案..."
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm mb-3 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
-                            onChange={e => setActiveAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
-                          />
-                        )}
-                        <Button
-                          size="sm"
-                          onClick={() => handleSubmitAnswer(q.id, activeAnswers[q.id] || '')}
-                          disabled={!activeAnswers[q.id]}
-                        >
-                          提交
-                        </Button>
-                      </>
+                    {q.options ? (
+                      <div className="space-y-1.5 mb-3">
+                        {q.options.map((opt, j) => {
+                          const isSelected = activeAnswers[q.id] === opt.label;
+                          const isCorrect = showAnswer[q.id] && opt.label === q.answer;
+                          const isWrongPick = showAnswer[q.id] && isSelected && opt.label !== q.answer;
+                          let rowClass = 'hover:bg-slate-50 cursor-pointer';
+                          if (submitted[q.id]) rowClass = 'cursor-default';
+                          if (isCorrect) rowClass = 'bg-emerald-50 border border-emerald-200';
+                          else if (isWrongPick) rowClass = 'bg-red-50 border border-red-200';
+                          return (
+                          <label key={j} className={`flex items-center gap-2.5 p-2 rounded-lg text-sm border border-transparent ${rowClass}`}>
+                            <input
+                              type="radio"
+                              name={`q-${q.id}`}
+                              value={opt.label}
+                              checked={isSelected}
+                              onChange={e => setActiveAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                              disabled={submitted[q.id]}
+                              className="text-indigo-600"
+                            />
+                            <span className="text-xs font-semibold text-slate-400">{opt.label}.</span>
+                            <span className="text-slate-700">{opt.text}</span>
+                            {isCorrect && <span className="ml-auto text-xs font-semibold text-emerald-700">✓ 正确</span>}
+                            {isWrongPick && <span className="ml-auto text-xs font-semibold text-red-700">✗ 你的选择</span>}
+                          </label>
+                          );
+                        })}
+                      </div>
                     ) : (
-                      <div className={`p-3 rounded-lg text-sm ${showAnswer[q.id] ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50'}`}>
+                      <input
+                        type="text"
+                        placeholder="输入你的答案..."
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm mb-3 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+                        onChange={e => setActiveAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                        disabled={submitted[q.id]}
+                      />
+                    )}
+
+                    {!submitted[q.id] ? (
+                      <Button
+                        size="sm"
+                        onClick={() => handleSubmitAnswer(q.id, activeAnswers[q.id] || '')}
+                        disabled={!activeAnswers[q.id]}
+                      >
+                        提交
+                      </Button>
+                    ) : (
+                      <div className={`p-3 rounded-lg text-sm mt-1 ${showAnswer[q.id] ? 'bg-emerald-50/70 border border-emerald-100' : 'bg-slate-50'}`}>
                         <p className="font-semibold text-emerald-800">答案: {q.answer}</p>
                         {q.explanation && <LatexText text={q.explanation} className="text-emerald-700/80 mt-1 text-xs" />}
                       </div>
