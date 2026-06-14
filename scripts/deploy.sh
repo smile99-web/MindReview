@@ -51,8 +51,7 @@ echo "[2/4] Deploying to VPS..."
 # 导致 MindReview/.next/node_modules/（包含 prisma symlink）解压缺失，运行时找不到。
 TMP_TAR="/tmp/mindreview-deploy-$$.tar.gz"
 trap 'rm -f "$TMP_TAR"' EXIT
-tar --exclude='node_modules' \
-    --exclude='.git' \
+tar --exclude='.git' \
     --exclude='id_ed25519*' \
     --exclude='.DS_Store' \
     -czf "$TMP_TAR" .next/standalone .next/static public prisma package.json ecosystem.config.js
