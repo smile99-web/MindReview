@@ -42,6 +42,8 @@ export async function GET(
       select: {
         readCompletedAt: true,
         practicedCompletedAt: true,
+        constructiveCompletedAt: true,
+        interactiveCompletedAt: true,
       },
     });
 
@@ -88,6 +90,8 @@ export async function GET(
       navigation,
       readCompletedAt: progress?.readCompletedAt ?? null,
       practicedCompletedAt: progress?.practicedCompletedAt ?? null,
+      constructiveCompletedAt: progress?.constructiveCompletedAt ?? null,
+      interactiveCompletedAt: progress?.interactiveCompletedAt ?? null,
     });
   } catch (error: unknown) {
     const message = getErrorMessage(error);

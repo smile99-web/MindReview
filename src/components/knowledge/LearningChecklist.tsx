@@ -2,11 +2,13 @@
 
 import { useState } from 'react';
 
-type LearningStep = 'read' | 'practiced';
+type LearningStep = 'read' | 'practiced' | 'constructive' | 'interactive';
 
 export interface LearningChecklistProps {
   readCompletedAt: Date | string | null;
   practicedCompletedAt: Date | string | null;
+  constructiveCompletedAt: Date | string | null;
+  interactiveCompletedAt: Date | string | null;
   onJumpToStep?: (step: LearningStep) => void;
   onResetProgress?: () => void;
 }
@@ -28,12 +30,14 @@ function formatTime(value: Date | string | null): string {
 
 /**
  * LearningChecklist — 知识点页顶部的"学习清单"。
- * 2 步基础完成度（阅读+练习）。全部完成显示🎉横幅。
+ * 4 步 ICAP 完成度：阅读 → 练习 → 构建 → 互动。全部完成显示🎉横幅。
  * 所有节点自由学习，没有任何锁定。
  */
 export function LearningChecklist({
   readCompletedAt,
   practicedCompletedAt,
+  constructiveCompletedAt,
+  interactiveCompletedAt,
   onJumpToStep,
   onResetProgress,
 }: LearningChecklistProps) {
@@ -43,16 +47,30 @@ export function LearningChecklist({
     {
       key: 'read',
       icon: '📖',
-      label: '阅读知识卡',
+      label: '阅读',
       hint: '看完知识卡',
       done: !!readCompletedAt,
     },
     {
       key: 'practiced',
       icon: '✏️',
-      label: '完成练习题',
+      label: '练习',
       hint: '答对至少 1 道题',
       done: !!practicedCompletedAt,
+    },
+    {
+      key: 'constructive',
+      icon: '🏗️',
+      label: '构建',
+      hint: '用自己的话解释总结',
+      done: !!constructiveCompletedAt,
+    },
+    {
+      key: 'interactive',
+      icon: '🤖',
+      label: '互动',
+      hint: '跟AI深度对话变式练习',
+      done: !!interactiveCompletedAt,
     },
   ];
 

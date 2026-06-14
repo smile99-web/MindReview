@@ -3,9 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 
-type LearningStep = 'read' | 'practiced';
+type LearningStep = 'read' | 'practiced' | 'constructive' | 'interactive';
 
-const VALID_STEPS = new Set<LearningStep>(['read', 'practiced']);
+const VALID_STEPS = new Set<LearningStep>(['read', 'practiced', 'constructive', 'interactive']);
 
 /**
  * POST /api/progress/mark-step
@@ -66,6 +66,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       readCompletedAt: updated.readCompletedAt,
       practicedCompletedAt: updated.practicedCompletedAt,
+      constructiveCompletedAt: updated.constructiveCompletedAt,
+      interactiveCompletedAt: updated.interactiveCompletedAt,
       justMarked: !progress[fieldName],
     });
   } catch (error: unknown) {

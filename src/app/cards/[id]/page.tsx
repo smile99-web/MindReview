@@ -54,6 +54,8 @@ interface KnowledgeCardNode extends RelatedKnowledgeNode {
   // 用户对该知识点的学习完成度（来自 UserKnowledgeProgress）
   readCompletedAt?: string | null;
   practicedCompletedAt?: string | null;
+  constructiveCompletedAt?: string | null;
+  interactiveCompletedAt?: string | null;
 }
 
 interface PracticeQuestionOption {
@@ -120,6 +122,8 @@ export default function KnowledgeCardPage() {
   const [unmetPrerequisites, setUnmetPrerequisites] = useState<UnmetPrerequisite[]>([]);
   const [readCompletedAt, setReadCompletedAt] = useState<string | null>(null);
   const [practicedCompletedAt, setPracticedCompletedAt] = useState<string | null>(null);
+  const [constructiveCompletedAt, setConstructiveCompletedAt] = useState<string | null>(null);
+  const [interactiveCompletedAt, setInteractiveCompletedAt] = useState<string | null>(null);
   const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const navigateToCard = useCallback((targetId?: string | null) => {
@@ -145,6 +149,8 @@ export default function KnowledgeCardPage() {
         setQuestions(data.questions || []);
         setReadCompletedAt(data.readCompletedAt || null);
         setPracticedCompletedAt(data.practicedCompletedAt || null);
+        setConstructiveCompletedAt(data.constructiveCompletedAt || null);
+        setInteractiveCompletedAt(data.interactiveCompletedAt || null);
 
         // Check prerequisites for this node
         try {
@@ -240,7 +246,7 @@ export default function KnowledgeCardPage() {
 
   // ---------- 学习完成度追踪 ----------
   // 幂等调用 mark-step API：首次成功才在本地点亮对应步骤
-  const markStep = useCallback(async (step: 'read' | 'practiced') => {
+  const markStep = useCallback(async (step: 'read' | 'practiced' | 'constructive' | 'interactive') => {
     if (!id) return;
     try {
       const res = await authFetch('/api/progress/mark-step', {
@@ -252,8 +258,12 @@ export default function KnowledgeCardPage() {
       const data = await res.json();
       if (step === 'read') {
         setReadCompletedAt(data.readCompletedAt || new Date().toISOString());
-      } else {
+      } else if (step === 'practiced') {
         setPracticedCompletedAt(data.practicedCompletedAt || new Date().toISOString());
+      } else if (step === 'constructive') {
+        setConstructiveCompletedAt(data.constructiveCompletedAt || new Date().toISOString());
+      } else if (step === 'interactive') {
+        setInteractiveCompletedAt(data.interactiveCompletedAt || new Date().toISOString());
       }
     } catch {
       // ignore — UI 不会因此阻塞
@@ -290,8 +300,10 @@ export default function KnowledgeCardPage() {
     }
   }, [practiceChecked, practiceAnswers, questions, practicedCompletedAt, markStep]);
 
-  const handleJumpToStep = useCallback((step: 'read' | 'practiced') => {
-    setActiveTab(step === 'read' ? 'card' : 'practice');
+  const handleJumpToStep = useCallback((step: 'read' | 'practiced' | 'constructive' | 'interactive') => {
+    if (step === 'read') setActiveTab('card');
+    else if (step === 'practiced') setActiveTab('practice');
+    else if (step === 'constructive' || step === 'interactive') setActiveTab('icap');
   }, []);
 
   // 切换 tab / 卸载时清掉 read timer，避免离页后还打点
@@ -470,6 +482,8 @@ export default function KnowledgeCardPage() {
       <LearningChecklist
         readCompletedAt={readCompletedAt}
         practicedCompletedAt={practicedCompletedAt}
+        constructiveCompletedAt={constructiveCompletedAt}
+        interactiveCompletedAt={interactiveCompletedAt}
         onJumpToStep={handleJumpToStep}
         onResetProgress={() => {
           // 只切到第一个 tab 让用户重新看一遍；DB 记录不重置（永远保留历史）
@@ -786,6 +800,11 @@ export default function KnowledgeCardPage() {
             knowledgeNodeId={id}
             knowledgeNodeTitle={node.title}
             onClose={() => setActiveTab('card')}
+            onComplete={() => {
+              // ICAP 训练完成后，标记构建和互动步骤为已完成
+              void markStep('constructive');
+              void markStep('interactive');
+            }}
           />
         </div>
       )}

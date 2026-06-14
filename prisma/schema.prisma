@@ -239,8 +239,10 @@ model UserKnowledgeProgress {
   lastReviewAt          DateTime?
   forgetRisk            Float    @default(0)
   // 学习完成进度（首次完成时记录时间戳；可重复学习，不重置）
-  readCompletedAt       DateTime?
-  practicedCompletedAt  DateTime?
+  readCompletedAt           DateTime?
+  practicedCompletedAt      DateTime?
+  constructiveCompletedAt   DateTime?
+  interactiveCompletedAt    DateTime?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
