@@ -9,7 +9,6 @@ import { LatexText } from '@/components/ui/LatexText';
 import { Badge } from '@/components/ui/Badge';
 import { MasteryBar } from '@/components/ui/MasteryBar';
 import { Button } from '@/components/ui/Button';
-import { LatexText } from '@/components/ui/LatexText';
 
 interface ChapterDetail {
   id: string;

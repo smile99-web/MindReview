@@ -5,7 +5,6 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card } from '@/components/ui/Card';
 import { LatexText } from '@/components/ui/LatexText';
 import { Button } from '@/components/ui/Button';
-import { LatexText } from '@/components/ui/LatexText';
 import { useUserId } from '@/components/auth/AuthProvider';
 import type {
   ConstructiveTask,

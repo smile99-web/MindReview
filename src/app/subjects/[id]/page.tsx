@@ -11,7 +11,6 @@ import { MasteryBar } from '@/components/ui/MasteryBar';
 import { DecomposeForm } from '@/components/knowledge/DecomposeForm';
 import { TextbookGenerateForm } from '@/components/knowledge/TextbookGenerateForm';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { LatexText } from '@/components/ui/LatexText';
 import { authFetch } from '@/lib/auth';
 import { useUserId } from '@/components/auth/AuthProvider';
 import { SUBJECT_CONFIG } from '@/types';

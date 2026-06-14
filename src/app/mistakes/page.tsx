@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import type { BadgeVariant } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { LatexText } from '@/components/ui/LatexText';
 import { authFetch } from '@/lib/auth';
 
 interface SubjectOption {
