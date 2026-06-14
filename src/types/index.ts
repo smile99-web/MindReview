@@ -1,7 +1,7 @@
 // ========== 学科 ==========
-export type SubjectName = '语文' | '数学' | '物理' | '化学' | '历史' | '道法';
+export type SubjectName = '语文' | '数学' | '物理' | '化学' | '历史' | '道法' | '地理' | '生物';
 
-export const SUBJECTS: SubjectName[] = ['语文', '数学', '物理', '化学', '历史', '道法'];
+export const SUBJECTS: SubjectName[] = ['语文', '数学', '物理', '化学', '历史', '道法', '地理', '生物'];
 
 export const SUBJECT_CONFIG: Record<SubjectName, {
   icon: string;
@@ -37,6 +37,16 @@ export const SUBJECT_CONFIG: Record<SubjectName, {
     icon: '⚖️',
     colorClass: 'bg-red-100 text-red-700 border-red-300',
     representationTypes: ['keyword', 'viewpoint', 'template'],
+  },
+  '地理': {
+    icon: '🌍',
+    colorClass: 'bg-teal-100 text-teal-700 border-teal-300',
+    representationTypes: ['map', 'climate', 'physical', 'human', 'regional'],
+  },
+  '生物': {
+    icon: '🧬',
+    colorClass: 'bg-emerald-100 text-emerald-700 border-emerald-300',
+    representationTypes: ['concept', 'process', 'classification', 'diagram', 'experiment'],
   },
 };
 
@@ -116,11 +126,11 @@ export function getReviewInterval(masteryLevel: number): number {
 
 // ========== 学科对比 ==========
 export function isSTEMSubject(subject: SubjectName): boolean {
-  return ['数学', '物理', '化学'].includes(subject);
+  return ['数学', '物理', '化学', '生物'].includes(subject);
 }
 
 export function isHumanitiesSubject(subject: SubjectName): boolean {
-  return ['语文', '历史', '道法'].includes(subject);
+  return ['语文', '历史', '道法', '地理'].includes(subject);
 }
 
 // ========== API 类型 ==========
