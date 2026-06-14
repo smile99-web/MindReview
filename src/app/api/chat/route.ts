@@ -206,6 +206,7 @@ export async function POST(req: NextRequest) {
 
   // 调用 LLM（结构化 JSON）
   let llmReply: ChatLlmReply;
+  let rawResponseForLog: string | null = null;
   try {
     const raw = await llmCall({
       messages: llmMessages,
@@ -213,13 +214,42 @@ export async function POST(req: NextRequest) {
       maxTokens: 2048,
       jsonMode: true,
     });
+    rawResponseForLog = raw;
     llmReply = normalizeLlmReply(raw);
     if (!llmReply.reply) {
-      throw new Error('LLM 返回内容为空');
+      // 罕见情况：DeepSeek 返回了合规 JSON 但 reply 字段为空（模型可能拒答 / 内容审核触发 / 截断）。
+      // 这里记下原始响应方便排查，同时退回到纯文本模式重试一次。
+      console.warn(
+        '[Chat] JSON reply 字段为空，准备重试纯文本模式。原始响应:',
+        raw.slice(0, 1000),
+      );
+      const fallbackRaw = await llmCall({
+        messages: llmMessages,
+        temperature: 0.5,
+        maxTokens: 1024,
+        jsonMode: false,
+      });
+      rawResponseForLog = fallbackRaw;
+      const fallbackReply = (fallbackRaw || '').trim();
+      if (!fallbackReply) {
+        throw new Error('LLM 返回内容为空');
+      }
+      llmReply = { reply: fallbackReply };
     }
   } catch (err) {
     const errMsg = getErrorMessage(err);
     console.error('[Chat] LLM 调用失败:', errMsg);
+    // 把原始响应落库，方便回溯哪些问题触发了空响应
+    await prisma.aiGenerationLog.create({
+      data: {
+        generatorType: 'chat',
+        model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
+        prompt: `[chat:${conversationId}] ${message}`.slice(0, 4000),
+        response: (rawResponseForLog || '').slice(0, 4000),
+        status: 'failed',
+        errorMessage: errMsg,
+      },
+    }).catch(() => {/* 日志失败不影响主流程 */});
     return NextResponse.json(
       { error: `AI 老师暂时无法回复: ${errMsg}` },
       { status: 502 },
