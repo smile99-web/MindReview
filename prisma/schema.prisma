@@ -12,23 +12,24 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  username      String    @unique
-  email         String?   @unique
-  passwordHash  String
-  name          String?
-  grade         String?   // 年级，如 "初二"
-  avatarUrl     String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String?  @unique
+  passwordHash String
+  name         String?
+  grade        String? // 年级，如 "初二"
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  reviewTasks   ReviewTask[]
-  reviewLogs    ReviewLog[]
-  mistakes      Mistake[]
-  mistakeLogs   MistakeLog[]
+  reviewTasks       ReviewTask[]
+  reviewLogs        ReviewLog[]
+  mistakes          Mistake[]
+  mistakeLogs       MistakeLog[]
   knowledgeProgress UserKnowledgeProgress[]
-  audioAssets   AudioAsset[]
-  refreshTokens RefreshToken[]
+  audioAssets       AudioAsset[]
+  refreshTokens     RefreshToken[]
+  chatConversations ChatConversation[]
 }
 
 model RefreshToken {
@@ -38,94 +39,94 @@ model RefreshToken {
   expiresAt DateTime
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Subject {
-  id          String    @id @default(cuid())
-  name        String    @unique // 数学/物理/化学/历史/道法
-  icon        String?   // 图标 emoji
-  colorClass  String?   // Tailwind 颜色类名
+  id          String   @id @default(cuid())
+  name        String   @unique // 数学/物理/化学/历史/道法
+  icon        String? // 图标 emoji
+  colorClass  String? // Tailwind 颜色类名
   description String?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
 
-  chapters    Chapter[]
+  chapters       Chapter[]
   knowledgeNodes KnowledgeNode[]
 }
 
 model Chapter {
-  id          String    @id @default(cuid())
-  subjectId   String
-  parentId    String?
-  title       String
-  sortOrder   Int       @default(0)
-  createdAt   DateTime  @default(now())
+  id        String   @id @default(cuid())
+  subjectId String
+  parentId  String?
+  title     String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
 
-  subject     Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  parent      Chapter?  @relation("ChapterHierarchy", fields: [parentId], references: [id])
-  children    Chapter[] @relation("ChapterHierarchy")
+  subject        Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  parent         Chapter?        @relation("ChapterHierarchy", fields: [parentId], references: [id])
+  children       Chapter[]       @relation("ChapterHierarchy")
   knowledgeNodes KnowledgeNode[]
 }
 
 model KnowledgeNode {
-  id                String    @id @default(cuid())
-  subjectId         String
-  chapterId         String?
-  parentId          String?
-  title             String
-  summary           String?   // 简明解释
-  keywords          String[]  @default([])
-  prerequisites     String[]  @default([])
-  commonMistakes    String[]  @default([])
-  typicalQuestions  String[]  @default([])
-  difficulty        Int       @default(3) // 1-5
-  cognitiveLoad     Int       @default(3) // 1-5
-  icapLevel         String    @default("Active") // Passive/Active/Constructive/Interactive
-  masteryLevel      Int       @default(0) // 0-100
+  id                 String                       @id @default(cuid())
+  subjectId          String
+  chapterId          String?
+  parentId           String?
+  title              String
+  summary            String? // 简明解释
+  keywords           String[]                     @default([])
+  prerequisites      String[]                     @default([])
+  commonMistakes     String[]                     @default([])
+  typicalQuestions   String[]                     @default([])
+  difficulty         Int                          @default(3) // 1-5
+  cognitiveLoad      Int                          @default(3) // 1-5
+  icapLevel          String                       @default("Active") // Passive/Active/Constructive/Interactive
+  masteryLevel       Int                          @default(0) // 0-100
   // SM-2 记忆调度字段
-  repetitions       Int       @default(0)  // 连续正确回忆次数
-  easeFactor        Float     @default(2.5) // 难度系数，最低 1.3
-  intervalDays      Int       @default(0)  // 当前复习间隔（天）
-  nextReviewAt      DateTime? // 下次复习时间
-  lastReviewAt      DateTime? // 上次复习时间
-  forgetRisk        Float     @default(0)  // 遗忘风险 0-1
-  representationType String?  // formula/image/step/timeline/causal/mindmap etc.
-  representationData Json?    // 表征数据
-  embedding         Unsupported("vector(1536)")?  // pgvector 语义搜索嵌入
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  repetitions        Int                          @default(0) // 连续正确回忆次数
+  easeFactor         Float                        @default(2.5) // 难度系数，最低 1.3
+  intervalDays       Int                          @default(0) // 当前复习间隔（天）
+  nextReviewAt       DateTime? // 下次复习时间
+  lastReviewAt       DateTime? // 上次复习时间
+  forgetRisk         Float                        @default(0) // 遗忘风险 0-1
+  representationType String? // formula/image/step/timeline/causal/mindmap etc.
+  representationData Json? // 表征数据
+  embedding          Unsupported("vector(1536)")? // pgvector 语义搜索嵌入
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
 
-  subject           Subject             @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  chapter           Chapter?            @relation(fields: [chapterId], references: [id])
-  parent            KnowledgeNode?      @relation("KnowledgeHierarchy", fields: [parentId], references: [id])
-  children          KnowledgeNode[]     @relation("KnowledgeHierarchy")
-  outgoingEdges     KnowledgeEdge[]     @relation("EdgeFrom")
-  incomingEdges     KnowledgeEdge[]     @relation("EdgeTo")
-  knowledgeCards    KnowledgeCard[]
-  questions         Question[]
-  mistakes          Mistake[]
-  mistakeLogs        MistakeLog[]
-  reviewLogs        ReviewLog[]
-  reviewTasks       ReviewTask[]
-  userProgress      UserKnowledgeProgress[]
+  subject        Subject                 @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  chapter        Chapter?                @relation(fields: [chapterId], references: [id])
+  parent         KnowledgeNode?          @relation("KnowledgeHierarchy", fields: [parentId], references: [id])
+  children       KnowledgeNode[]         @relation("KnowledgeHierarchy")
+  outgoingEdges  KnowledgeEdge[]         @relation("EdgeFrom")
+  incomingEdges  KnowledgeEdge[]         @relation("EdgeTo")
+  knowledgeCards KnowledgeCard[]
+  questions      Question[]
+  mistakes       Mistake[]
+  mistakeLogs    MistakeLog[]
+  reviewLogs     ReviewLog[]
+  reviewTasks    ReviewTask[]
+  userProgress   UserKnowledgeProgress[]
 }
 
 model KnowledgeEdge {
-  id          String   @id @default(cuid())
-  fromId      String
-  toId        String
-  relationType String  // contains/prerequisite/cause/compare/formula/experiment/mistake/questionType
-  label       String?
-  createdAt   DateTime @default(now())
+  id           String   @id @default(cuid())
+  fromId       String
+  toId         String
+  relationType String // contains/prerequisite/cause/compare/formula/experiment/mistake/questionType
+  label        String?
+  createdAt    DateTime @default(now())
 
-  from        KnowledgeNode @relation("EdgeFrom", fields: [fromId], references: [id], onDelete: Cascade)
-  to          KnowledgeNode @relation("EdgeTo", fields: [toId], references: [id], onDelete: Cascade)
+  from KnowledgeNode @relation("EdgeFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to   KnowledgeNode @relation("EdgeTo", fields: [toId], references: [id], onDelete: Cascade)
 }
 
 model KnowledgeCard {
   id              String   @id @default(cuid())
   knowledgeNodeId String
-  cardType        String   // summary/formula/diagram/timeline/template/mistake
+  cardType        String // summary/formula/diagram/timeline/template/mistake
   title           String
   content         String
   imageUrl        String?
@@ -133,24 +134,24 @@ model KnowledgeCard {
   sortOrder       Int      @default(0)
   createdAt       DateTime @default(now())
 
-  knowledgeNode   KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+  knowledgeNode KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
 }
 
 model Question {
   id              String   @id @default(cuid())
   knowledgeNodeId String
-  questionType    String   // multiple_choice/fill_blank/true_false/short_answer/variant
+  questionType    String // multiple_choice/fill_blank/true_false/short_answer/variant
   icapLevel       String   @default("Active") // Passive/Active/Constructive/Interactive
-  stem            String   // 题干
-  options         Json?    // [{label: "A", text: "..."}]
-  answer          String   // 正确答案
-  explanation     String?  // 解析
+  stem            String // 题干
+  options         Json? // [{label: "A", text: "..."}]
+  answer          String // 正确答案
+  explanation     String? // 解析
   difficulty      Int      @default(3) // 1-5
   cognitiveLoad   Int      @default(3) // 1-5
   audioUrl        String?
   createdAt       DateTime @default(now())
 
-  knowledgeNode   KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+  knowledgeNode KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
 }
 
 model Mistake {
@@ -158,96 +159,96 @@ model Mistake {
   userId          String
   knowledgeNodeId String?
   subjectId       String?
-  questionText    String   // 原题文本（或图片描述）
-  wrongAnswer     String?  // 错误答案
-  correctAnswer   String   // 正确答案
-  mistakeType     String?  // conceptual/calculation/careless/application
-  analysis        String?  // AI错因分析
+  questionText    String // 原题文本（或图片描述）
+  wrongAnswer     String? // 错误答案
+  correctAnswer   String // 正确答案
+  mistakeType     String? // conceptual/calculation/careless/application
+  analysis        String? // AI错因分析
   resolved        Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  knowledgeNode   KnowledgeNode? @relation(fields: [knowledgeNodeId], references: [id])
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  knowledgeNode KnowledgeNode? @relation(fields: [knowledgeNodeId], references: [id])
 }
 
 model ReviewTask {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   userId          String
   knowledgeNodeId String
-  taskType        String   // passive/active/constructive/interactive
+  taskType        String // passive/active/constructive/interactive
   dueDate         DateTime
-  completed       Boolean  @default(false)
-  score           Int?     // 得分
-  feedback        String?  // AI反馈
-  createdAt       DateTime @default(now())
+  completed       Boolean   @default(false)
+  score           Int? // 得分
+  feedback        String? // AI反馈
+  createdAt       DateTime  @default(now())
   completedAt     DateTime?
 
-  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  knowledgeNode   KnowledgeNode  @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  knowledgeNode KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
 }
 
 model ReviewLog {
-  id              String   @id @default(cuid())
-  userId          String
-  knowledgeNodeId String?
-  action          String   // reviewed/solved/mistake/mastered
-  masteryBefore   Int?
-  masteryAfter    Int?
+  id               String   @id @default(cuid())
+  userId           String
+  knowledgeNodeId  String?
+  action           String // reviewed/solved/mistake/mastered
+  masteryBefore    Int?
+  masteryAfter     Int?
   // SM-2 快照
-  quality         Int?     // 回忆质量 0-5
+  quality          Int? // 回忆质量 0-5
   easeFactorBefore Float?
   easeFactorAfter  Float?
-  intervalBefore   Int?    // 复习前间隔（天）
-  intervalAfter    Int?    // 复习后间隔（天）
-  repetitions      Int?    // 本次复习时的连续正确次数
-  forgetRisk       Float?  // 遗忘风险快照
-  durationSeconds Int?
-  createdAt       DateTime @default(now())
+  intervalBefore   Int? // 复习前间隔（天）
+  intervalAfter    Int? // 复习后间隔（天）
+  repetitions      Int? // 本次复习时的连续正确次数
+  forgetRisk       Float? // 遗忘风险快照
+  durationSeconds  Int?
+  createdAt        DateTime @default(now())
 
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  knowledgeNode   KnowledgeNode?  @relation(fields: [knowledgeNodeId], references: [id])
-  mistakeLogs     MistakeLog[]
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  knowledgeNode KnowledgeNode? @relation(fields: [knowledgeNodeId], references: [id])
+  mistakeLogs   MistakeLog[]
 }
 
 model MistakeLog {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   userId          String
   knowledgeNodeId String?
   reviewLogId     String?
-  mistakeType     String   // conceptual/calculation/careless/application
-  severity        Int      @default(1) // 1-5 错误严重程度
-  triggerCount    Int      @default(1) // 同类错误触发次数
+  mistakeType     String // conceptual/calculation/careless/application
+  severity        Int       @default(1) // 1-5 错误严重程度
+  triggerCount    Int       @default(1) // 同类错误触发次数
   resolvedAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  knowledgeNode   KnowledgeNode?  @relation(fields: [knowledgeNodeId], references: [id])
-  reviewLog       ReviewLog?      @relation(fields: [reviewLogId], references: [id])
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  knowledgeNode KnowledgeNode? @relation(fields: [knowledgeNodeId], references: [id])
+  reviewLog     ReviewLog?     @relation(fields: [reviewLogId], references: [id])
 }
 
 model UserKnowledgeProgress {
-  id                    String   @id @default(cuid())
-  userId                String
-  knowledgeNodeId       String
-  masteryLevel          Int      @default(0)
-  repetitions           Int      @default(0)
-  easeFactor            Float    @default(2.5)
-  intervalDays          Int      @default(0)
-  nextReviewAt          DateTime?
-  lastReviewAt          DateTime?
-  forgetRisk            Float    @default(0)
+  id                      String    @id @default(cuid())
+  userId                  String
+  knowledgeNodeId         String
+  masteryLevel            Int       @default(0)
+  repetitions             Int       @default(0)
+  easeFactor              Float     @default(2.5)
+  intervalDays            Int       @default(0)
+  nextReviewAt            DateTime?
+  lastReviewAt            DateTime?
+  forgetRisk              Float     @default(0)
   // 学习完成进度（首次完成时记录时间戳；可重复学习，不重置）
-  readCompletedAt           DateTime?
-  practicedCompletedAt      DateTime?
-  constructiveCompletedAt   DateTime?
-  interactiveCompletedAt    DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  readCompletedAt         DateTime?
+  practicedCompletedAt    DateTime?
+  constructiveCompletedAt DateTime?
+  interactiveCompletedAt  DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  knowledgeNode   KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  knowledgeNode KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
 
   @@unique([userId, knowledgeNodeId])
   @@index([userId, nextReviewAt])
@@ -256,11 +257,11 @@ model UserKnowledgeProgress {
 
 model AiGenerationLog {
   id            String   @id @default(cuid())
-  generatorType String   // llm/tts/image
-  model         String   // deepseek-chat/volcano_tts/seedream-5-0
+  generatorType String // llm/tts/image
+  model         String // deepseek-chat/volcano_tts/seedream-5-0
   prompt        String
   response      String?
-  status        String   // pending/processing/success/failed
+  status        String // pending/processing/success/failed
   resultUrl     String?
   errorMessage  String?
   tokensUsed    Int?
@@ -269,41 +270,71 @@ model AiGenerationLog {
 }
 
 model AudioAsset {
-  id            String   @id @default(cuid())
-  userId        String?
-  contentType   String   // card/explanation/summary/question
-  contentRefId  String?  // 关联的知识卡片/题目ID
-  text          String   // 原文
-  audioUrl      String
-  durationMs    Int?
-  voiceType     String?
-  createdAt     DateTime @default(now())
+  id           String   @id @default(cuid())
+  userId       String?
+  contentType  String // card/explanation/summary/question
+  contentRefId String? // 关联的知识卡片/题目ID
+  text         String // 原文
+  audioUrl     String
+  durationMs   Int?
+  voiceType    String?
+  createdAt    DateTime @default(now())
 
-  user          User?    @relation(fields: [userId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
 }
 
 model ImageAsset {
-  id            String   @id @default(cuid())
-  imageType     String   // knowledge/experiment/timeline/force/reaction/portrait
-  prompt        String
-  imageUrl      String
-  contentRefId  String?  // 关联的知识卡片ID
-  status        String   @default("pending") // pending/processing/success/failed
-  errorMessage  String?
-  createdAt     DateTime @default(now())
+  id           String   @id @default(cuid())
+  imageType    String // knowledge/experiment/timeline/force/reaction/portrait
+  prompt       String
+  imageUrl     String
+  contentRefId String? // 关联的知识卡片ID
+  status       String   @default("pending") // pending/processing/success/failed
+  errorMessage String?
+  createdAt    DateTime @default(now())
 }
 
 model ApiKey {
-  id        String   @id @default(cuid())
-  service   String   // llm / tts / image
-  key       String   // 加密存储的 API Key
-  baseUrl   String?  // 自定义 Base URL
-  model     String?  // 自定义 Model
-  isActive  Boolean  @default(true)
+  id        String    @id @default(cuid())
+  service   String // llm / tts / image
+  key       String // 加密存储的 API Key
+  baseUrl   String? // 自定义 Base URL
+  model     String? // 自定义 Model
+  isActive  Boolean   @default(true)
   lastTest  DateTime?
-  testOk    Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  testOk    Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@unique([service])
+}
+
+// AI 多轮问答会话 —— 学生在 /cards 等页面遇到不懂概念时与 AI 老师的对话。
+// 多轮历史持久化便于跨刷新、跨设备继续聊，也方便后续接入学习报告。
+model ChatConversation {
+  id              String   @id @default(cuid())
+  userId          String
+  knowledgeNodeId String? // 可选：发起会话时所在知识点（删除节点时置空，保留历史）
+  title           String   @default("新对话")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model ChatMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String // user / assistant / system
+  content        String // 文本内容（assistant 同时承担 image prompt 描述）
+  imageUrl       String? // assistant 触发图片生成时，存生成结果 URL
+  imagePrompt    String? // 触发本次图片生成所用的提示词（便于复用 / 重生成）
+  createdAt      DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
 }

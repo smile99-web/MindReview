@@ -4,6 +4,9 @@ import "./globals.css";
 import Navbar from "@/components/layout/Navbar";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ChatProvider } from "@/components/chat/ChatProvider";
+import { ChatLauncher } from "@/components/chat/ChatLauncher";
+import { ChatPanel } from "@/components/chat/ChatPanel";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,12 +35,16 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-[#f0f2f5]">
         <AuthProvider>
-          <ErrorBoundary>
-            <Navbar />
-            <main className="flex-1 pt-14">
-              {children}
-            </main>
-          </ErrorBoundary>
+          <ChatProvider>
+            <ErrorBoundary>
+              <Navbar />
+              <main className="flex-1 pt-14">
+                {children}
+              </main>
+              <ChatLauncher />
+              <ChatPanel />
+            </ErrorBoundary>
+          </ChatProvider>
         </AuthProvider>
       </body>
     </html>

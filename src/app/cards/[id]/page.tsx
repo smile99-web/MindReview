@@ -12,6 +12,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { LatexText } from '@/components/ui/LatexText';
+import { useChat } from '@/components/chat/ChatProvider';
 
 interface RelatedKnowledgeNode {
   id: string;
@@ -126,6 +127,8 @@ export default function KnowledgeCardPage() {
   const [interactiveCompletedAt, setInteractiveCompletedAt] = useState<string | null>(null);
   const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const { setKnowledgeContext } = useChat();
+
   const navigateToCard = useCallback((targetId?: string | null) => {
     if (!targetId || targetId === id) return;
     router.push(`/cards/${targetId}`);
@@ -199,6 +202,26 @@ export default function KnowledgeCardPage() {
     loadImage();
     loadAudio();
   }, [id]);
+
+  // 节点加载后，把当前知识点的上下文推到全局 ChatProvider，让 AI 老师对话知道学生在学什么。
+  // 离页或切换节点时清空，避免上一个知识点的 context 污染下一次对话。
+  useEffect(() => {
+    if (!node) {
+      setKnowledgeContext(null);
+      return;
+    }
+    setKnowledgeContext({
+      nodeId: node.id,
+      subject: node.subject?.name,
+      chapter: node.chapter?.title,
+      title: node.title,
+      summary: node.summary,
+      keywords: node.keywords,
+    });
+    return () => {
+      setKnowledgeContext(null);
+    };
+  }, [node, setKnowledgeContext]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
