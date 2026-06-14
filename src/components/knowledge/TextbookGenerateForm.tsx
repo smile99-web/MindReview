@@ -46,7 +46,17 @@ export function TextbookGenerateForm({ initialSubject, onGenerated }: TextbookGe
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subject, grade, volume }),
       });
-      const data = await res.json() as TextbookGenerateResult & { error?: string };
+      // 偶发 LLM 或 Nginx 超时返回 HTML，res.json() 会抛出 "Unexpected token '<'"。
+      // 此时正文已经是 HTML，包一层 try 给用户更友好的提示。
+      let data: Partial<TextbookGenerateResult & { error: string }> = {};
+      try {
+        data = await res.json() as TextbookGenerateResult & { error?: string };
+      } catch {
+        throw new Error(
+          `服务端返回了非 JSON 响应 (HTTP ${res.status})。可能原因：API 调用超时或 DeepSeek 服务暂时不可用。` +
+            (res.status >= 500 ? ' 请稍后重试，或检查 DEEPSEEK_API_KEY 是否有效。' : ''),
+        );
+      }
       if (!res.ok) throw new Error(data.error || '生成失败');
       setResult(data);
       onGenerated?.(data);
