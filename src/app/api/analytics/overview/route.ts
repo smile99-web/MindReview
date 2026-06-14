@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
       mistakes,
       mistakeLogs30d,
       reviewTasks,
+      studyTimeLogs30d,
       userProgress,
     ] = await Promise.all([
       prisma.knowledgeNode.findMany({
@@ -95,6 +96,18 @@ export async function GET(req: NextRequest) {
           createdAt: true,
         },
       }),
+      // 学习时长心跳 —— 用 startedAt 锚定"哪一天"，与 dailyActivity / 总时长一致
+      prisma.studyTimeLog.findMany({
+        where: {
+          userId,
+          startedAt: { gte: days30Ago },
+        },
+        select: {
+          id: true,
+          startedAt: true,
+          durationSeconds: true,
+        },
+      }),
       loadProgressByNodeId(
         userId,
         [] as string[], // we'll merge with node data below
@@ -124,6 +137,7 @@ export async function GET(req: NextRequest) {
     // --- 1. Daily Review Activity (30 days, inclusive of today) ---
     // 用 UTC 算"今天"和"今日 0:00"：VPS 是 CST (UTC+8)，如果用本地 Date(y,m,d) 构造的
     // 0:00 在 UTC 里是前一天，导致 toISOString 切出来的 key 少一天。
+    // count = 复习次数（来自 ReviewLog），duration = 实际学习时长（来自 StudyTimeLog）。
     const todayUtcKey = now.toISOString().slice(0, 10);
     const startOfToday = new Date(todayUtcKey + 'T00:00:00.000Z');
     const dailyActivityMap = new Map<string, { count: number; duration: number }>();
@@ -136,6 +150,12 @@ export async function GET(req: NextRequest) {
       const entry = dailyActivityMap.get(key);
       if (entry) {
         entry.count += 1;
+      }
+    }
+    for (const log of studyTimeLogs30d) {
+      const key = log.startedAt.toISOString().slice(0, 10);
+      const entry = dailyActivityMap.get(key);
+      if (entry) {
         entry.duration += log.durationSeconds || 0;
       }
     }
@@ -323,9 +343,12 @@ export async function GET(req: NextRequest) {
 
     // --- Totals ---
     const totalReviewCount30d = reviewLogs30d.length;
-    const totalStudyMinutes30d = Math.round(
-      reviewLogs30d.reduce((s, l) => s + (l.durationSeconds || 0), 0) / 60,
+    // 学习时长：按"30 秒内有点击屏幕操作或输入文字"规则统计，来自客户端心跳。
+    const totalStudySeconds30d = studyTimeLogs30d.reduce(
+      (s, l) => s + (l.durationSeconds || 0),
+      0,
     );
+    const totalStudyMinutes30d = Math.round(totalStudySeconds30d / 60);
 
     return NextResponse.json({
       overview: {

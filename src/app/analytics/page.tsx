@@ -264,17 +264,39 @@ export default function AnalyticsPage() {
                     <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
                     <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                   </linearGradient>
+                  <linearGradient id="colorDuration" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#a855f7" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
+                  </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis
                   dataKey="date" tickFormatter={formatDate}
                   tick={{ fontSize: 11, fill: '#94a3b8' }} interval="preserveStartEnd"
                 />
-                <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} allowDecimals={false} />
+                <YAxis
+                  yAxisId="left"
+                  tick={{ fontSize: 11, fill: '#94a3b8' }}
+                  allowDecimals={false}
+                  label={{ value: '复习次数', angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: '#94a3b8' } }}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tick={{ fontSize: 11, fill: '#a855f7' }}
+                  allowDecimals={false}
+                  label={{ value: '学习时长(分钟)', angle: 90, position: 'insideRight', style: { fontSize: 11, fill: '#a855f7' } }}
+                />
                 <Tooltip content={<CustomTooltip />} />
                 <Area
+                  yAxisId="left"
                   type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2}
                   fill="url(#colorCount)" name="复习次数"
+                />
+                <Area
+                  yAxisId="right"
+                  type="monotone" dataKey="durationMinutes" stroke="#a855f7" strokeWidth={2}
+                  fill="url(#colorDuration)" name="学习时长(分钟)"
                 />
               </AreaChart>
             </ResponsiveContainer>

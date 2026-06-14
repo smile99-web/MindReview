@@ -7,6 +7,7 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ChatProvider } from "@/components/chat/ChatProvider";
 import { ChatLauncher } from "@/components/chat/ChatLauncher";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { StudyTimeTracker } from "@/components/study-time/StudyTimeTracker";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -43,6 +44,7 @@ export default function RootLayout({
               </main>
               <ChatLauncher />
               <ChatPanel />
+              <StudyTimeTracker />
             </ErrorBoundary>
           </ChatProvider>
         </AuthProvider>
