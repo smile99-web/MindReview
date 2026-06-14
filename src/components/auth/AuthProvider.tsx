@@ -16,7 +16,12 @@ import {
   isAuthenticated,
   authFetch,
   getValidToken,
+  ensureFreshToken,
 } from "@/lib/auth";
+
+// 每 10 分钟主动 refresh 一次 access token，避免浏览器不活跃时
+// access token 过期导致下次打开页面就跳登录页。
+const TOKEN_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 interface User {
   id: string;
@@ -75,8 +80,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     restoreSession();
 
+    // 后台定时续 token：浏览器不活跃也不会掉线
+    const refreshTimer = setInterval(() => {
+      if (!cancelled) {
+        void ensureFreshToken();
+      }
+    }, TOKEN_REFRESH_INTERVAL_MS);
+
     return () => {
       cancelled = true;
+      clearInterval(refreshTimer);
     };
   }, []);
 

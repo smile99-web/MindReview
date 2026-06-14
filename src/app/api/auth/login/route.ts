@@ -26,6 +26,19 @@ export async function POST(request: Request) {
       where: { userId: user.id, expiresAt: { lt: now } },
     });
 
+    // 多设备支持：保留最近 5 个 active session 防止 token 无限累积。
+    // 同账号可在多设备同时登录，新登录不会踢旧设备（旧设备 refresh 时如果
+    // 旧 token 已不在 DB 中就清理）。超过 5 个时删除最老的。
+    const activeSessions = await prisma.refreshToken.findMany({
+      where: { userId: user.id, expiresAt: { gt: now } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (activeSessions.length >= 5) {
+      const idsToDelete = activeSessions.slice(4).map((s) => s.id);
+      await prisma.refreshToken.deleteMany({ where: { id: { in: idsToDelete } } });
+    }
+
     const refreshValue = createRefreshTokenValue();
     const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 

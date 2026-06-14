@@ -22,7 +22,7 @@ const ACCESS_KEY = "mindreview_access_token";
 const REFRESH_KEY = "mindreview_refresh_token";
 const USER_KEY = "mindreview_user";
 const ACCESS_COOKIE = "mindreview_access_token";
-const COOKIE_MAX_AGE_SECONDS = 15 * 60;
+const COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
 export class AuthExpiredError extends Error {
   constructor(message = "Session expired") {
@@ -122,6 +122,30 @@ export async function getValidToken(): Promise<string | null> {
   } catch {
     clearTokens();
     return null;
+  }
+}
+
+/**
+ * Force-refresh the access token using the refresh token.
+ * Used by AuthProvider's setInterval to keep the session alive on idle tabs.
+ * Returns true if a fresh access token was obtained.
+ */
+export async function ensureFreshToken(): Promise<boolean> {
+  const refresh = getRefreshToken();
+  if (!refresh) return false;
+  try {
+    const res = await fetch(`${AUTH_API}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refresh }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    setTokens(data.access_token, data.refresh_token);
+    setUser(data.user);
+    return true;
+  } catch {
+    return false;
   }
 }
 

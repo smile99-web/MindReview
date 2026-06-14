@@ -4,7 +4,9 @@ import type { NextRequest } from 'next/server';
 
 const ACCESS_COOKIE = 'mindreview_access_token';
 const DEV_JWT_SECRET = 'mindreview-dev-secret-change-me';
-const ACCESS_TOKEN_EXPIRE_SECONDS = 15 * 60; // 15 min
+// 7 天：与 refresh token 一致，避免浏览器不活跃时 access token 过期导致掉线。
+// 安全上仍受 refresh_token rotation 保护（每次 refresh 替换旧 token）。
+const ACCESS_TOKEN_EXPIRE_SECONDS = 7 * 24 * 60 * 60;
 const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 
 function getSecret(): string {
