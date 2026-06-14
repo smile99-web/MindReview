@@ -121,10 +121,12 @@ export async function GET(req: NextRequest) {
     const nodeIds = allNodes.map((n) => n.id);
     const progressByNodeId = await loadProgressByNodeId(userId, nodeIds, prisma);
 
-    // --- 1. Daily Review Activity (30 days) ---
+    // --- 1. Daily Review Activity (30 days, inclusive of today) ---
+    // 之前 i < 30 漏掉今天（today），导致今天所有的学习活动全部归到 0。改为 < 31。
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dailyActivityMap = new Map<string, { count: number; duration: number }>();
-    for (let i = 0; i < 30; i++) {
-      const d = new Date(days30Ago.getTime() + i * 24 * 60 * 60 * 1000);
+    for (let i = 0; i < 31; i++) {
+      const d = new Date(startOfToday.getTime() - (30 - i) * 24 * 60 * 60 * 1000);
       dailyActivityMap.set(d.toISOString().slice(0, 10), { count: 0, duration: 0 });
     }
     for (const log of reviewLogs30d) {
@@ -181,10 +183,10 @@ export async function GET(req: NextRequest) {
     }));
     const resolvedMistakes = mistakes.filter((m) => m.resolved).length;
 
-    // Mistake trend (last 7 days)
+    // Mistake trend (last 7 days, inclusive of today)
     const last7DailyMistakes: { date: string; count: number }[] = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(days7Ago.getTime() + i * 24 * 60 * 60 * 1000);
+    for (let i = 0; i < 8; i++) {
+      const d = new Date(startOfToday.getTime() - (7 - i) * 24 * 60 * 60 * 1000);
       const key = d.toISOString().slice(0, 10);
       const count = mistakeLogs30d.filter(
         (m) => m.createdAt.toISOString().slice(0, 10) === key,
@@ -248,10 +250,10 @@ export async function GET(req: NextRequest) {
       else easeBuckets.easy += 1;
     }
 
-    // --- 6. Knowledge Node Growth (last 30 days) ---
+    // --- 6. Knowledge Node Growth (last 30 days, inclusive of today) ---
     const nodeGrowthByDay: { date: string; count: number }[] = [];
-    for (let i = 0; i < 30; i++) {
-      const d = new Date(days30Ago.getTime() + i * 24 * 60 * 60 * 1000);
+    for (let i = 0; i < 31; i++) {
+      const d = new Date(startOfToday.getTime() - (30 - i) * 24 * 60 * 60 * 1000);
       const key = d.toISOString().slice(0, 10);
       const nextD = new Date(d.getTime() + 24 * 60 * 60 * 1000);
       const count = allNodes.filter(
