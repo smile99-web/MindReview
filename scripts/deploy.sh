@@ -69,6 +69,9 @@ ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
       ln -sfn /opt/mindreview /Users/ai && \
       tar -xzf /tmp/mindreview-deploy.tar.gz && \
       rm -f /tmp/mindreview-deploy.tar.gz && \
+      # 确保 standalone 的 .next/ 父目录存在（tar 解压偶发会缺这一层，
+      # 缺了 cp 会因 No such file or directory 直接退出 — 见 2026-06-14 首页 CSS 404 事件）
+      mkdir -p .next/standalone/MindReview/.next && \
       cp -r .next/static .next/standalone/MindReview/.next/static && \
       cp -r public .next/standalone/ && \
       # 把 @prisma/client 复制到符号链接指向的位置

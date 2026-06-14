@@ -22,7 +22,7 @@ echo [2/4] Deploying to VPS...
 (
   tar --exclude='node_modules' --exclude='.git' -czf - ^
     .next/standalone .next/static public prisma package.json
-) | ssh %SERVER% "cd %REMOTE_DIR% && tar -xzf - && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/ && npx prisma generate 2>/dev/null && pm2 restart mindreview"
+) | ssh %SERVER% "cd %REMOTE_DIR% && tar -xzf - && mkdir -p .next/standalone/MindReview/.next 2>nul && cp -r .next/static .next/standalone/MindReview/.next/static && cp -r public .next/standalone/ && npx prisma generate 2>/dev/null && pm2 restart mindreview"
 echo       VPS deploy OK
 
 :: 3. Git commit
