@@ -258,25 +258,41 @@ export default function MistakesPage() {
               </span>
             </div>
 
-            <div className="bg-slate-50/80 rounded-xl p-4 mb-3">
-              <p className="text-sm font-medium text-slate-800 mb-3"><LatexText text={m.questionText} /></p>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                {m.wrongAnswer && (
-                  <div className="flex items-start gap-1.5">
-                    <span className="text-red-500 shrink-0 mt-0.5">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </span>
-                    <span className="text-red-700"><LatexText text={m.wrongAnswer || ""} /></span>
-                  </div>
-                )}
-                <div className="flex items-start gap-1.5">
-                  <span className="text-emerald-500 shrink-0 mt-0.5">
+            {/* 原题（独立高亮块，视觉上最突出） */}
+            <div className="rounded-xl p-4 mb-3 bg-gradient-to-br from-slate-50 to-slate-100/60 border border-slate-200/70">
+              <div className="flex items-start gap-2 mb-2">
+                <span className="shrink-0 text-xs font-semibold text-slate-500 bg-white border border-slate-200 rounded-md px-1.5 py-0.5 mt-0.5">
+                  📝 原题
+                </span>
+              </div>
+              <div className="text-sm font-medium text-slate-800 leading-relaxed">
+                <LatexText text={m.questionText} />
+              </div>
+            </div>
+
+            {/* 你的答案 / 正确答案 */}
+            <div className="grid grid-cols-2 gap-3 text-sm mb-3">
+              {m.wrongAnswer && (
+                <div className="flex items-start gap-1.5 px-3 py-2 rounded-lg bg-red-50/60 border border-red-100">
+                  <span className="text-red-500 shrink-0 mt-0.5">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] text-red-500 font-medium mb-0.5">你的答案</p>
+                    <span className="text-red-700"><LatexText text={m.wrongAnswer || ""} /></span>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-start gap-1.5 px-3 py-2 rounded-lg bg-emerald-50/60 border border-emerald-100">
+                <span className="text-emerald-500 shrink-0 mt-0.5">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] text-emerald-600 font-medium mb-0.5">正确答案</p>
                   <span className="text-emerald-700"><LatexText text={m.correctAnswer} /></span>
                 </div>
               </div>
