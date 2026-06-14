@@ -74,6 +74,25 @@ interface PracticeGradeResult {
 
 type PracticeQuestion = Awaited<ReturnType<typeof prisma.question.findMany>>[number];
 
+/** 把题干的 stem + 4 个选项拼成完整题目文本，用于错题本的 questionText。
+ *  例如："家庭联产承包责任制与…的根本区别在于？\nA. 土地私有制\nB. 土地公有制\nC. 土地集体所有制\nD. 土地国有制" */
+function formatFullQuestion(stem: string, options?: unknown): string {
+  if (!options || !Array.isArray(options) || (options as Array<unknown>).length === 0) {
+    return stem;
+  }
+  const lines = [stem];
+  for (const opt of options as Array<{ label?: string; text?: string }>) {
+    const label = opt.label || '';
+    const text = opt.text || '';
+    if (label && text) {
+      lines.push(`${label}. ${text}`);
+    } else if (text) {
+      lines.push(text);
+    }
+  }
+  return lines.join('\n');
+}
+
 interface GeneratedQuestion {
   questionType?: string;
   stem?: string;
@@ -676,7 +695,8 @@ async function handleSubmitAnswer(body: PracticeRequestBody, uid: string) {
           userId: uid,
           knowledgeNodeId: node.id,
           subjectId: node.subject?.id ?? null,
-          questionText: question.stem,
+          // 带选项的完整题目，错题本才能看到原题的 A/B/C/D 选项内容
+          questionText: formatFullQuestion(question.stem, question.options),
           wrongAnswer: answerStr,
           correctAnswer: question.answer,
           mistakeType: analysis?.mistakeType || 'conceptual',

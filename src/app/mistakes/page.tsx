@@ -265,7 +265,7 @@ export default function MistakesPage() {
                   📝 原题
                 </span>
               </div>
-              <div className="text-sm font-medium text-slate-800 leading-relaxed">
+              <div className="text-sm font-medium text-slate-800 leading-relaxed whitespace-pre-line">
                 <LatexText text={m.questionText} />
               </div>
             </div>
