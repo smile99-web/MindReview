@@ -56,13 +56,14 @@ tar --exclude='node_modules' \
     --exclude='.git' \
     --exclude='id_ed25519*' \
     --exclude='.DS_Store' \
-    -czf - .next/standalone .next/static public prisma package.json \
+    -czf - .next/standalone .next/static public prisma package.json ecosystem.config.js \
   | ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && tar -xzf - && \
         cp -r .next/static .next/standalone/MindReview/.next/static && \
         cp -r public .next/standalone/ && \
         npx prisma generate 2>/dev/null && \
         npx prisma migrate deploy 2>&1; \
-        pm2 restart mindreview"
+        pm2 delete mindreview 2>/dev/null; \
+        pm2 start ecosystem.config.js --update-env 2>&1"
 echo "      VPS deploy OK"
 echo
 
