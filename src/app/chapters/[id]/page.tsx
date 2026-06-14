@@ -129,19 +129,17 @@ export default function ChapterDetailPage() {
 
       <div className="space-y-2">
         {nodes.map((node) => {
+          // 前置知识点仅作为软提示：所有节点都可以自由学习
           const blockedBy = blockedMap.get(node.id);
-          const isLocked = blockedBy && blockedBy.length > 0;
-          const lockTooltip = isLocked
-            ? `需要先掌握: ${blockedBy.map((b) => b.title).join('、')}`
-            : '';
+          const isLocked = false;
+          const lockTooltip = '';
 
           const cardContent = (
-            <Card hover={!isLocked} padding="sm" className={isLocked ? 'opacity-60' : ''}>
+            <Card hover padding="sm">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1.5">
-                    {isLocked && <span className="text-sm cursor-default" title={lockTooltip}>🔒</span>}
-                    <h4 className={`font-medium ${isLocked ? 'text-slate-400' : 'text-slate-800'}`}>{node.title}</h4>
+                    <h4 className="font-medium text-slate-800">{node.title}</h4>
                     <Badge variant="purple" size="sm">{node.icapLevel}</Badge>
                     <span className="text-xs text-slate-400">
                       {'★'.repeat(node.difficulty)}
@@ -160,19 +158,15 @@ export default function ChapterDetailPage() {
                   <div className="w-24">
                     <MasteryBar level={node.masteryLevel} />
                   </div>
-                  {!isLocked && (
-                    <svg className="w-4 h-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                    </svg>
-                  )}
+                  <svg className="w-4 h-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
                 </div>
               </div>
             </Card>
           );
 
-          return isLocked ? (
-            <div key={node.id} title={lockTooltip}>{cardContent}</div>
-          ) : (
+          return (
             <Link key={node.id} href={`/cards/${node.id}`}>{cardContent}</Link>
           );
         })}

@@ -307,40 +307,27 @@ export default function SubjectDetailPage() {
             ) : learningPath ? (
               <div className="space-y-0">
                 {learningPath.steps?.map((step, i) => {
-                  const isLocked = step.locked === true;
+                  // 学习路径不再锁定：所有步骤都可以自由学习
+                  const isLocked = false;
                   const blockedInfo = blockedMap.get(step.nodeId);
-                  const lockTooltip = blockedInfo?.length
-                    ? `需要先掌握: ${blockedInfo.map((b) => b.title).join('、')}`
-                    : '需要先掌握前置知识点';
 
                   return (
                     <div key={i} className="flex gap-3">
                       <div className="flex flex-col items-center flex-shrink-0">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                          isLocked ? 'bg-slate-100 text-slate-400' : 'bg-indigo-100 text-indigo-600'
-                        }`}>
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold bg-indigo-100 text-indigo-600">
                           {i + 1}
                         </div>
                         {i < (learningPath.steps?.length || 0) - 1 && (
-                          <div className={`w-0.5 flex-1 min-h-[16px] ${
-                            isLocked ? 'bg-slate-100' : 'bg-indigo-100'
-                          }`} />
+                          <div className="w-0.5 flex-1 min-h-[16px] bg-indigo-100" />
                         )}
                       </div>
                       <div className="pb-5 flex-1 min-w-0">
-                        {isLocked ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm cursor-default" title={lockTooltip}>🔒</span>
-                            <span className="font-medium text-slate-400 text-sm" title={lockTooltip}>{step.title}</span>
-                          </div>
-                        ) : (
-                          <Link href={`/cards/${step.nodeId}`} className="font-medium text-slate-800 text-sm hover:text-indigo-600 transition-colors">
-                            {step.title}
-                          </Link>
-                        )}
+                        <Link href={`/cards/${step.nodeId}`} className="font-medium text-slate-800 text-sm hover:text-indigo-600 transition-colors">
+                          {step.title}
+                        </Link>
                         {step.summary && <LatexText text={step.summary || ""} className="text-xs text-slate-500 mt-0.5 line-clamp-1" />}
                         <div className="flex items-center gap-2 mt-1.5">
-                          <Badge variant={isLocked ? 'default' : 'info'} size="sm">{step.icapLevel}</Badge>
+                          <Badge variant="info" size="sm">{step.icapLevel}</Badge>
                           {step.estimatedMinutes && <span className="text-xs text-slate-400">{step.estimatedMinutes}分钟</span>}
                           <span className="text-xs text-slate-400">难度 {step.difficulty}</span>
                           <div className="w-16">

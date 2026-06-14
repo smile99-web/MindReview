@@ -1,10 +1,11 @@
 'use client';
 
 import { authFetch } from '@/lib/auth';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { KnowledgeCardView } from '@/components/knowledge/KnowledgeCardView';
+import { LearningChecklist } from '@/components/knowledge/LearningChecklist';
 import { MindMap } from '@/components/mindmap/MindMap';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -49,6 +50,9 @@ interface KnowledgeCardNode extends RelatedKnowledgeNode {
   representationType?: string | null;
   representationData?: unknown;
   navigation?: CardNavigation;
+  // 用户对该知识点的学习完成度（来自 UserKnowledgeProgress）
+  readCompletedAt?: string | null;
+  practicedCompletedAt?: string | null;
 }
 
 interface PracticeQuestionOption {
@@ -113,6 +117,9 @@ export default function KnowledgeCardPage() {
   const [selectedSchemaIds, setSelectedSchemaIds] = useState<Set<string>>(new Set());
   const [buildingSchema, setBuildingSchema] = useState(false);
   const [unmetPrerequisites, setUnmetPrerequisites] = useState<UnmetPrerequisite[]>([]);
+  const [readCompletedAt, setReadCompletedAt] = useState<string | null>(null);
+  const [practicedCompletedAt, setPracticedCompletedAt] = useState<string | null>(null);
+  const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const navigateToCard = useCallback((targetId?: string | null) => {
     if (!targetId || targetId === id) return;
@@ -128,11 +135,15 @@ export default function KnowledgeCardPage() {
         setPracticeAnswers({});
         setPracticeChecked({});
         setUnmetPrerequisites([]);
+        setReadCompletedAt(null);
+        setPracticedCompletedAt(null);
         const res = await authFetch(`/api/knowledge/${id}`);
         if (!res.ok) throw new Error('知识点不存在');
         const data = await res.json();
         setNode(data);
         setQuestions(data.questions || []);
+        setReadCompletedAt(data.readCompletedAt || null);
+        setPracticedCompletedAt(data.practicedCompletedAt || null);
 
         // Check prerequisites for this node
         try {
@@ -224,6 +235,72 @@ export default function KnowledgeCardPage() {
       setSchemasLoading(false);
     }
     loadSchemas();
+  }, [id]);
+
+  // ---------- 学习完成度追踪 ----------
+  // 幂等调用 mark-step API：首次成功才在本地点亮对应步骤
+  const markStep = useCallback(async (step: 'read' | 'practiced') => {
+    if (!id) return;
+    try {
+      const res = await authFetch('/api/progress/mark-step', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodeId: id, step }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (step === 'read') {
+        setReadCompletedAt(data.readCompletedAt || new Date().toISOString());
+      } else {
+        setPracticedCompletedAt(data.practicedCompletedAt || new Date().toISOString());
+      }
+    } catch {
+      // ignore — UI 不会因此阻塞
+    }
+  }, [id]);
+
+  // 阅读完成：知识卡 tab 被显示 ≥ 3 秒后自动标记
+  useEffect(() => {
+    if (activeTab !== 'card') return;
+    if (readCompletedAt) return;
+    if (readTimerRef.current) return;
+    readTimerRef.current = setTimeout(() => {
+      readTimerRef.current = null;
+      void markStep('read');
+    }, 3000);
+    return () => {
+      if (readTimerRef.current) {
+        clearTimeout(readTimerRef.current);
+        readTimerRef.current = null;
+      }
+    };
+  }, [activeTab, readCompletedAt, markStep]);
+
+  // 练习完成：练习 tab 内出现任一题被答对时自动标记
+  useEffect(() => {
+    if (practicedCompletedAt) return;
+    if (questions.length === 0) return;
+    const hasCorrect = questions.some((q, i) => {
+      const key = `${q.id || i}`;
+      return practiceChecked[key] === true && practiceAnswers[key] === q.answer;
+    });
+    if (hasCorrect) {
+      void markStep('practiced');
+    }
+  }, [practiceChecked, practiceAnswers, questions, practicedCompletedAt, markStep]);
+
+  const handleJumpToStep = useCallback((step: 'read' | 'practiced') => {
+    setActiveTab(step === 'read' ? 'card' : 'practice');
+  }, []);
+
+  // 切换 tab / 卸载时清掉 read timer，避免离页后还打点
+  useEffect(() => {
+    return () => {
+      if (readTimerRef.current) {
+        clearTimeout(readTimerRef.current);
+        readTimerRef.current = null;
+      }
+    };
   }, [id]);
 
   const handleGenerateQuestions = async () => {
@@ -387,25 +464,36 @@ export default function KnowledgeCardPage() {
         </div>
       )}
 
-      {/* Prerequisite warning banner */}
+      {/* 学习清单：阅读 + 练习两步，全部点亮即"完成"。可重复学习，不锁任何节点。 */}
+      <LearningChecklist
+        readCompletedAt={readCompletedAt}
+        practicedCompletedAt={practicedCompletedAt}
+        onJumpToStep={handleJumpToStep}
+        onResetProgress={() => {
+          // 只切到第一个 tab 让用户重新看一遍；DB 记录不重置（永远保留历史）
+          setActiveTab('card');
+        }}
+      />
+
+      {/* Prerequisite soft hint — 所有节点都可以自由学习，这里只是友好提示相关知识点 */}
       {unmetPrerequisites.length > 0 && (
-        <div className="mb-6 p-4 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50/80 to-yellow-50/80">
+        <div className="mb-6 p-4 rounded-xl border border-sky-200 bg-gradient-to-r from-sky-50/80 to-blue-50/80">
           <div className="flex items-start gap-3">
-            <span className="text-lg shrink-0 mt-0.5">🔒</span>
+            <span className="text-lg shrink-0 mt-0.5">💡</span>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-amber-800">建议先复习以下前置知识点：</p>
+              <p className="text-sm font-semibold text-sky-800">这个知识点会用到：</p>
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {unmetPrerequisites.map((p) => (
                   <Link
                     key={p.nodeId}
                     href={`/cards/${p.nodeId}`}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 text-xs font-medium hover:bg-amber-200 transition-colors"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-100 text-sky-800 text-xs font-medium hover:bg-sky-200 transition-colors"
                   >
                     {p.title}
-                    <span className="text-amber-500">({p.masteryLevel}/{p.requiredLevel})</span>
                   </Link>
                 ))}
               </div>
+              <p className="text-xs text-sky-600 mt-2">可以现在一起看，也可以之后再回顾。</p>
             </div>
           </div>
         </div>

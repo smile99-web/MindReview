@@ -36,6 +36,15 @@ export async function GET(
       return NextResponse.json({ error: '知识点不存在' }, { status: 404 });
     }
 
+    // 取出当前用户对该知识点的学习完成度（可能不存在）
+    const progress = await prisma.userKnowledgeProgress.findUnique({
+      where: { userId_knowledgeNodeId: { userId, knowledgeNodeId: id } },
+      select: {
+        readCompletedAt: true,
+        practicedCompletedAt: true,
+      },
+    });
+
     const siblingWhere: Prisma.KnowledgeNodeWhereInput = {
       subjectId: node.subjectId,
       OR: nonSchemaNodeConditions,
@@ -74,7 +83,12 @@ export async function GET(
           scopeLabel,
         };
 
-    return NextResponse.json({ ...node, navigation });
+    return NextResponse.json({
+      ...node,
+      navigation,
+      readCompletedAt: progress?.readCompletedAt ?? null,
+      practicedCompletedAt: progress?.practicedCompletedAt ?? null,
+    });
   } catch (error: unknown) {
     const message = getErrorMessage(error);
     return NextResponse.json({ error: message }, { status: message === 'Authentication required' ? 401 : 500 });
