@@ -61,6 +61,10 @@ tar --exclude='node_modules' \
         cp -r .next/static .next/standalone/MindReview/.next/static && \
         cp -r public .next/standalone/ && \
         npx prisma generate 2>/dev/null && \
+        # 关键：把 prisma client 复制到 server.js 进程 cwd 期望的位置
+        # （Next.js 16 standalone 启动时 cwd = standalone/MindReview/）
+        mkdir -p .next/standalone/MindReview/.next/node_modules && \
+        cp -r node_modules/@prisma .next/standalone/MindReview/.next/node_modules/ && \
         npx prisma migrate deploy 2>&1; \
         pm2 delete mindreview 2>/dev/null; \
         pm2 start ecosystem.config.js --update-env 2>&1"
