@@ -65,6 +65,7 @@ ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
       # Prisma client 二进制硬编码了 Mac 上的 build 路径 /Users/ai/MindReview
       # （outputFileTracingRoot 不能在 projectPath 外）。在 VPS 上创建 symlink
       # 让 prisma 找到对应 node_modules。
+      mkdir -p /Users && \
       ln -sfn /opt/mindreview /Users/ai && \
       tar -xzf /tmp/mindreview-deploy.tar.gz && \
       rm -f /tmp/mindreview-deploy.tar.gz && \
