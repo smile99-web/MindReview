@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { KnowledgeCardView } from '@/components/knowledge/KnowledgeCardView';
 import { LearningChecklist } from '@/components/knowledge/LearningChecklist';
 import { MindMap } from '@/components/mindmap/MindMap';
+import { IcapPipeline } from '@/components/practice/IcapPipeline';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -103,7 +104,7 @@ export default function KnowledgeCardPage() {
 
   const [node, setNode] = useState<KnowledgeCardNode | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'card' | 'mindmap' | 'practice'>('card');
+  const [activeTab, setActiveTab] = useState<'card' | 'mindmap' | 'practice' | 'icap'>('card');
   const [practiceAnswers, setPracticeAnswers] = useState<Record<string, string>>({});
   const [practiceChecked, setPracticeChecked] = useState<Record<string, boolean>>({});
   const [questions, setQuestions] = useState<PracticeQuestion[]>([]);
@@ -387,6 +388,7 @@ export default function KnowledgeCardPage() {
   const tabs = [
     { key: 'card' as const, label: '知识卡', icon: '📖' },
     { key: 'practice' as const, label: '练习', icon: '✏️' },
+    { key: 'icap' as const, label: 'ICAP训练', icon: '🧠' },
     { key: 'mindmap' as const, label: '关联图', icon: '🗺️' },
   ];
 
@@ -767,6 +769,24 @@ export default function KnowledgeCardPage() {
             );
             })
           )}
+        </div>
+      )}
+
+      {activeTab === 'icap' && (
+        <div className="space-y-4">
+          <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-4 border border-purple-100/60 mb-4">
+            <p className="text-sm text-purple-800 font-medium">🧠 ICAP 四阶段深度学习</p>
+            <p className="text-xs text-purple-600/80 mt-1">
+              从阅读理解 → 主动回忆 → 构建理解 → 互动深化，完整掌握一个知识点。
+              每个阶段都可以反复训练，没有次数限制。
+            </p>
+          </div>
+          <IcapPipeline
+            key={id}
+            knowledgeNodeId={id}
+            knowledgeNodeTitle={node.title}
+            onClose={() => setActiveTab('card')}
+          />
         </div>
       )}
     </div>
