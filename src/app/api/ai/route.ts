@@ -116,12 +116,25 @@ export async function GET(req: NextRequest) {
     const action = searchParams.get('action');
 
     if (action === 'list-logs') {
-      const generatorType = searchParams.get('generatorType') || 'all';
+      const typesParam = searchParams.get('types');
       const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
       const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
 
-      const where: Record<string, string> = {};
-      if (generatorType !== 'all') where.generatorType = generatorType;
+      // UI 传 `types=llm,tts,image...` 多个值；空 / 'all' 不过滤。
+      // AiGenerationLog.generatorType 实际值见代码各处写入：
+      //   llm / chat / tutor_chat / textbook_chapter / textbook_outline /
+      //   practice_answer_grading / worked_example / tts / image
+      // UI 把这些映射成 4 类，所以后端要支持 IN 查询。
+      const where: { generatorType?: { in: string[] } } = {};
+      if (typesParam && typesParam !== 'all') {
+        const types = typesParam
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (types.length > 0) {
+          where.generatorType = { in: types };
+        }
+      }
 
       const [logs, total] = await Promise.all([
         prisma.aiGenerationLog.findMany({

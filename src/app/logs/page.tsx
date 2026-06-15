@@ -10,6 +10,24 @@ import type { BadgeVariant } from '@/components/ui/Badge';
 
 const PAGE_SIZE = 20;
 
+// UI 类别 → DB 真实 generatorType 值（多选 IN 查询用）。
+// 真实值随代码演进增减，这里集中维护，避免散落各处。
+const FILTER_TYPE_MAP: Record<string, string> = {
+  all: 'all',
+  llm: [
+    'llm',
+    'chat',
+    'tutor_chat',
+    'textbook_chapter',
+    'textbook_outline',
+    'practice_answer_grading',
+    'worked_example',
+  ].join(','),
+  practice_answer_grading: 'practice_answer_grading',
+  tts: 'tts',
+  image: 'image',
+};
+
 interface AiLog {
   id: string;
   generatorType: string;
@@ -33,9 +51,12 @@ export default function AILogsPage() {
   const fetchLogs = useCallback(async (currentFilter: string, currentPage: number) => {
     setLoading(true);
     try {
+      // UI 单选 → 后端 types 多值（AiGenerationLog.generatorType 实际是细粒度值，
+      // 4 个 UI 类别各自映射到若干真实类型）
+      const types = FILTER_TYPE_MAP[currentFilter] || currentFilter;
       const params = new URLSearchParams({
         action: 'list-logs',
-        generatorType: currentFilter,
+        types,
         page: String(currentPage),
         limit: String(PAGE_SIZE),
       });
@@ -76,20 +97,39 @@ export default function AILogsPage() {
     processing: 'info',
   };
 
+  // UI 4 类 → DB 真实 generatorType 值映射。
+  // 真实值见 src/lib/llm-client.ts / tutor-persistence.ts / textbook/generate 等写入点。
   const filterOptions = [
     { key: 'all', label: '全部' },
-    { key: 'llm', label: 'LLM' },
+    { key: 'llm', label: 'AI 调用' },
     { key: 'practice_answer_grading', label: '练习判分' },
     { key: 'tts', label: 'TTS' },
     { key: 'image', label: '图片' },
   ];
 
   const getTypeIcon = (type: string) => {
-    if (type === 'practice_answer_grading') return '判';
-    if (type === 'llm') return 'AI';
     if (type === 'tts') return '声';
     if (type === 'image') return '图';
-    return '记';
+    if (type === 'practice_answer_grading') return '判';
+    if (type === 'chat' || type === 'tutor_chat') return '聊';
+    if (type.startsWith('textbook')) return '教';
+    if (type === 'worked_example') return '例';
+    return 'AI';
+  };
+
+  const getTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      llm: 'AI 通用',
+      chat: 'AI 老师对话',
+      tutor_chat: '旧版导师对话',
+      textbook_chapter: '教材章节生成',
+      textbook_outline: '教材大纲生成',
+      practice_answer_grading: '练习判分',
+      worked_example: '样例教学',
+      tts: '语音合成',
+      image: '图片生成',
+    };
+    return labels[type] || type;
   };
 
   if (loading && logs.length === 0) {
@@ -150,7 +190,7 @@ export default function AILogsPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-slate-800">
-                        {log.generatorType.toUpperCase()} · {log.model}
+                        {getTypeLabel(log.generatorType)} · {log.model}
                       </span>
                       <Badge
                         variant={statusColors[log.status] || 'default'}
