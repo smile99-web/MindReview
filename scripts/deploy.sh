@@ -57,7 +57,10 @@ tar --exclude='.git' \
     -czf "$TMP_TAR" .next/standalone .next/static public prisma package.json ecosystem.config.js
 echo "      tar size: $(du -h "$TMP_TAR" | awk '{print $1}'), files: $(tar -tzf "$TMP_TAR" | wc -l | tr -d ' ')"
 scp "${SSH_OPTS[@]}" "$TMP_TAR" "$SERVER:/tmp/mindreview-deploy.tar.gz"
-ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
+# 远程命令整体加 set -e + 把 pm2 那两行也接进 && 链；
+# 任何一步失败立即退出（之前的写法用 ; 隔开 pm2，tar 失败但 pm2 仍跑，
+# 导致 deploy 报 "OK" 实际是旧版本 + CSS/chunks 404）。
+ssh "${SSH_OPTS[@]}" "$SERVER" "set -e && cd '$REMOTE_DIR' && \
       # 清理上次部署残留。注意：必须把 node_modules 也清掉！
       # Mac build 产物里 .next/standalone/MindReview/node_modules/{next,react,react-dom}
       # 是 pnpm symlink，tar 解压到同名 symlink 上会因为 'File exists' 退出，
@@ -65,8 +68,7 @@ ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
       rm -rf .next/standalone/MindReview/.next \
              .next/standalone/MindReview/node_modules \
              .next/standalone/.next \
-             .next/static \
-             2>/dev/null; \
+             .next/static; \
       # Prisma client 二进制硬编码了 Mac 上的 build 路径 /Users/ai/MindReview
       # （outputFileTracingRoot 不能在 projectPath 外）。在 VPS 上创建 symlink
       # 让 prisma 找到对应 node_modules。
@@ -76,18 +78,17 @@ ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
       rm -f /tmp/mindreview-deploy.tar.gz && \
       # 确保 standalone 的 .next/ 父目录存在（tar 解压偶发会缺这一层，
       # 缺了 cp 会因 No such file or directory 直接退出 — 见 2026-06-14 首页 CSS 404 事件）
-      echo '   [vps] mkdir .next/standalone/MindReview/.next' && \
       mkdir -p .next/standalone/MindReview/.next && \
-      echo '   [vps] cp static → standalone' && \
       cp -r .next/static .next/standalone/MindReview/.next/static && \
-      echo "   [vps] static chunks: $(ls .next/standalone/MindReview/.next/static/chunks 2>/dev/null | wc -l)" && \
+      echo \"   [vps] static chunks: \$(ls .next/standalone/MindReview/.next/static/chunks 2>/dev/null | wc -l)\" && \
       cp -r public .next/standalone/ && \
       # 把 @prisma/client 复制到符号链接指向的位置
       # （Mac build 产物里 client-2d8ce578843d5dc0 是一个 symlink → MindReview/node_modules/@prisma/client）
       mkdir -p .next/standalone/MindReview/node_modules/@prisma && \
+      rm -rf .next/standalone/MindReview/node_modules/@prisma/client && \
       cp -r node_modules/@prisma/client .next/standalone/MindReview/node_modules/@prisma/ && \
-      npx prisma migrate deploy 2>&1; \
-      pm2 delete mindreview 2>/dev/null; \
+      npx prisma migrate deploy 2>&1 && \
+      (pm2 delete mindreview 2>/dev/null || true) && \
       pm2 start ecosystem.config.js --update-env 2>&1"
 echo "      VPS deploy OK"
 echo
