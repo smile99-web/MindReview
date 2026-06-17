@@ -71,8 +71,11 @@ ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
       rm -f /tmp/mindreview-deploy.tar.gz && \
       # 确保 standalone 的 .next/ 父目录存在（tar 解压偶发会缺这一层，
       # 缺了 cp 会因 No such file or directory 直接退出 — 见 2026-06-14 首页 CSS 404 事件）
+      echo '   [vps] mkdir .next/standalone/MindReview/.next' && \
       mkdir -p .next/standalone/MindReview/.next && \
+      echo '   [vps] cp static → standalone' && \
       cp -r .next/static .next/standalone/MindReview/.next/static && \
+      echo "   [vps] static chunks: $(ls .next/standalone/MindReview/.next/static/chunks 2>/dev/null | wc -l)" && \
       cp -r public .next/standalone/ && \
       # 把 @prisma/client 复制到符号链接指向的位置
       # （Mac build 产物里 client-2d8ce578843d5dc0 是一个 symlink → MindReview/node_modules/@prisma/client）
