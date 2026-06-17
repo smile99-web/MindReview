@@ -58,7 +58,12 @@ tar --exclude='.git' \
 echo "      tar size: $(du -h "$TMP_TAR" | awk '{print $1}'), files: $(tar -tzf "$TMP_TAR" | wc -l | tr -d ' ')"
 scp "${SSH_OPTS[@]}" "$TMP_TAR" "$SERVER:/tmp/mindreview-deploy.tar.gz"
 ssh "${SSH_OPTS[@]}" "$SERVER" "cd '$REMOTE_DIR' && \
+      # 清理上次部署残留。注意：必须把 node_modules 也清掉！
+      # Mac build 产物里 .next/standalone/MindReview/node_modules/{next,react,react-dom}
+      # 是 pnpm symlink，tar 解压到同名 symlink 上会因为 'File exists' 退出，
+      # 整条 && 链断开后 pm2 仍会被拉起（用 ; 分隔），导致 CSS/chunks 全部 404。
       rm -rf .next/standalone/MindReview/.next \
+             .next/standalone/MindReview/node_modules \
              .next/standalone/.next \
              .next/static \
              2>/dev/null; \
