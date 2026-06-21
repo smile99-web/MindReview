@@ -76,6 +76,13 @@ export default function SchemasPage() {
   const [schemaName, setSchemaName] = useState('');
   const [building, setBuilding] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
+  // AI-recommended schema candidate groups. Populated by handleSuggestSchemas
+  // (calls /api/schema/suggest which wraps the previously-orphaned
+  // suggestSchemaNodes in lib/schema-builder.ts).
+  const [suggestions, setSuggestions] = useState<
+    Array<{ nodeIds: string[]; rationale: string }>
+  >([]);
+  const [suggesting, setSuggesting] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -186,6 +193,58 @@ export default function SchemasPage() {
     }
   };
 
+  // Ask the AI to propose a few schema candidate groups. We pass a
+  // random seed from the currently-filtered knowledge nodes; the
+  // backend's suggestSchemaNodes (lib/schema-builder.ts) walks the
+  // knowledge graph neighbours and returns groups. The user can then
+  // apply one with '用此组合', which seeds the existing selection.
+  const handleSuggestSchemas = async () => {
+    if (knowledgeNodes.length === 0) return;
+    setSuggesting(true);
+    setBuildError(null);
+    try {
+      // Pick a random subset (3 nodes) as seeds so the LLM has multiple
+      // anchors to build a coherent schema from.
+      const seedIds: string[] = [];
+      const pool = [...builderNodes];
+      for (let i = 0; i < 3 && pool.length > 0; i++) {
+        const idx = Math.floor(Math.random() * pool.length);
+        seedIds.push(pool[idx].id);
+        pool.splice(idx, 1);
+      }
+      // suggestSchemaNodes is called per seed and we union the results
+      // so the user sees a few candidate groups to pick from.
+      const allSuggestions: Array<{ nodeIds: string[]; rationale: string }> = [];
+      for (const seedId of seedIds) {
+        const res = await authFetch('/api/schema/suggest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seedNodeId: seedId }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          suggestions?: Array<{ nodeIds: string[]; rationale: string }>;
+          error?: string;
+        };
+        if (!res.ok) continue;
+        for (const s of data.suggestions || []) {
+          // Deduplicate by nodeIds set
+          const key = [...s.nodeIds].sort().join(',');
+          if (!allSuggestions.find(x => [...x.nodeIds].sort().join(',') === key)) {
+            allSuggestions.push(s);
+          }
+        }
+      }
+      setSuggestions(allSuggestions.slice(0, 5));
+      if (allSuggestions.length === 0) {
+        setBuildError('当前知识点网络较稀疏，未找到可推荐的图式。');
+      }
+    } catch (error: unknown) {
+      setBuildError(error instanceof Error ? error.message : '推荐失败，请稍后重试。');
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
   const builderPanel = (
     <Card className="mb-6">
       <div className="flex flex-col gap-4">
@@ -196,18 +255,86 @@ export default function SchemasPage() {
               选择 2 个以上相关知识点，AI 会把它们组织成一个可迁移的知识框架。
             </p>
           </div>
-          <button
-            onClick={handleBuildSchema}
-            disabled={selectedNodeIds.size < 2 || building}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              selectedNodeIds.size >= 2 && !building
-                ? 'bg-indigo-500 text-white hover:bg-indigo-600'
-                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-            }`}
-          >
-            {building ? '正在构建...' : `构建图式 (${selectedNodeIds.size})`}
-          </button>
+          <div className="flex gap-2">
+            {/* AI 推荐入口：让用户从一个种子节点出发，让 suggestSchemaNodes
+                自动从邻居节点中找出一组可构成图式的候选。Wires up the
+                previously-orphaned function in src/lib/schema-builder.ts
+                so the 'AI identifies the schema' promise is no longer
+                bypassed. */}
+            <button
+              onClick={() => void handleSuggestSchemas()}
+              disabled={knowledgeNodes.length === 0 || suggesting}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                knowledgeNodes.length > 0 && !suggesting
+                  ? 'bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50'
+                  : 'bg-slate-100 text-slate-400 border border-transparent cursor-not-allowed'
+              }`}
+            >
+              {suggesting ? '推荐中...' : '✨ AI 推荐'}
+            </button>
+            <button
+              onClick={handleBuildSchema}
+              disabled={selectedNodeIds.size < 2 || building}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                selectedNodeIds.size >= 2 && !building
+                  ? 'bg-indigo-500 text-white hover:bg-indigo-600'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              {building ? '正在构建...' : `构建图式 (${selectedNodeIds.size})`}
+            </button>
+          </div>
         </div>
+
+        {suggestions.length > 0 && (
+          <div className="mt-4 p-4 rounded-xl border border-indigo-200 bg-indigo-50/40">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-indigo-700">
+                AI 推荐图式（点击种子节点 + 一组候选）
+              </h4>
+              <button
+                onClick={() => setSuggestions([])}
+                className="text-xs text-slate-500 hover:text-slate-700"
+              >
+                收起
+              </button>
+            </div>
+            <ul className="space-y-2">
+              {suggestions.map((s, i) => (
+                <li key={i} className="p-3 bg-white rounded-lg border border-indigo-100">
+                  <p className="text-xs text-slate-700 mb-2">{s.rationale}</p>
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    {s.nodeIds.map((nid) => {
+                      const node = knowledgeNodes.find(k => k.id === nid);
+                      return (
+                        <span
+                          key={nid}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600"
+                        >
+                          {node?.title || nid.slice(0, 8)}
+                        </span>
+                      );
+                    })}
+                    <button
+                      onClick={() => {
+                        // Replace the user's current selection with the
+                        // AI-recommended group. The 'AI identifies schema'
+                        // promise is now actually delivered to the user.
+                        setSelectedNodeIds(new Set(s.nodeIds));
+                      }}
+                      className="ml-auto text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                    >
+                      用此组合
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <p className="text-[10px] text-slate-500 mt-2">
+              推荐基于种子节点在知识图谱中的邻居自动找出相关节点组。点击「用此组合」可一键填入选区，然后构建图式。
+            </p>
+          </div>
+        )}
 
         <input
           value={schemaName}
@@ -483,7 +610,14 @@ export default function SchemasPage() {
                   </button>
                   <button
                     onClick={() =>
-                      router.push(`/practice?schemaId=${schema.id}`)
+                      // Wire up the previously-orphaned SchemaApplyExercise
+                      // (560-line AI problem-generator + per-step grader).
+                      // Previously this button pushed to /practice?schemaId=
+                      // which loaded the generic practice flow; the
+                      // schema-transfer flow existed in code but was
+                      // unreachable. /schemas/[id]/apply hosts the
+                      // dedicated transfer-exercise UI.
+                      router.push(`/schemas/${schema.id}/apply`)
                     }
                     className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500 text-white hover:bg-indigo-600 transition-colors shadow-sm"
                   >
