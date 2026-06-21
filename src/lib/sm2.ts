@@ -99,15 +99,15 @@ export function sm2(quality: number, previous: SM2Input["previous"]): SM2Result 
     }
     newReps = previous.repetitions + 1;
 
-    // SM-2 难度系数更新
+    // SM-2 难度系数更新 — 规范只在 q>=3 时更新 EF
     newEF = previous.easeFactor + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
   } else {
-    // 错误回忆 → 重置
+    // 错误回忆 → 重置 reps 和 interval，EF 保持不变（canonical SuperMemo）
+    // 之前的实现 -=(0.14+(3-q)*0.06) 是非规范的：lapse 时 EF 不应变化，
+    // 只重置 reps。叠加 Ebbinghaus 缩短 interval 已足够惩罚。
     newReps = 0;
     newInterval = 1;
-
-    // 降低 EF（惩罚）
-    newEF = previous.easeFactor - (0.14 + (3 - q) * 0.06);
+    newEF = previous.easeFactor;
   }
 
   newEF = Math.max(1.3, Number(newEF.toFixed(2)));
