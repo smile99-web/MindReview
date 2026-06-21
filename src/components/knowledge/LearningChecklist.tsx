@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type LearningStep = 'read' | 'practiced' | 'constructive' | 'interactive';
 
@@ -42,6 +42,14 @@ export function LearningChecklist({
   onResetProgress,
 }: LearningChecklistProps) {
   const [resetHintShown, setResetHintShown] = useState(false);
+  // Hold the reset-hint timer so we can clear it if the component unmounts
+  // within the 2.2s window. Without this, setState would fire on an
+  // unmounted component (React 18 ignores it, but the closure still leaks
+  // the state setter).
+  const resetHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (resetHintTimer.current) clearTimeout(resetHintTimer.current);
+  }, []);
 
   const steps: StepItem[] = [
     {
@@ -99,7 +107,8 @@ export function LearningChecklist({
             onClick={() => {
               onResetProgress();
               setResetHintShown(true);
-              window.setTimeout(() => setResetHintShown(false), 2200);
+              if (resetHintTimer.current) clearTimeout(resetHintTimer.current);
+              resetHintTimer.current = setTimeout(() => setResetHintShown(false), 2200);
             }}
             className="text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors shrink-0"
             title="仅清空本地提示（已完成记录保留在数据库中，可继续学习不重置）"

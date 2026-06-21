@@ -11,7 +11,7 @@ interface ConversationSummary {
   knowledgeNodeId: string | null;
   updatedAt: string;
   lastMessage: {
-    role: string;
+    role: "user" | "assistant";
     content: string;
     imageUrl: string | null;
     createdAt: string;
@@ -20,7 +20,7 @@ interface ConversationSummary {
 
 interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | string;
+  role: "user" | "assistant";
   content: string;
   imageUrl: string | null;
   imagePrompt: string | null;

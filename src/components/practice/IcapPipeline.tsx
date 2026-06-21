@@ -1,7 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/auth';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Card } from '@/components/ui/Card';
 import { LatexText } from '@/components/ui/LatexText';
 import { Button } from '@/components/ui/Button';
@@ -163,6 +163,15 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   const [cognitiveGaps, setCognitiveGaps] = useState<DetectCognitiveGapsResult | null>(null);
   const [gapCheckLoading, setGapCheckLoading] = useState(false);
   const [showGapWarning, setShowGapWarning] = useState(false);
+
+  // Hold the "auto-send" timer fired by the suggested-question button so we
+  // can clear it on unmount / stage change. Without this, handleTutorChatSend
+  // would run against state from an unmounted component if the user
+  // navigates away within the 50ms window.
+  const tutorAutoSendTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (tutorAutoSendTimer.current) clearTimeout(tutorAutoSendTimer.current);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1032,7 +1041,8 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                         <button
                           onClick={() => {
                             setTutorChatInput(sq.question);
-                            setTimeout(() => handleTutorChatSend(), 50);
+                            if (tutorAutoSendTimer.current) clearTimeout(tutorAutoSendTimer.current);
+                            tutorAutoSendTimer.current = setTimeout(() => handleTutorChatSend(), 50);
                           }}
                           className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-50 text-purple-600 hover:bg-purple-100 transition-colors"
                         >
