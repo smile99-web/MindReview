@@ -12,8 +12,12 @@ export async function GET(req: NextRequest) {
     const subjectId = searchParams.get('subjectId');
     const chapterId = searchParams.get('chapterId');
     const search = searchParams.get('search');
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '50');
+    // Guard against `?page=abc` / `?limit=abc` — parseInt('abc') is NaN,
+    // and Prisma silently ignores skip/take:NaN, returning the entire table.
+    const rawPage = parseInt(searchParams.get('page') || '1', 10);
+    const rawLimit = parseInt(searchParams.get('limit') || '50', 10);
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : 50;
 
     const where: Prisma.KnowledgeNodeWhereInput = {};
     if (subjectId) where.subjectId = subjectId;

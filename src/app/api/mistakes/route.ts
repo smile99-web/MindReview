@@ -21,9 +21,14 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const userId = await resolveUserIdFromRequest(req);
     const resolved = searchParams.get('resolved');
+    const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '50', 10) || 50));
 
     const where: Prisma.MistakeWhereInput = { userId };
-    if (resolved !== null && resolved !== undefined) {
+    // Only apply the resolved filter when the value is explicitly 'true' or
+    // 'false' — an empty `?resolved=` would otherwise parse to '' which is
+    // not nullish, and `'' === 'true'` is false, silently filtering out
+    // resolved mistakes with no signal to the caller.
+    if (resolved === 'true' || resolved === 'false') {
       where.resolved = resolved === 'true';
     }
 
@@ -33,6 +38,10 @@ export async function GET(req: NextRequest) {
         knowledgeNode: { select: { id: true, title: true, subject: { select: { name: true } } } },
       },
       orderBy: { createdAt: 'desc' },
+      // Cap to prevent unbounded payload. The mistake book auto-records on
+      // every wrong practice answer; a year-old power user could have 10k+
+      // rows. UI should paginate via the `limit` query param.
+      take: limit,
     });
 
     return NextResponse.json(mistakes);

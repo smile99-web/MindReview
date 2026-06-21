@@ -41,7 +41,16 @@ export async function GET(req: NextRequest) {
       prisma.reviewTask.count({ where: { userId, completed: false } }),
       prisma.mistake.count({ where: { userId } }),
       prisma.question.count(),
-      prisma.knowledgeNode.findMany({ select: { id: true, masteryLevel: true } }),
+      // Cap to bound the load. With the global mastery avg, the master
+      // distribution is computed from up to MAX_NODES_MASTERY nodes
+      // sampled from the most-recently-created set. Older nodes are
+      // progressively less likely to drive the user's average, so this is
+      // a good proxy without loading the entire table.
+      prisma.knowledgeNode.findMany({
+        select: { id: true, masteryLevel: true },
+        orderBy: { createdAt: 'desc' },
+        take: 2000,
+      }),
       prisma.subject.findMany({
         include: {
           _count: {

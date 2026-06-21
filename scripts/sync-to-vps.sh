@@ -26,6 +26,7 @@ rsync -avz --delete \
   --exclude='*.log' \
   --exclude='.env' \
   --exclude='mindreview_dump.sql' \
+  --exclude='public/uploads' \
   "$SRC_DIR/" \
   "$VPS_USER@$VPS_HOST:$VPS_PATH/"
 

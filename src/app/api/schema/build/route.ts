@@ -26,6 +26,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Cap nodeIds to bound the per-node findUnique lookups inside buildSchema.
+    // Without this, a client could send 10,000 ids and degrade the route.
+    if (nodeIds.length > 50) {
+      return NextResponse.json(
+        { error: 'nodeIds 最多 50 个' },
+        { status: 400 },
+      );
+    }
+
     const result = await buildSchema(nodeIds, null, prisma, currentUserId, name);
 
     return NextResponse.json({ schema: result });
