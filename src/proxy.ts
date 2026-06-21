@@ -28,6 +28,24 @@ const PUBLIC_API_PREFIXES = [
 const ACCESS_COOKIE = "mindreview_access_token";
 const DEV_JWT_SECRET = "mindreview-dev-secret-change-me";
 
+/**
+ * Resolve the JWT secret. In production, refuse to fall back to a hardcoded
+ * dev secret — that would silently let an attacker forge a valid token and
+ * bypass the proxy's 401 check. Mirrors the guard in src/lib/server-auth.ts
+ * so the two halves can't disagree on what counts as "secure enough".
+ */
+function getProxySecret(): string {
+  const envSecret = process.env.JWT_SECRET_KEY;
+  if (envSecret) return envSecret;
+  if (process.env.NODE_ENV === 'production') {
+    // Fail closed: the proxy cannot verify tokens without a real secret.
+    // This throws on every request, but that's preferable to silently
+    // accepting forgeries.
+    throw new Error('JWT_SECRET_KEY environment variable is required in production');
+  }
+  return DEV_JWT_SECRET;
+}
+
 type JwtPayload = {
   exp?: number;
   type?: string;
@@ -62,7 +80,7 @@ async function verifyAccessToken(token: string | undefined): Promise<boolean> {
     const header = JSON.parse(base64UrlToString(parts[0])) as { alg?: string };
     if (header.alg !== "HS256") return false;
 
-    const secret = process.env.JWT_SECRET_KEY || DEV_JWT_SECRET;
+    const secret = getProxySecret();
     const key = await crypto.subtle.importKey(
       "raw",
       new TextEncoder().encode(secret),

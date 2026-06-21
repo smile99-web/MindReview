@@ -3,9 +3,23 @@ import crypto from "crypto";
 const PREFIX = "enc:v1";
 const DEV_SECRET = "mindreview-dev-secret-change-me";
 
+/**
+ * Resolve the AES key for at-rest secret encryption. In production, refuse
+ * to fall back to a hardcoded dev secret — that would silently encrypt
+ * every stored API key with a key the public source code already leaks,
+ * making the encryption a no-op.
+ */
 function getKey(): Buffer {
-  const secret = process.env.API_KEY_ENCRYPTION_SECRET || process.env.JWT_SECRET_KEY || DEV_SECRET;
-  return crypto.createHash("sha256").update(secret).digest();
+  const envSecret = process.env.API_KEY_ENCRYPTION_SECRET || process.env.JWT_SECRET_KEY;
+  if (envSecret) {
+    return crypto.createHash("sha256").update(envSecret).digest();
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'API_KEY_ENCRYPTION_SECRET (or JWT_SECRET_KEY) environment variable is required in production'
+    );
+  }
+  return crypto.createHash("sha256").update(DEV_SECRET).digest();
 }
 
 export function encryptSecret(value: string): string {
