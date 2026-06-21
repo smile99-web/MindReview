@@ -109,6 +109,7 @@ interface IcapDraft {
   variantAnswers?: Record<string, string>;
   variantSubmitted?: Record<string, boolean>;
   variantShowAnswer?: Record<string, boolean>;
+  variantGraded?: Record<string, boolean>;
   interactiveTask?: InteractiveTask | null;
   scenarioResponses?: Record<string, string>;
   scenarioSubmitted?: Record<string, boolean>;
@@ -154,6 +155,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   const [variantAnswers, setVariantAnswers] = useState<Record<string, string>>({});
   const [variantSubmitted, setVariantSubmitted] = useState<Record<string, boolean>>({});
   const [variantShowAnswer, setVariantShowAnswer] = useState<Record<string, boolean>>({});
+  const [variantGraded, setVariantGraded] = useState<Record<string, boolean>>({});
   const [scenarioResponses, setScenarioResponses] = useState<Record<string, string>>({});
   const [scenarioSubmitted, setScenarioSubmitted] = useState<Record<string, boolean>>({});
   const [scenarioFeedbacks, setScenarioFeedbacks] = useState<Record<string, string>>({});
@@ -209,6 +211,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
         if (draft.variantAnswers) setVariantAnswers(draft.variantAnswers);
         if (draft.variantSubmitted) setVariantSubmitted(draft.variantSubmitted);
         if (draft.variantShowAnswer) setVariantShowAnswer(draft.variantShowAnswer);
+        if (draft.variantGraded) setVariantGraded(draft.variantGraded);
         if (draft.interactiveTask) setInteractiveTask(draft.interactiveTask);
         if (draft.scenarioResponses) setScenarioResponses(draft.scenarioResponses);
         if (draft.scenarioSubmitted) setScenarioSubmitted(draft.scenarioSubmitted);
@@ -246,6 +249,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
       variantAnswers,
       variantSubmitted,
       variantShowAnswer,
+      variantGraded,
       interactiveTask,
       scenarioResponses,
       scenarioSubmitted,
@@ -273,6 +277,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
     variantAnswers,
     variantSubmitted,
     variantShowAnswer,
+    variantGraded,
     interactiveTask,
     scenarioResponses,
     scenarioSubmitted,
@@ -398,8 +403,18 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   };
 
   const handleSubmitVariantAnswer = (vqId: string) => {
+    // Grade the user's selection against the correct answer (option
+    // label). Previously the handler just flipped two booleans and
+    // revealed the answer — a student could pick any option and see
+    // the right answer with zero correctness signal. The grading map
+    // is rendered below; counts as an Interactive response so the
+    // '完成训练' gate still triggers.
+    const vq = interactiveTask?.variantQuestions.find(q => q.id === vqId);
+    const userAnswer = variantAnswers[vqId] || '';
+    const isCorrect = !!vq && userAnswer.trim() !== '' && userAnswer === vq.answer;
     setVariantSubmitted(prev => ({ ...prev, [vqId]: true }));
     setVariantShowAnswer(prev => ({ ...prev, [vqId]: true }));
+    setVariantGraded(prev => ({ ...prev, [vqId]: isCorrect }));
     setResults(prev => ({
       ...prev,
       interactive: { ...prev.interactive, responses: prev.interactive.responses + 1 },
@@ -1132,7 +1147,13 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                                     <input
                                       type="radio"
                                       name={`vq-${vq.id}`}
-                                      value={opt.text}
+                                      // Store the option label (e.g. 'A') so the
+                                      // value can be compared directly to
+                                      // vq.answer (which is also a label).
+                                      // Previously stored opt.text, which
+                                      // made it impossible to grade the
+                                      // answer against vq.answer.
+                                      value={opt.label}
                                       onChange={e => setVariantAnswers(prev => ({ ...prev, [vq.id]: e.target.value }))}
                                       className="text-indigo-600"
                                     />
@@ -1159,13 +1180,38 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                             </Button>
                           </>
                         ) : (
-                          <div className={`p-3 rounded-lg text-sm ${showAns ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50'}`}>
-                            <p className="font-semibold text-emerald-800">答案: {vq.answer}</p>
-                            {vq.explanation && <LatexText text={vq.explanation} className="text-emerald-700/80 mt-1 text-xs" />}
+                          <div className={`p-3 rounded-lg text-sm ${
+                            showAns
+                              ? variantGraded[vq.id]
+                                ? 'bg-emerald-50 border border-emerald-200'
+                                : 'bg-rose-50 border border-rose-200'
+                              : 'bg-slate-50'
+                          }`}>
+                            <p className={`font-semibold mb-1 ${
+                              showAns
+                                ? variantGraded[vq.id] ? 'text-emerald-800' : 'text-rose-800'
+                                : 'text-slate-700'
+                            }`}>
+                              {showAns
+                                ? variantGraded[vq.id] ? '✓ 回答正确' : '✗ 回答错误'
+                                : '已提交'}
+                            </p>
+                            {showAns && (
+                              <>
+                                <p className="text-sm text-slate-700">
+                                  你的答案: <span className="font-medium">{userAnswer || '（未作答）'}</span>
+                                  {vq.answer && (
+                                    <> · 正确答案: <span className="font-medium text-emerald-700">{vq.answer}</span></>
+                                  )}
+                                </p>
+                                {vq.explanation && <LatexText text={vq.explanation} className="text-slate-600 mt-1 text-xs" />}
+                              </>
+                            )}
                             <button
                               onClick={() => {
                                 setVariantSubmitted(prev => ({ ...prev, [vq.id]: false }));
                                 setVariantShowAnswer(prev => ({ ...prev, [vq.id]: false }));
+                                setVariantGraded(prev => ({ ...prev, [vq.id]: false }));
                                 setVariantAnswers(prev => ({ ...prev, [vq.id]: '' }));
                               }}
                               className="mt-2 text-xs font-medium text-indigo-500 hover:text-indigo-600 transition-colors"
@@ -1325,22 +1371,34 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
 
           <div className="flex justify-between">
             <Button variant="ghost" onClick={() => goToStage(2)}>返回上一步</Button>
-            <Button onClick={() => {
-              recordStageTime('interactive');
-              setResults(prev => ({ ...prev, interactive: { ...prev.interactive, completed: true } }));
-              if (typeof window !== 'undefined') {
-                window.localStorage.removeItem(draftStorageKey);
-              }
-              // 通知父组件：构建 + 互动步骤已完成
-              // 之前只在 allDone 结果面板的"查看结果"按钮里调 onComplete，
-              // 导致 cards 页 markStep('constructive'/'interactive') 永远不跑，
-              // LearningChecklist 的 🏗️🤖 步骤不会亮。现在直接在完成时就通知。
-              onComplete?.({
-                ...results,
-                interactive: { ...results.interactive, completed: true },
-              });
-            }}>
-              完成训练
+            <Button
+              // Require at least 2 Interactive-stage responses (Socratic
+              // exchanges + variant/scenario answers) before allowing
+              // completion. Without this gate, a student could click
+              // 完成训练 the moment they entered stage 3 — ICAP's
+              // Interactive stage requires actual co-construction via
+              // dialogue. Disabled state shows the remaining count.
+              disabled={results.interactive.responses < 2}
+              onClick={() => {
+                if (results.interactive.responses < 2) return;
+                recordStageTime('interactive');
+                setResults(prev => ({ ...prev, interactive: { ...prev.interactive, completed: true } }));
+                if (typeof window !== 'undefined') {
+                  window.localStorage.removeItem(draftStorageKey);
+                }
+                // 通知父组件：构建 + 互动步骤已完成
+                // 之前只在 allDone 结果面板的"查看结果"按钮里调 onComplete，
+                // 导致 cards 页 markStep('constructive'/'interactive') 永远不跑，
+                // LearningChecklist 的 🏗️🤖 步骤不会亮。现在直接在完成时就通知。
+                onComplete?.({
+                  ...results,
+                  interactive: { ...results.interactive, completed: true },
+                });
+              }}
+            >
+              {results.interactive.responses < 2
+                ? `完成训练（还需 ${2 - results.interactive.responses} 次互动）`
+                : '完成训练'}
             </Button>
           </div>
         </div>
