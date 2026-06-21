@@ -338,7 +338,7 @@ export async function generatePath(
  */
 export async function checkPrerequisites(
   knowledgeNodeId: string,
-  _userId: string | null | undefined,
+  userId: string | null | undefined,
   prisma: PrismaClient,
   requiredLevel: number = 60,
 ): Promise<PrerequisiteCheck> {
@@ -346,6 +346,15 @@ export async function checkPrerequisites(
   const visited = new Set<string>();
   const queue: string[] = [knowledgeNodeId];
   const allPrerequisites: { nodeId: string; title: string; masteryLevel: number }[] = [];
+
+  // Collect every prerequisite node id we encounter so we can fetch the
+  // CALLER's mastery for them in one query. Previously this read
+  // `edge.from.masteryLevel`, which is the knowledge node's built-in
+  // default (usually 50 or 0) — NOT the student's actual mastery. That
+  // meant prerequisite gating ignored whether the student had actually
+  // learned the prerequisite: a student who'd mastered it could still be
+  // locked out, and a student who hadn't could slip through.
+  const prerequisiteNodeIds = new Set<string>();
 
   while (queue.length > 0) {
     const currentId = queue.shift()!;
@@ -360,7 +369,7 @@ export async function checkPrerequisites(
       },
       select: {
         from: {
-          select: { id: true, title: true, masteryLevel: true },
+          select: { id: true, title: true },
         },
       },
     });
@@ -368,13 +377,32 @@ export async function checkPrerequisites(
     for (const edge of edges) {
       const fromId = edge.from.id;
       if (!visited.has(fromId)) {
+        prerequisiteNodeIds.add(fromId);
         allPrerequisites.push({
           nodeId: fromId,
           title: edge.from.title,
-          masteryLevel: edge.from.masteryLevel,
+          masteryLevel: 0, // placeholder; resolved below from user progress
         });
         queue.push(fromId);
       }
+    }
+  }
+
+  // Resolve each prerequisite's mastery for THIS user. No progress row =
+  // student hasn't studied it yet → mastery 0 (correctly blocks).
+  if (allPrerequisites.length > 0 && userId) {
+    const progressRows = await prisma.userKnowledgeProgress.findMany({
+      where: {
+        userId,
+        knowledgeNodeId: { in: [...prerequisiteNodeIds] },
+      },
+      select: { knowledgeNodeId: true, masteryLevel: true },
+    });
+    const masteryById = new Map(
+      progressRows.map(r => [r.knowledgeNodeId, r.masteryLevel]),
+    );
+    for (const p of allPrerequisites) {
+      p.masteryLevel = masteryById.get(p.nodeId) ?? 0;
     }
   }
 
@@ -397,13 +425,18 @@ export async function checkPrerequisites(
  */
 export async function batchCheckPrerequisites(
   nodeIds: string[],
-  _userId: string | null | undefined,
+  userId: string | null | undefined,
   prisma: PrismaClient,
   requiredLevel: number = 60,
 ): Promise<Record<string, PrerequisiteCheck>> {
   if (nodeIds.length === 0) return {};
 
-  // Fetch all relevant edges in one query (all prerequisite edges)
+  // Fetch all relevant edges in one query (all prerequisite edges).
+  // NOTE: we deliberately do NOT select `from.masteryLevel` here — that's
+  // the knowledge node's built-in default, not the student's mastery.
+  // Using it made prerequisite gating ignore whether the student had
+  // actually learned the prerequisite. The per-user mastery is resolved
+  // below from UserKnowledgeProgress.
   const allEdges = await prisma.knowledgeEdge.findMany({
     where: {
       relationType: 'prerequisite',
@@ -412,7 +445,7 @@ export async function batchCheckPrerequisites(
       fromId: true,
       toId: true,
       from: {
-        select: { id: true, title: true, masteryLevel: true },
+        select: { id: true, title: true },
       },
     },
   });
@@ -422,6 +455,7 @@ export async function batchCheckPrerequisites(
     string,
     { nodeId: string; title: string; masteryLevel: number }[]
   >();
+  const allPrereqNodeIds = new Set<string>();
   for (const edge of allEdges) {
     if (!prerequisiteOf.has(edge.toId)) {
       prerequisiteOf.set(edge.toId, []);
@@ -429,8 +463,30 @@ export async function batchCheckPrerequisites(
     prerequisiteOf.get(edge.toId)!.push({
       nodeId: edge.from.id,
       title: edge.from.title,
-      masteryLevel: edge.from.masteryLevel,
+      masteryLevel: 0, // placeholder; resolved below from user progress
     });
+    allPrereqNodeIds.add(edge.from.id);
+  }
+
+  // Resolve every prerequisite node's mastery for THIS user in one query.
+  // No progress row = student hasn't studied it → mastery 0 (blocks).
+  const masteryById = new Map<string, number>();
+  if (allPrereqNodeIds.size > 0 && userId) {
+    const progressRows = await prisma.userKnowledgeProgress.findMany({
+      where: {
+        userId,
+        knowledgeNodeId: { in: [...allPrereqNodeIds] },
+      },
+      select: { knowledgeNodeId: true, masteryLevel: true },
+    });
+    for (const r of progressRows) {
+      masteryById.set(r.knowledgeNodeId, r.masteryLevel);
+    }
+  }
+  for (const prereqs of prerequisiteOf.values()) {
+    for (const p of prereqs) {
+      p.masteryLevel = masteryById.get(p.nodeId) ?? 0;
+    }
   }
 
   // Compute transitive prerequisites for a single node via BFS
