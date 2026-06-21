@@ -167,8 +167,12 @@ function ReviewContent() {
         ),
       );
       setCompletedCount(prev => Math.min(tasks.length, prev + 1));
+      // recentErrors 是 shouldTakeBreak / suggestMode / CognitiveLoadManager
+      // 文案里说的"连续错误数"。原实现 prev - 1 是累计减，
+      // 答对一次会缓慢归零，破坏"连续"语义。
+      // 答对 → 立即清零（破坏连击）；答错 → 累加。
       if (quality < 3) setRecentErrors(prev => prev + 1);
-      else setRecentErrors(prev => Math.max(0, prev - 1));
+      else setRecentErrors(0);
       return data;
     } catch (err) {
       console.error(err);

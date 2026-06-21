@@ -52,7 +52,11 @@ function getReviewTaskType(node: Pick<ReviewDueNode, 'repetitions' | 'easeFactor
 function getDaysDelta(target: Date | null, now: Date): number | null {
   if (!target) return null;
   const msPerDay = 24 * 60 * 60 * 1000;
-  return Math.ceil((target.getTime() - now.getTime()) / msPerDay);
+  // Round (was ceil) — ceil made a review due in 1 hour show as
+  // "距离到期还有 1 天" because ceil(1/24) = 1. Round gives 0 for
+  // anything within ±12h, which the caller's 'dueInDays === 0' branch
+  // renders as "今天到期" — a more honest label for short deltas.
+  return Math.round((target.getTime() - now.getTime()) / msPerDay);
 }
 
 function buildReviewReason(node: ReviewDueNode, taskType: string, now: Date): ReviewReason {
@@ -269,7 +273,9 @@ export async function POST(req: NextRequest) {
         easeFactorAfter: result.log.easeFactorAfter,
         intervalBefore: result.log.intervalBefore,
         intervalAfter: result.log.intervalAfter,
-        repetitions: result.log.repetitions,
+        // After value: matches the ReviewLog.repetitions schema comment
+        // ('本次复习时的连续正确次数' = the count as of this review).
+        repetitions: result.log.repetitionsAfter,
         forgetRisk: result.log.forgetRisk,
         durationSeconds: typeof durationSeconds === 'number' ? durationSeconds : null,
       },

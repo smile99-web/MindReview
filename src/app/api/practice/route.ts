@@ -674,7 +674,9 @@ async function handleSubmitAnswer(body: PracticeRequestBody, uid: string) {
       easeFactorAfter: sm2Result.log.easeFactorAfter,
       intervalBefore: sm2Result.log.intervalBefore,
       intervalAfter: sm2Result.log.intervalAfter,
-      repetitions: sm2Result.log.repetitions,
+      // repetitionsAfter: matches the ReviewLog.repetitions schema comment
+      // ('本次复习时的连续正确次数' = the count as of this review).
+      repetitions: sm2Result.log.repetitionsAfter,
       forgetRisk: sm2Result.log.forgetRisk,
       durationSeconds: durationSeconds || null,
     },

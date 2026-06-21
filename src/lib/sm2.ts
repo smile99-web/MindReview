@@ -35,7 +35,12 @@ export interface SM2Result {
     easeFactorAfter: number;
     intervalBefore: number;
     intervalAfter: number;
-    repetitions: number;
+    // Paired with the *_Before/*_After fields above. The single
+    // 'repetitions' was ambiguous (set to the PRE-review count but the
+    // schema comment said AT this review). The route handlers write
+    // repetitionsAfter to ReviewLog.repetitions.
+    repetitionsBefore: number;
+    repetitionsAfter: number;
     forgetRisk: number;
   };
 }
@@ -132,16 +137,30 @@ export function sm2(quality: number, previous: SM2Input["previous"]): SM2Result 
   // 强制上限: 365 天
   newInterval = Math.min(365, newInterval);
 
-  // 计算下次复习时间
-  const nextReviewAt = new Date(now);
-  nextReviewAt.setDate(nextReviewAt.getDate() + newInterval);
-  nextReviewAt.setHours(8, 0, 0, 0); // 早上 8:00
+  // 计算下次复习时间。之前的实现 setHours(8, 0, 0, 0) 把时间钉死到
+  // 服务器本地时区的 08:00。Postgres 存的是绝对时间（UTC），所以不同
+  // 时区的学生看到的到期时刻都按服务器来 — 一个 UTC+0 学生在 CST
+  // 服务器存的 nextReviewAt 会显示成 16:00（不是 8:00）。
+  // 去掉 setHours 改为 `now + N 天的精确时间`。review route 的
+  // '今天到期' 判断走 getDaysDelta（按天比较），不受影响。
+  const nextReviewAt = new Date(now.getTime() + newInterval * 24 * 60 * 60 * 1000);
 
-  // 映射 masteryLevel: retention * 100 + 质量加成
-  const retentionFinal = calcRetention(0, strength); // 当前保留率
-  const masteryLevel = Math.round(
-    Math.min(100, retentionFinal * 85 + q * 3)
-  );
+  // 映射 masteryLevel: 综合本轮质量 + 间隔长度
+  //
+  // 之前实现是 `calcRetention(0, strength) * 85 + q * 3`，但
+  // calcRetention(0, ...) = e^(-0/strength) = 1.0 恒成立，
+  // 所以公式退化成 `85 + q*3` ∈ [85, 100]，
+  // 完全忽略学生表现（答对/答错都 ≥ 85%）。
+  //
+  // 新公式: 质量分 0-60 + 间隔分 0-40
+  //   - q=0 (完全忘记) → 0
+  //   - q=5 (完美回忆) → 60
+  //   - interval=1 天 → 2
+  //   - interval≥20 天 → 40
+  // 这让 60% 的"通过"门槛能正确反映"本轮答得 + 已记住多久"。
+  const qualityScore = q * 12; // 0-60
+  const intervalScore = Math.min(40, newInterval * 2); // 1→2, 20→40
+  const masteryLevel = Math.min(100, qualityScore + intervalScore);
 
   return {
     state: {
@@ -159,7 +178,15 @@ export function sm2(quality: number, previous: SM2Input["previous"]): SM2Result 
       easeFactorAfter: newEF,
       intervalBefore,
       intervalAfter: newInterval,
-      repetitions: previous.repetitions,
+      // Pair with the *_Before/*_After fields above. The previous
+      // single 'repetitions' field was set to the PRE-review count,
+      // which contradicted the ReviewLog.repetitions schema comment
+      // ('本次复习时的连续正确次数'). The route handlers used to write
+      // this 'before' value into ReviewLog.repetitions, so the logged
+      // count was always the count going into the review, not the
+      // resulting count. Now store both so the caller can pick.
+      repetitionsBefore: previous.repetitions,
+      repetitionsAfter: newReps,
       forgetRisk,
     },
   };
