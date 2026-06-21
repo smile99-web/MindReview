@@ -159,15 +159,23 @@ export async function buildLearnerProfile(
       },
     }),
 
-    // MistakeLog type distribution
-    prisma.mistakeLog.groupBy({
+    // Mistake (NOT MistakeLog) — the rich practice-mistake table is what
+    // actually populates the user's mistake book and is the only place
+    // /api/practice writes to. Previously these queries read
+    // prisma.mistakeLog, which /api/review writes to but /api/practice
+    // does not — so a student who only practiced (no SM-2 review) had
+    // weaknessAreas=[] and mistakePatterns={0,0,0,0} despite 50 wrong
+    // answers. The two models are schema-incompatible (MistakeLog has
+    // severity/triggerCount; Mistake has questionText/AI analysis), so
+    // mixing them at the analytics layer was always wrong.
+    prisma.mistake.groupBy({
       by: ['mistakeType'],
       _count: { id: true },
-      where: { userId },
+      where: { userId, mistakeType: { not: null } },
     }),
 
     // Subject-level mistake counts (for weakness detection)
-    prisma.mistakeLog.findMany({
+    prisma.mistake.findMany({
       where: { userId },
       select: {
         knowledgeNode: {
@@ -323,8 +331,21 @@ export async function buildLearnerProfile(
   if (learningVelocity < 5 && sessionsWithDelta.length > 5) {
     recommendedNextSteps.push('学习速度偏慢，考虑降低难度或增加复习频率');
   }
+  // If we have no actionable signal (brand-new user with no data),
+  // don't claim "everything is fine" — point them to the onboarding
+  // diagnostic so the next call has actual data to work with. The
+  // previous fallback ('学习状态良好') was misleading and made the
+  // profile look like it knew the student when it didn't.
+  const totalMistakes = mistakeCounts.reduce(
+    (sum, m) => sum + (m._count?.id ?? 0),
+    0,
+  );
   if (recommendedNextSteps.length === 0) {
-    recommendedNextSteps.push('学习状态良好，保持当前节奏继续巩固');
+    if (totalMistakes === 0 && userProgressRows.length === 0) {
+      recommendedNextSteps.push('完成入门诊断（设置 → 学习者画像），获取个性化学习建议');
+    } else {
+      recommendedNextSteps.push('学习状态良好，保持当前节奏继续巩固');
+    }
   }
 
   return {
@@ -410,8 +431,10 @@ export async function generateActionableSteps(
     }
   }
 
-  // ── 2. Fix mistakes: nodes with the most mistake logs for this user ──
-  const mistakeAgg = await prisma.mistakeLog.groupBy({
+  // ── 2. Fix mistakes: nodes with the most mistakes for this user ──
+  // Read from the rich Mistake table (not MistakeLog) — see comment on
+  // the groupBy call above for why.
+  const mistakeAgg = await prisma.mistake.groupBy({
     by: ['knowledgeNodeId'],
     _count: { id: true },
     where: { userId, knowledgeNodeId: { not: null } },
