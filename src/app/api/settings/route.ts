@@ -2,11 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encryptSecret, maskSecret } from "@/lib/secrets";
 import { assertSafeExternalBaseUrl } from "@/lib/url-security";
+import { resolveUserIdFromRequest } from "@/lib/user-context";
 
 const SERVICES = new Set(["llm", "tts", "image", "embedding"]);
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    // Require auth — this route lists global API keys (even if masked).
+    // Defense in depth: the proxy already blocks unauthenticated requests,
+    // but a forged JWT slipping past the proxy could still read this list.
+    await resolveUserIdFromRequest(req);
+
     const keys = await prisma.apiKey.findMany({
       select: {
         id: true,
@@ -35,6 +41,11 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    // Defense in depth: this route mutates global API keys shared by all
+    // users (LLM, TTS, Image, Embedding). Proxy already blocks unauth
+    // requests; this catches forged-JWT bypasses.
+    await resolveUserIdFromRequest(req);
+
     const body = await req.json();
     const service = typeof body.service === "string" ? body.service : "";
     const key = typeof body.key === "string" ? body.key.trim() : "";
@@ -77,6 +88,9 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    // Defense in depth: this route deletes global API keys.
+    await resolveUserIdFromRequest(req);
+
     const { searchParams } = new URL(req.url);
     const service = searchParams.get('service');
 

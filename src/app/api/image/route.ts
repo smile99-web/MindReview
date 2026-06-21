@@ -1,12 +1,18 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { generateImage } from '@/lib/image-client';
 import type { Prisma } from '@prisma/client';
 
 // POST /api/image — 生成图片
 export async function POST(req: NextRequest) {
   try {
+    // Require auth — this route triggers a paid image generation call
+    // (Doubao Seedream). Without this guard, any caller that slipped past
+    // the proxy could burn the project owner's image quota.
+    await resolveUserIdFromRequest(req);
+
     const body = await req.json();
     const { prompt, imageType, contentRefId, style } = body;
 

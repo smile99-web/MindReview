@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secrets";
 import { assertSafeExternalBaseUrl } from "@/lib/url-security";
+import { resolveUserIdFromRequest } from "@/lib/user-context";
 
 function describeError(err: unknown): string {
   if (!(err instanceof Error)) return "Image test failed";
@@ -14,6 +15,9 @@ function describeError(err: unknown): string {
 
 export async function POST(req: NextRequest) {
   try {
+    // Defense in depth: this route triggers a live image-gen API call ($$$).
+    await resolveUserIdFromRequest(req);
+
     const { key, baseUrl, model } = await req.json();
     const saved = await prisma.apiKey.findUnique({ where: { service: "image" } });
     const apiKey = key || process.env.SEEDREAM_API_KEY || (saved?.key ? decryptSecret(saved.key) : "");

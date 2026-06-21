@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secrets";
 import { assertSafeExternalBaseUrl } from "@/lib/url-security";
+import { resolveUserIdFromRequest } from "@/lib/user-context";
 
 export async function POST(req: NextRequest) {
   try {
+    // Defense in depth: this route triggers a live LLM API call ($$$).
+    await resolveUserIdFromRequest(req);
+
     const { key, baseUrl, model } = await req.json();
     const saved = await prisma.apiKey.findUnique({ where: { service: "llm" } });
     const apiKey = key || process.env.DEEPSEEK_API_KEY || (saved?.key ? decryptSecret(saved.key) : "");

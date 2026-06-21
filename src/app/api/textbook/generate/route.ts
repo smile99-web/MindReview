@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { llmCallWithLog } from '@/lib/llm-client';
 import { sanitizeJsonString } from '@/lib/utils';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { SUBJECT_CONFIG, SUBJECTS } from '@/types';
 import type { IcapLevel, SubjectName } from '@/types';
 
@@ -301,6 +302,11 @@ async function generateChapterKnowledge(
 
 export async function POST(req: NextRequest) {
   try {
+    // Require auth — this route generates an entire textbook (multiple
+    // deepseek LLM calls in parallel). Without this guard, any caller
+    // that slipped past the proxy could burn API quota.
+    await resolveUserIdFromRequest(req);
+
     const body = await req.json();
     const subject = cleanText(body.subject) as SubjectName;
     const grade = cleanText(body.grade, '初二');

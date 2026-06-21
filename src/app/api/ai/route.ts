@@ -1,6 +1,7 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
 import {
   analyzeMistake,
   generateQuestions,
@@ -158,6 +159,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    // Require auth — every action below issues a deepseek LLM call ($$$).
+    // Without this guard, a caller that slipped past the proxy could
+    // burn the project owner's API quota or trigger image generation.
+    // Note: GET (list-logs) is an admin-facing viewer and remains open to
+    // any authenticated user; auth is still enforced by the proxy.
+    await resolveUserIdFromRequest(req);
+
     const body = await req.json();
     const { action } = body;
 

@@ -5,24 +5,18 @@ import { getAuthenticatedUserId } from '@/lib/server-auth';
 import { buildLearnerProfile, recommendOptimalSettings, generateActionableSteps, runOnboardingDiagnostic } from '@/lib/learner-model';
 
 // GET /api/learner/profile
-// Query: ?userId=xxx (optional; falls back to authenticated user)
-// Returns aggregated learner profile + recommended settings
+// Returns aggregated learner profile + recommended settings for the
+// authenticated user. The previous `?userId=` query fallback was an IDOR:
+// a caller without a valid token (or one forging another user's id) could
+// read any user's learner profile.
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    let userId = searchParams.get('userId');
-
-    // Prefer auth token
-    const authUserId = getAuthenticatedUserId(req);
-    if (authUserId) {
-      userId = authUserId;
-    }
-
-    if (!userId || userId.trim() === '') {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
       return NextResponse.json(
-        { error: 'userId query parameter is required when not authenticated' },
-        { status: 400 },
+        { error: 'Authentication required' },
+        { status: 401 },
       );
     }
 
@@ -70,18 +64,16 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    let userId = body.userId as string;
 
-    // Prefer auth token
-    const authUserId = getAuthenticatedUserId(req);
-    if (authUserId) {
-      userId = authUserId;
-    }
-
-    if (!userId || userId.trim() === '') {
+    // Always require an authenticated user. The previous version accepted
+    // `body.userId` as a fallback, which was an IDOR: a caller without a
+    // valid token (e.g., one that slipped past the proxy) could pass any
+    // userId and run the diagnostic against another user's account.
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
       return NextResponse.json(
-        { error: 'userId is required when not authenticated' },
-        { status: 400 },
+        { error: 'Authentication required' },
+        { status: 401 },
       );
     }
 

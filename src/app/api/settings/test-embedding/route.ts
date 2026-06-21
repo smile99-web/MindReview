@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secrets";
+import { resolveUserIdFromRequest } from "@/lib/user-context";
 
 /**
  * Test Doubao Embedding Vision API connectivity.
@@ -9,6 +10,9 @@ import { decryptSecret } from "@/lib/secrets";
  */
 export async function POST(req: NextRequest) {
   try {
+    // Defense in depth: this route triggers a live embedding API call ($$$).
+    await resolveUserIdFromRequest(req);
+
     const body = await req.json();
     const key = typeof body.key === "string" ? body.key.trim() : "";
     const baseUrl =

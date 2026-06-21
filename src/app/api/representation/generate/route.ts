@@ -1,6 +1,7 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
 import {
   detectRepresentationType,
   generateRepresentationContent,
@@ -12,6 +13,10 @@ import {
 // Body: { knowledgeNodeId: string, representationType?: string }
 export async function POST(req: NextRequest) {
   try {
+    // Require auth — this route triggers an LLM call ($$$). Without this
+    // check, any caller that slipped past the proxy could burn API quota.
+    await resolveUserIdFromRequest(req);
+
     const body = await req.json();
     const { knowledgeNodeId, representationType } = body;
 
