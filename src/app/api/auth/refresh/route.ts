@@ -26,19 +26,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ detail: 'Refresh token expired; please log in again' }, { status: 401 });
     }
 
-    await prisma.refreshToken.delete({ where: { token: refresh_token } });
-
     const newRefresh = createRefreshTokenValue();
     const newExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    await prisma.refreshToken.create({
-      data: {
-        id: crypto.randomUUID(),
-        token: newRefresh,
-        userId: row.userId,
-        expiresAt: newExpires,
-      },
-    });
+    // Atomic delete-then-create: a crash between the two used to leave the
+    // user with no valid token (logged out). The transaction also closes a
+    // race where two concurrent refreshes would both create new rows.
+    await prisma.$transaction([
+      prisma.refreshToken.delete({ where: { token: refresh_token } }),
+      prisma.refreshToken.create({
+        data: {
+          id: crypto.randomUUID(),
+          token: newRefresh,
+          userId: row.userId,
+          expiresAt: newExpires,
+        },
+      }),
+    ]);
 
     const accessToken = createAccessToken(row.user.id, row.user.username);
 
