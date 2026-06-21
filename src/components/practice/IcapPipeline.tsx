@@ -169,6 +169,17 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   // would run against state from an unmounted component if the user
   // navigates away within the 50ms window.
   const tutorAutoSendTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror of tutorChatInput used by the 50ms-delayed auto-send. The
+  // inline click handler calls setTutorChatInput then schedules a timer;
+  // the timer fires 50ms later against the closure captured at click
+  // time, when tutorChatInput is still the OLD (empty) value. Without
+  // this ref, handleTutorChatSend's `if (!tutorChatInput.trim()) return`
+  // short-circuits and the suggested-question button silently does
+  // nothing.
+  const tutorChatInputRef = useRef('');
+  useEffect(() => {
+    tutorChatInputRef.current = tutorChatInput;
+  }, [tutorChatInput]);
   useEffect(() => () => {
     if (tutorAutoSendTimer.current) clearTimeout(tutorAutoSendTimer.current);
   }, []);
@@ -451,9 +462,13 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   };
 
   const handleTutorChatSend = async () => {
-    if (!tutorChatInput.trim()) return;
+    // Read input from the ref so the 50ms-delayed auto-send path (set by
+    // the suggested-question button) sees the value the user just typed
+    // / had pre-filled, not the stale closure value from the click render.
+    const inputNow = tutorChatInputRef.current.trim();
+    if (!inputNow) return;
     setTutorChatLoading(true);
-    const msg = tutorChatInput.trim();
+    const msg = inputNow;
     const newMessages = [...tutorChatMessages, { role: 'user', content: msg }];
     setTutorChatMessages(newMessages);
     setTutorChatInput('');
@@ -1040,6 +1055,10 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                       <div className="flex gap-2 flex-wrap">
                         <button
                           onClick={() => {
+                            // Pre-populate the ref synchronously so the
+                            // 50ms-delayed auto-send can read the just-set
+                            // value, even if React hasn't re-rendered yet.
+                            tutorChatInputRef.current = sq.question;
                             setTutorChatInput(sq.question);
                             if (tutorAutoSendTimer.current) clearTimeout(tutorAutoSendTimer.current);
                             tutorAutoSendTimer.current = setTimeout(() => handleTutorChatSend(), 50);
