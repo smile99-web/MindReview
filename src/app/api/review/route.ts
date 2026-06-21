@@ -1,7 +1,7 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { calcCurrentForgetRisk, sm2 } from '@/lib/sm2';
+import { calcCurrentForgetRisk, getQualityLabel, sm2 } from '@/lib/sm2';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import {
   applyProgressToNode,
@@ -211,10 +211,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'knowledgeNodeId is required' }, { status: 400 });
     }
 
-    const rawQuality = typeof quality === 'number' ? quality : Number(quality ?? 3);
-    const safeQuality = Number.isFinite(rawQuality)
-      ? Math.max(0, Math.min(5, rawQuality))
-      : 3;
+    // quality is REQUIRED — silently defaulting to 3 (the SM-2 "correct
+    // recall" threshold) was a footgun: a passive "mark as reviewed"
+    // button or a buggy client would advance the schedule as if the
+    // student recalled it perfectly. Force the caller to declare the
+    // actual quality score.
+    if (typeof quality !== 'number' || !Number.isFinite(quality)) {
+      return NextResponse.json(
+        { error: 'quality is required (number 0-5)' },
+        { status: 400 },
+      );
+    }
+    const safeQuality = Math.max(0, Math.min(5, Math.round(quality)));
 
     let progress;
     try {
@@ -269,24 +277,48 @@ export async function POST(req: NextRequest) {
 
     if (quality !== undefined && safeQuality < 3) {
       const severity = safeQuality === 0 ? 5 : safeQuality <= 1 ? 4 : 3;
+      const mistakeType =
+        safeQuality === 0 ? 'conceptual' : safeQuality <= 1 ? 'application' : 'calculation';
+
       await prisma.mistakeLog.create({
         data: {
           userId: uid,
           knowledgeNodeId,
-          mistakeType: safeQuality === 0 ? 'conceptual' : safeQuality <= 1 ? 'application' : 'calculation',
+          mistakeType,
           severity,
           triggerCount: 1,
         },
       });
 
+      // SM-2 review failures aren't tied to a specific Question row (the
+      // student self-rates recall quality), so there's no real "question
+      // stem" to record. Previously this wrote the raw knowledgeNodeId
+      // (a UUID) as questionText, which showed up in the mistake book as
+      // an unreadable string. Fetch the knowledge node's title + subject
+      // so the mistake book entry is actionable: the student can see
+      // WHICH knowledge point they forgot and go back to review it.
+      const nodeForMistake = await prisma.knowledgeNode.findUnique({
+        where: { id: knowledgeNodeId },
+        select: {
+          title: true,
+          summary: true,
+          subject: { select: { name: true } },
+        },
+      });
+      const nodeTitle = nodeForMistake?.title ?? '未知知识点';
+      const subjectName = nodeForMistake?.subject?.name ?? '';
+      const nextReviewDate = result.state.nextReviewAt?.toISOString().split('T')[0] ?? '未知';
+
       await prisma.mistake.create({
         data: {
           userId: uid,
           knowledgeNodeId,
-          questionText: `[SM-2 复习] ${knowledgeNodeId}`,
-          wrongAnswer: `质量评分: ${safeQuality}/5`,
-          correctAnswer: `已重新调度，下次复习: ${result.state.nextReviewAt?.toISOString().split('T')[0]}`,
-          mistakeType: safeQuality === 0 ? 'conceptual' : safeQuality <= 1 ? 'application' : 'calculation',
+          questionText: `[${subjectName}] ${nodeTitle}${
+            nodeForMistake?.summary ? `\n${nodeForMistake.summary.slice(0, 120)}` : ''
+          }`,
+          wrongAnswer: `复习时回忆失败（质量评分 ${safeQuality}/5：${getQualityLabel(safeQuality)}）`,
+          correctAnswer: `已重新调度，下次复习：${nextReviewDate}。建议回到该知识点重新学习。`,
+          mistakeType,
         },
       });
     }
