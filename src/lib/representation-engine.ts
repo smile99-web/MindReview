@@ -16,7 +16,17 @@ export type RepresentationType =
   | 'mindmap'
   | 'template'
   | 'comparison'
-  | 'concept_map';
+  | 'concept_map'
+  // Subject-specific tokens from SUBJECT_CONFIG[*].representationTypes
+  // (src/types/index.ts). Required for 语文/物理/化学/历史/道法/地理/生物
+  // to actually use their tuned representations instead of collapsing
+  // to concept_map.
+  | 'text' | 'poem' | 'essay' | 'classical'
+  | 'concept' | 'experiment' | 'particle' | 'classification'
+  | 'figure' | 'event'
+  | 'keyword' | 'viewpoint'
+  | 'map' | 'climate' | 'physical' | 'human' | 'regional'
+  | 'process' | 'diagram';
 
 const REPRESENTATION_TYPES: RepresentationType[] = [
   'formula',
@@ -30,6 +40,19 @@ const REPRESENTATION_TYPES: RepresentationType[] = [
   'template',
   'comparison',
   'concept_map',
+  // Subject-specific tokens defined in src/types/index.ts
+  // SUBJECT_CONFIG[*].representationTypes. The engine previously only
+  // accepted the 11 engine-level types above, so when the LLM returned
+  // a subject-tuned type (e.g. 'text'/'poem' for 语文, 'map' for 地理,
+  // 'process' for 生物, 'particle' for 化学), line 245's allowlist
+  // check rejected it and silently fell back to 'concept_map' — making
+  // 5 of 8 subjects visually indistinguishable from each other.
+  'text', 'poem', 'essay', 'classical',          // 语文
+  'concept', 'experiment', 'particle', 'classification', // 物理/化学/生物
+  'figure', 'event',                              // 历史
+  'keyword', 'viewpoint',                         // 道法
+  'map', 'climate', 'physical', 'human', 'regional', // 地理
+  'process', 'diagram',                           // 生物
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {

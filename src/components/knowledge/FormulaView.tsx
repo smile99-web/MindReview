@@ -146,7 +146,15 @@ export function FormulaView({
               <tbody>
                 {variables.map((v, i) => (
                   <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
-                    <td className="px-3 py-2 font-mono text-blue-700 font-medium">{v.symbol}</td>
+                    {/* Wrap the symbol in LatexText so LaTeX like \vec{F},
+                        \omega, F_合 renders consistently with the equation
+                        line at the top (which goes through KaTeX). Previously
+                        shown as raw monospace — visual inconsistency broke
+                        the 'this is math' affordance for any symbol that
+                        the LLM emitted in LaTeX form. */}
+                    <td className="px-3 py-2 text-blue-700 font-medium">
+                      <LatexText text={v.symbol} />
+                    </td>
                     <td className="px-3 py-2 text-slate-700">{v.name}</td>
                     <td className="px-3 py-2 text-slate-500 text-xs">{v.unit || '-'}</td>
                   </tr>
