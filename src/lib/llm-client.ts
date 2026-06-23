@@ -266,12 +266,63 @@ async function getLlmSettings() {
 }
 
 /**
+ * Vision-capable model settings. Pulled from the dedicated 'vision'
+ * row in the ApiKey table (configured separately in Settings →
+ * "视觉模型 (MiniMax M3)") or, as a fallback, from VISION_*
+ * environment variables. The default model is MiniMax-M3 (a
+ * multimodal model the user picked for exam-photo OCR).
+ *
+ * Kept separate from the regular LLM settings because the OCR path
+ * often wants a different model from text reasoning (a vision
+ * model, not DeepSeek). Falling back to the LLM config is an
+ * explicit decision the user makes by leaving the vision row empty.
+ */
+export async function getVisionSettings(): Promise<{
+  apiKey: string;
+  baseURL: string;
+  model: string;
+}> {
+  const saved = await prisma.apiKey
+    .findUnique({ where: { service: 'vision' } })
+    .catch(() => null);
+  const savedKey = saved?.isActive && saved.key ? decryptSecret(saved.key) : '';
+  // Fall back to the LLM row's apiKey/baseUrl only if explicitly
+  // configured there. Most users will keep the vision row separate.
+  const fallback = await prisma.apiKey
+    .findUnique({ where: { service: 'llm' } })
+    .catch(() => null);
+  const fallbackKey =
+    fallback?.isActive && fallback.key ? decryptSecret(fallback.key) : '';
+
+  const apiKey = savedKey || process.env.VISION_API_KEY || fallbackKey || '';
+  if (!apiKey) {
+    throw new Error(
+      '未配置视觉模型 API Key。请在 设置 → 视觉模型 (MiniMax M3) 填写你的 API Key。',
+    );
+  }
+  const baseURL = assertSafeExternalBaseUrl(
+    saved?.baseUrl ||
+      process.env.VISION_BASE_URL ||
+      fallback?.baseUrl ||
+      'https://api.minimaxi.chat/v1',
+  );
+  // Default to MiniMax-M3 (per the user's choice for exam-photo OCR).
+  // The model name is also overridable per-provider since MiniMax's
+  // exact API path / model string may change.
+  const model =
+    saved?.model ||
+    process.env.VISION_MODEL ||
+    fallback?.model ||
+    'MiniMax-M3';
+
+  return { apiKey, baseURL, model };
+}
+
+/**
  * Vision-capable LLM call. Sends a base64-encoded image plus a text
- * prompt and returns the model's reply. Requires the configured LLM
- * provider to support image input (e.g. Doubao-1.5-vision-pro,
- * Qwen-VL-Plus, GPT-4o). If the configured baseUrl/model does not
- * support vision, the provider will return an error which the caller
- * surfaces to the user.
+ * prompt and returns the model's reply. Uses the dedicated 'vision'
+ * settings (configured in Settings → 视觉模型 (MiniMax M3)). The
+ * default model is MiniMax-M3.
  *
  * The image is sent as a data: URL (no separate file upload needed).
  * Larger images should be downscaled by the caller before calling.
@@ -310,7 +361,38 @@ export async function llmVisionCall(options: {
     ],
   });
 
-  return llmCall({ messages, temperature, maxTokens, jsonMode });
+  // Use the dedicated vision settings (default: MiniMax-M3) rather
+  // than the regular LLM settings. Keeps the two model choices
+  // independent — the user can swap vision providers without
+  // affecting text reasoning, and vice versa.
+  const settings = await getVisionSettings();
+  const client = new OpenAI({
+    apiKey: settings.apiKey,
+    baseURL: settings.baseURL,
+  });
+
+  return runAiTask(
+    {
+      service: 'llm',
+      operation: 'chat.completions.create',
+      timeoutMs: LLM_TIMEOUT_MS,
+      retries: LLM_RETRIES,
+    },
+    () => client.chat.completions.create({
+      model: settings.model,
+      messages: messages as unknown as Parameters<typeof client.chat.completions.create>[0]['messages'],
+      temperature,
+      max_tokens: maxTokens,
+      response_format: jsonMode ? { type: 'json_object' } : undefined,
+    }),
+  ).then((res) => {
+    // res is a ChatCompletion (not a Stream) because we don't pass stream:true
+    const content = (res as { choices: Array<{ message: { content?: string | null } }> }).choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error('视觉模型未返回内容，请检查模型名/网络/Key');
+    }
+    return content;
+  });
 }
 
 export async function llmCall(options: LlmCallOptions): Promise<string> {
