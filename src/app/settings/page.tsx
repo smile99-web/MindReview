@@ -380,8 +380,8 @@ export default function SettingsPage() {
                     </div>
                   )}
 
-                  {/* LLM / Image: Base URL + Model */}
-                  {(svc === "llm" || svc === "image" || svc === "embedding") && (
+                  {/* Base URL + Model fields for services that need them */}
+                  {(svc === "llm" || svc === "image" || svc === "embedding" || svc === "vision") && (
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1">Base URL</label>
