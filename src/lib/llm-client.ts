@@ -9,9 +9,23 @@ import type { WorkedExample } from '@/types';
 
 export type LlmRole = 'system' | 'user' | 'assistant';
 
+/**
+ * One part of a multimodal message. Mirrors the OpenAI Chat
+ * Completions multimodal shape (text + image_url). Only used when
+ * the LLM provider supports vision input (e.g. Doubao-1.5-vision-pro,
+ * Qwen-VL, GPT-4o, etc.). For text-only providers, fall back to
+ * string content.
+ */
+export type LlmContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export interface LlmMessage {
   role: LlmRole;
-  content: string;
+  // String for text-only models, or an array of text/image parts for
+  // vision-capable models. The OpenAI SDK accepts both shapes
+  // directly, so callers can pass either.
+  content: string | LlmContentPart[];
 }
 
 export interface LlmCallOptions {
@@ -251,6 +265,54 @@ async function getLlmSettings() {
   return { apiKey, baseURL, model };
 }
 
+/**
+ * Vision-capable LLM call. Sends a base64-encoded image plus a text
+ * prompt and returns the model's reply. Requires the configured LLM
+ * provider to support image input (e.g. Doubao-1.5-vision-pro,
+ * Qwen-VL-Plus, GPT-4o). If the configured baseUrl/model does not
+ * support vision, the provider will return an error which the caller
+ * surfaces to the user.
+ *
+ * The image is sent as a data: URL (no separate file upload needed).
+ * Larger images should be downscaled by the caller before calling.
+ */
+export async function llmVisionCall(options: {
+  prompt: string;
+  imageBase64: string;
+  mimeType?: string;
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  jsonMode?: boolean;
+}): Promise<string> {
+  const {
+    prompt,
+    imageBase64,
+    mimeType = 'image/png',
+    systemPrompt,
+    temperature = 0.3,
+    maxTokens = 2048,
+    jsonMode = false,
+  } = options;
+
+  const messages: LlmMessage[] = [];
+  if (systemPrompt) {
+    messages.push({ role: 'system', content: systemPrompt });
+  }
+  messages.push({
+    role: 'user',
+    content: [
+      { type: 'text', text: prompt },
+      {
+        type: 'image_url',
+        image_url: { url: `data:${mimeType};base64,${imageBase64}` },
+      },
+    ],
+  });
+
+  return llmCall({ messages, temperature, maxTokens, jsonMode });
+}
+
 export async function llmCall(options: LlmCallOptions): Promise<string> {
   const { messages, temperature = 0.7, maxTokens = 4096, jsonMode = false } = options;
 
@@ -270,10 +332,12 @@ export async function llmCall(options: LlmCallOptions): Promise<string> {
       },
       () => client.chat.completions.create({
         model: settings.model,
-        messages: messages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
+        // Cast to the OpenAI SDK's message-param union. Our LlmMessage
+        // uses a permissive `string | ContentPart[]` for content so we
+        // can build multimodal messages, which the OpenAI runtime
+        // handles correctly even though the .d.ts narrows content by
+        // role.
+        messages: messages as unknown as Parameters<typeof client.chat.completions.create>[0]['messages'],
         temperature,
         max_tokens: maxTokens,
         response_format: jsonMode ? { type: 'json_object' } : undefined,

@@ -31,6 +31,7 @@ model User {
   refreshTokens     RefreshToken[]
   chatConversations ChatConversation[]
   studyTimeLogs     StudyTimeLog[]
+  examUploads       ExamUpload[]
 }
 
 model RefreshToken {
@@ -355,5 +356,38 @@ model StudyTimeLog {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, startedAt])
+  @@index([userId, createdAt])
+}
+
+// 上传试卷/练习题图片 + OCR + 拆解 + 练习
+// 工作流：
+//   1. 前端 POST multipart image → /api/exam/upload
+//      后端 OCR（vision LLM）→ ocrText 落库 → 返回 {id, ocrText}
+//   2. 前端 POST {examId} → /api/exam/analyze
+//      后端把 ocrText 喂给 decomposeKnowledge → knowledgePoints 落库
+//   3. 前端 POST {examId} → /api/exam/practice
+//      后端用 knowledgePoints 当作 conditioning context，调用
+//      generateQuestions 生成类似题 → practiceQuestions 落库
+//   4. 前端把整张试卷（id）展示给用户：OCR 文字 + 知识点卡片 + 类似题练习
+model ExamUpload {
+  id                String   @id @default(cuid())
+  userId            String
+  // 原图（压缩后的 JPEG/PNG 字节）。bytea 字段，~50KB 上限。
+  imageData         Bytes?
+  // 推断的学科（OCR 后 LLM 一并返回）。空表示未识别。
+  subjectName       String?
+  // Vision LLM 提取的题目文字（保留 LaTeX 标记）
+  ocrText           String
+  // 知识点拆解（decomposeKnowledge 输出）
+  knowledgePoints   Json     @default("[]")
+  // 类似题（generateQuestions 输出）
+  practiceQuestions Json     @default("[]")
+  // 用户在 UI 上输入的笔记 / 答案
+  userNotes         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId, createdAt])
 }
