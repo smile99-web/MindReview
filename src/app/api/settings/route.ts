@@ -4,7 +4,7 @@ import { encryptSecret, maskSecret } from "@/lib/secrets";
 import { assertSafeExternalBaseUrl } from "@/lib/url-security";
 import { resolveUserIdFromRequest } from "@/lib/user-context";
 
-const SERVICES = new Set(["llm", "tts", "image", "embedding"]);
+const SERVICES = new Set(["llm", "tts", "image", "embedding", "vision"]);
 
 export async function GET(req: NextRequest) {
   try {

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { authFetch } from "@/lib/auth";
 
-type ServiceName = "llm" | "tts" | "image" | "embedding";
+type ServiceName = "llm" | "tts" | "image" | "embedding" | "vision";
 
 interface KeyState {
   saved: boolean;
@@ -50,6 +50,13 @@ const DEFAULT_KEYS: Record<ServiceName, KeyState> = {
     maskedKey: "", key: "", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-embedding-vision-250615",
     cluster: "", voiceType: "",
   },
+  // 视觉模型 — 拍照讲题 OCR 用。默认 MiniMax-M3（多模态）。
+  // User 自己在 baseUrl/model 字段填入实际 MiniMax API 端点和模型名。
+  vision: {
+    saved: false, testing: false, result: null,
+    maskedKey: "", key: "", baseUrl: "https://api.minimaxi.chat/v1", model: "MiniMax-M3",
+    cluster: "", voiceType: "",
+  },
 };
 
 const SERVICE_INFO: Record<ServiceName, { title: string; icon: string; desc: string; docUrl: string; docLabel: string; fields: string[] }> = {
@@ -83,6 +90,14 @@ const SERVICE_INFO: Record<ServiceName, { title: string; icon: string; desc: str
     desc: "知识点语义向量搜索",
     docUrl: "https://www.volcengine.com/docs/82379/1537010",
     docLabel: "火山方舟 Embedding 文档",
+    fields: ["key", "baseUrl", "model"],
+  },
+  vision: {
+    title: "视觉模型 (MiniMax M3)",
+    icon: "👁️",
+    desc: "拍照讲题 OCR 识别题目文字与学科。默认 MiniMax-M3 多模态模型，请在下方填写你的 API Key。",
+    docUrl: "https://platform.MiniMax.io",
+    docLabel: "MiniMax 平台文档",
     fields: ["key", "baseUrl", "model"],
   },
 };
@@ -207,6 +222,7 @@ export default function SettingsPage() {
       tts: "/api/settings/test-tts",
       image: "/api/settings/test-image",
       embedding: "/api/settings/test-embedding",
+      vision: "/api/settings/test-vision",
     };
 
     try {
