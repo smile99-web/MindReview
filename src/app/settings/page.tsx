@@ -54,7 +54,7 @@ const DEFAULT_KEYS: Record<ServiceName, KeyState> = {
   // User 自己在 baseUrl/model 字段填入实际 MiniMax API 端点和模型名。
   vision: {
     saved: false, testing: false, result: null,
-    maskedKey: "", key: "", baseUrl: "https://api.minimaxi.chat/v1", model: "MiniMax-M3",
+    maskedKey: "", key: "", baseUrl: "https://api.minimaxi.com/v1", model: "MiniMax-M3",
     cluster: "", voiceType: "",
   },
 };

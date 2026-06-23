@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
 
     const effectiveBaseUrl = (typeof baseUrl === 'string' && baseUrl.trim())
       ? assertSafeExternalBaseUrl(baseUrl.trim())
-      : 'https://api.minimaxi.chat/v1';
+      : 'https://api.minimaxi.com/v1';
     const effectiveModel = (typeof model === 'string' && model.trim())
       ? model.trim()
       : 'MiniMax-M3';

@@ -304,7 +304,7 @@ export async function getVisionSettings(): Promise<{
     saved?.baseUrl ||
       process.env.VISION_BASE_URL ||
       fallback?.baseUrl ||
-      'https://api.minimaxi.chat/v1',
+      'https://api.minimaxi.com/v1',
   );
   // Default to MiniMax-M3 (per the user's choice for exam-photo OCR).
   // The model name is also overridable per-provider since MiniMax's
