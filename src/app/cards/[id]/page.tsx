@@ -112,6 +112,7 @@ export default function KnowledgeCardPage() {
   const [practiceChecked, setPracticeChecked] = useState<Record<string, boolean>>({});
   const [questions, setQuestions] = useState<PracticeQuestion[]>([]);
   const [generatingQuestions, setGeneratingQuestions] = useState(false);
+  const [questionError, setQuestionError] = useState('');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [generatingImage, setGeneratingImage] = useState(false);
@@ -359,6 +360,7 @@ export default function KnowledgeCardPage() {
 
   const handleGenerateQuestions = async () => {
     setGeneratingQuestions(true);
+    setQuestionError('');
     try {
       const res = await authFetch('/api/ai', {
         method: 'POST',
@@ -372,11 +374,17 @@ export default function KnowledgeCardPage() {
         }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        const msg = typeof data.error === 'string' ? data.error : `生成失败 (${res.status})`;
+        throw new Error(msg);
+      }
       if (data.questions) {
         setQuestions(data.questions);
+      } else {
+        setQuestionError('AI 未返回题目，请重试');
       }
     } catch (err) {
-      console.error(err);
+      setQuestionError(err instanceof Error ? err.message : '生成题目失败，请重试');
     } finally {
       setGeneratingQuestions(false);
     }
@@ -704,6 +712,11 @@ export default function KnowledgeCardPage() {
               AI生成题目
             </Button>
           </div>
+          {questionError && (
+            <div className="bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 text-xs text-rose-700">
+              {questionError}
+            </div>
+          )}
 
           {questions.length === 0 ? (
             <Card>
