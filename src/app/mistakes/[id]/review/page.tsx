@@ -250,16 +250,12 @@ export default function MistakeReviewPage({
             </Link>
             <Button
               onClick={() => {
-                // Navigate back to the subject list (with this mistake
-                // just rescheduled, the next due question will be at the
-                // top of the "待复习" tab). Previously this just cleared
-                // fsrsResult + checkResult, which re-rendered the SAME
-                // question — clicking "继续" was a no-op.
-                router.push(
-                  mistake.subject
-                    ? `/mistakes/subject/${mistake.subject.id}`
-                    : '/mistakes',
-                );
+                // 全量跳回学科详情页（刚答完的题被 FSRS 重调度后，
+                // 列表顶部是下一道待复习题）。用 window.location
+                // 保证浏览器不缓存 Next.js 客户端路由状态。
+                window.location.href = mistake.subject
+                  ? `/mistakes/subject/${mistake.subject.id}`
+                  : '/mistakes';
               }}
             >
               继续复习下一题
