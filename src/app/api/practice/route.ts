@@ -703,6 +703,18 @@ async function handleSubmitAnswer(body: PracticeRequestBody, uid: string) {
           correctAnswer: question.answer,
           mistakeType: analysis?.mistakeType || 'conceptual',
           analysis: analysis?.analysis || '',
+          // FSRS initial state — the row is now FSRS-scheduled
+          // instead of SM-2-scheduled. The first review uses the
+          // canonical FSRS beginner curve (stability=1, next in
+          // 1 day).
+          state: 'new',
+          stability: 1,
+          difficulty: 5,
+          reps: 0,
+          lapses: 0,
+          lastReviewAt: null,
+          nextReviewAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          history: [],
         },
       });
     } catch (mistakeError) {

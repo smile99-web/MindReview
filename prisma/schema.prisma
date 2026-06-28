@@ -55,6 +55,7 @@ model Subject {
 
   chapters       Chapter[]
   knowledgeNodes KnowledgeNode[]
+  mistakes       Mistake[]
 }
 
 model Chapter {
@@ -168,11 +169,37 @@ model Mistake {
   mistakeType     String? // conceptual/calculation/careless/application
   analysis        String? // AI错因分析
   resolved        Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  // FSRS-style scheduling state. We model stability + difficulty +
+  // repetition/lapse counters in the same shape FSRS uses so we can
+  // re-schedule the mistake review at the right Ebbinghaus-style
+  // forgetting-curve point.
+  //
+  //   state: 'new' (never reviewed), 'learning' (recently wrong /
+  //   just-created), 'review' (graduated after several corrects),
+  //   'relearning' (was in 'review' then got wrong again).
+  //   stability:  "memory half-life" in days (FSRS S value).
+  //   difficulty: 1-10 FSRS D value (default 5).
+  //   reps: how many times the student has reviewed this mistake.
+  //   lapses: how many times they got it wrong.
+  //   lastReviewAt: when the student last attempted this mistake.
+  //   nextReviewAt: when FSRS says to re-show this mistake.
+  //   history: per-attempt log (rating + time) for analytics.
+  state          String   @default("new")
+  stability      Float    @default(1)
+  difficulty     Float    @default(5)
+  reps           Int      @default(0)
+  lapses         Int      @default(0)
+  lastReviewAt   DateTime?
+  nextReviewAt   DateTime?
+  // JSON array of {at, rating, durationMs?} entries — one per
+  // review attempt. Bounded to the last 20 entries in the API.
+  history        Json     @default("[]")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   knowledgeNode KnowledgeNode? @relation(fields: [knowledgeNodeId], references: [id])
+  subject       Subject?       @relation(fields: [subjectId], references: [id], onDelete: SetNull)
 }
 
 model ReviewTask {
