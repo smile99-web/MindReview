@@ -455,7 +455,32 @@ export function DocUploadCard() {
               onAnswer={(idx, val) =>
                 setPracticeAnswers((prev) => ({ ...prev, [idx]: val }))
               }
-              onSubmit={() => setPracticeSubmitted(true)}
+              onSubmit={() => {
+                setPracticeSubmitted(true);
+                const wrongs = allQuestions
+                  .filter((q, i) => {
+                    const ans = practiceAnswers[i];
+                    return ans && q.answer && ans !== q.answer;
+                  })
+                  .map((q, i) => ({
+                    questionText:
+                      q.questionType === 'multiple_choice'
+                        ? (q.stem || '') +
+                          (q.options || []).map((o) => `\n${o.label}. ${o.text}`).join('')
+                        : q.stem || '',
+                    wrongAnswer: practiceAnswers[allQuestions.indexOf(q)] || '',
+                    correctAnswer: q.answer || '',
+                    questionType: q.questionType,
+                    explanation: q.explanation,
+                  }));
+                if (wrongs.length > 0) {
+                  void authFetch(`/api/doc/${doc!.id}/record-mistakes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wrongAnswers: wrongs }),
+                  });
+                }
+              }}
               onMore={handlePractice}
               typeFilter={typeFilter}
               onChangeFilter={setTypeFilter}
