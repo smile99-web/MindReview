@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
       subject,
       '通用',
       doc.fileName?.replace(/\.\w+$/, '') || '上传文件',
-      doc.content.slice(0, 6000), // truncate to ~6k chars to stay within LLM context
+      doc.content.slice(0, 2000), // 2k chars is enough context for decompose; larger → LLM returns huge JSON that hits maxTokens
     );
 
     const knowledgePoints: DecomposeKnowledgeResult = {

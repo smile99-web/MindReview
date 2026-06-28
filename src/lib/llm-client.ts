@@ -522,7 +522,7 @@ export async function decomposeKnowledge(
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.3,
-    maxTokens: 8192,
+    maxTokens: 16384,
     jsonMode: true,
   });
 
