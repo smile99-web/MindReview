@@ -23,11 +23,15 @@ export async function GET(req: NextRequest) {
         resolved: false,
         OR: [{ nextReviewAt: null }, { nextReviewAt: { lte: now } }],
       },
+      // 同题答错 N 次 → N 行，今日待复习列表会出现 10 道完全相同的题。
+      // `distinct` 让 Prisma 在 SELECT 里加 DISTINCT ON (questionText)，
+      // 每个题干只保留第一行（按 orderBy 排序，最早创建的优先）。
+      distinct: ['questionText'],
       include: {
         knowledgeNode: { select: { id: true, title: true } },
         subject: { select: { id: true, name: true, icon: true, colorClass: true } },
       },
-      orderBy: [{ nextReviewAt: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ questionText: 'asc' }, { createdAt: 'asc' }],
       take: limit,
     });
 

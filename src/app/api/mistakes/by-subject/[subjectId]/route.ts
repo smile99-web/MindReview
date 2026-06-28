@@ -32,10 +32,12 @@ export async function GET(
       }),
       prisma.mistake.findMany({
         where,
+        // 去重：同题答错多次只展示一条。
+        distinct: ['questionText'],
         include: {
           knowledgeNode: { select: { id: true, title: true } },
         },
-        orderBy: [{ resolved: 'asc' }, { nextReviewAt: 'asc' }, { createdAt: 'desc' }],
+        orderBy: [{ questionText: 'asc' }, { createdAt: 'asc' }],
         take: limit,
       }),
     ]);
