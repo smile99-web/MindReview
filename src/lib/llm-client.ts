@@ -496,6 +496,8 @@ export async function decomposeKnowledge(
 ): Promise<DecomposeKnowledgeResult> {
   const systemPrompt = `你是一位资深中学${subject}教师，擅长将教材内容拆解为最小可复习知识点。
 
+所有数学公式、物理量、化学式统一用 $...$ 包裹（如 $\\sqrt{2}$、$F=ma$、$H_2O$）。
+
 请将以下内容拆解为知识点列表。每个知识点包含：
 - title: 知识点标题（简洁准确）
 - summary: 简明解释（50-100字）
@@ -544,7 +546,7 @@ function buildQuestionPrompt(
   count: number,
 ): string {
   const header = `你是一位中学${subject}出题专家。请根据知识点生成 ${count} 道"${questionType}"题目。`;
-  const footer = '注意：只输出 JSON 数组，不附加解释文字。每题 difficulty 为 1-5（5 最难）。';
+  const footer = '所有数学公式、化学方程式、物理量必须用 $...$ 包裹（如 $\\sqrt{2}$、$H_2O$）。只输出 JSON 数组，不附加解释文字。每题 difficulty 为 1-5（5 最难）。';
 
   switch (questionType) {
     case 'multiple_choice':
