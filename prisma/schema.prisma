@@ -32,6 +32,7 @@ model User {
   chatConversations ChatConversation[]
   studyTimeLogs     StudyTimeLog[]
   examUploads       ExamUpload[]
+  docUploads        DocUpload[]
 }
 
 model RefreshToken {
@@ -383,6 +384,23 @@ model ExamUpload {
   // 类似题（generateQuestions 输出）
   practiceQuestions Json     @default("[]")
   // 用户在 UI 上输入的笔记 / 答案
+  userNotes         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model DocUpload {
+  id                String   @id @default(cuid())
+  userId            String
+  fileName          String
+  subjectName       String?
+  content           String
+  knowledgePoints   Json     @default("[]")
+  practiceQuestions Json     @default("[]")
   userNotes         String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
