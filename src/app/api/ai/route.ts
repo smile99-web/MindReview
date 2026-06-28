@@ -191,6 +191,24 @@ export async function POST(req: NextRequest) {
           count,
         );
 
+        console.log(
+          '[generate-questions] raw result:',
+          JSON.stringify({
+            questionsCount: (result.questions || []).length,
+            firstQuestion: (result.questions || [])[0],
+          }).slice(0, 500),
+        );
+
+        if (!result.questions || result.questions.length === 0) {
+          return NextResponse.json(
+            {
+              error:
+                'AI 生成了题目但格式未能解析。请重试或更换知识点。若持续出现，可能是 LLM 返回的 JSON 与预期格式不匹配。',
+            },
+            { status: 422 },
+          );
+        }
+
         const questions = [];
         for (const questionData of result.questions || []) {
           const question = await prisma.question.create({
