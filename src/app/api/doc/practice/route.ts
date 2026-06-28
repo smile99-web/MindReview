@@ -76,8 +76,11 @@ export async function POST(req: NextRequest) {
     const allQuestions: Array<Record<string, unknown>> = [];
 
     const docTitle = doc.fileName?.replace(/\.\w+$/, '') || '上传文件';
+    // 结合知识点摘要 + 原文（各取 1500 字），LLM 出题时有完整上下文
+    const kpPart = kpSummary ? '知识点摘要：\n' + kpSummary.slice(0, 1500) : '';
+    const contentPart = doc.content ? '原文内容：\n' + doc.content.slice(0, 1500) : '';
     const knowledgeSummary =
-      kpSummary || doc.content.slice(0, 400) || '教材内容';
+      [kpPart, contentPart].filter(Boolean).join('\n\n') || '教材内容';
     const subject = doc.subjectName || '通用';
 
     // 3 次独立 LLM 调用（各题型自己的 prompt，JSON 小不易截断）。
