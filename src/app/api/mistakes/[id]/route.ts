@@ -3,6 +3,36 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 
+// GET /api/mistakes/[id]
+// Returns the full Mistake row (with subject + knowledgeNode joined)
+// so the /mistakes/[id]/review page can render the question +
+// correct/wrong answer + AI analysis without re-fetching.
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const userId = await resolveUserIdFromRequest(_req);
+    const { id } = await params;
+    const mistake = await prisma.mistake.findUnique({
+      where: { id },
+      include: {
+        subject: { select: { id: true, name: true, icon: true } },
+        knowledgeNode: { select: { id: true, title: true } },
+      },
+    });
+    if (!mistake) {
+      return NextResponse.json({ error: 'Mistake not found' }, { status: 404 });
+    }
+    if (mistake.userId !== userId) {
+      return NextResponse.json({ error: '无权访问' }, { status: 403 });
+    }
+    return NextResponse.json(mistake);
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+  }
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
