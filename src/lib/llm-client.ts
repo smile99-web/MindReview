@@ -609,7 +609,25 @@ export async function generateQuestions(
     jsonMode: true,
   });
 
-  return normalizeGenerateQuestionsResult(parseAiJson<unknown>(result, 'generateQuestions'));
+  const raw = result;
+  let parsed: unknown;
+  try {
+    parsed = parseAiJson<unknown>(raw, 'generateQuestions');
+  } catch (err) {
+    console.error(
+      '[generateQuestions] JSON parse failed. Raw LLM output (first 500 chars):',
+      raw.slice(0, 500),
+    );
+    throw err;
+  }
+  const normalized = normalizeGenerateQuestionsResult(parsed);
+  if (!normalized.questions || normalized.questions.length === 0) {
+    console.error(
+      '[generateQuestions] normalized to empty. Raw JSON (first 800 chars):',
+      JSON.stringify(parsed).slice(0, 800),
+    );
+  }
+  return normalized;
 }
 
 // ========== 错因分析 ==========
