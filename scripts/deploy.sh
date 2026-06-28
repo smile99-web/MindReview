@@ -54,7 +54,7 @@ trap 'rm -f "$TMP_TAR"' EXIT
 tar --exclude='.git' \
     --exclude='id_ed25519*' \
     --exclude='.DS_Store' \
-    -czf "$TMP_TAR" .next/standalone .next/static public prisma package.json ecosystem.config.js
+    -czf "$TMP_TAR" .next/standalone .next/static public prisma package.json ecosystem.config.js start.sh
 echo "      tar size: $(du -h "$TMP_TAR" | awk '{print $1}'), files: $(tar -tzf "$TMP_TAR" | wc -l | tr -d ' ')"
 scp "${SSH_OPTS[@]}" "$TMP_TAR" "$SERVER:/tmp/mindreview-deploy.tar.gz"
 # 远程命令整体加 set -e + 把 pm2 那两行也接进 && 链；

@@ -1,17 +1,13 @@
 module.exports = {
   apps: [{
     name: 'mindreview',
-    // Next.js 16 standalone 把 server.js 输出在 <project-dir>/ 子目录（用 build 目录名）
-    // Mac 上是 .next/standalone/MindReview/server.js（项目目录是 MindReview）
-    script: '.next/standalone/MindReview/server.js',
+    // PM2's --env-file flag and env_file directive both proved
+    // unreliable across versions (v5→v7). /opt/mindreview/start.sh
+    // is a tiny bash wrapper that does `set -a; source .env; set +a;
+    // exec node server.js` — guaranteed to inject JWT_SECRET_KEY,
+    // DATABASE_URL, etc. into the process before Next.js boots.
+    script: '/opt/mindreview/start.sh',
     cwd: '/opt/mindreview',
-    // Load /opt/mindreview/.env via Node's built-in --env-file flag
-    // (available since Node 20.6). This is more reliable than PM2's
-    // `env_file` directive which is inconsistently applied across
-    // versions. The .env file is in .gitignore and contains the secrets
-    // that used to be hardcoded here (DATABASE_URL, JWT_SECRET_KEY,
-    // DEEPSEEK_API_KEY, etc.).
-    node_args: ['--env-file=/opt/mindreview/.env'],
     env: {
       NODE_ENV: 'production',
       HOSTNAME: '0.0.0.0',
