@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/errors';
@@ -85,6 +86,7 @@ export default function MistakeReviewPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const [mistake, setMistake] = useState<MistakeDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -248,9 +250,16 @@ export default function MistakeReviewPage({
             </Link>
             <Button
               onClick={() => {
-                setFsrsResult(null);
-                setCheckResult(null);
-                setSelected('');
+                // Navigate back to the subject list (with this mistake
+                // just rescheduled, the next due question will be at the
+                // top of the "待复习" tab). Previously this just cleared
+                // fsrsResult + checkResult, which re-rendered the SAME
+                // question — clicking "继续" was a no-op.
+                router.push(
+                  mistake.subject
+                    ? `/mistakes/subject/${mistake.subject.id}`
+                    : '/mistakes',
+                );
               }}
             >
               继续复习下一题
