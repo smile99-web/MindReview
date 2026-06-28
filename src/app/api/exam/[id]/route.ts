@@ -93,3 +93,55 @@ export async function PATCH(
     );
   }
 }
+
+// DELETE /api/exam/[id]
+// Removes the user's exam-photo upload (the stored image bytea +
+// OCR text + analysis + practice questions). Cascades to the
+// KnowledgeNode marker if any was created via /create-node.
+//
+// Used by the dashboard history list to clean up old entries.
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const userId = await resolveUserIdFromRequest(_req);
+    const { id } = await params;
+    const exam = await prisma.examUpload.findUnique({
+      where: { id },
+      select: { userId: true },
+    });
+    if (!exam) {
+      return NextResponse.json({ error: '试卷不存在' }, { status: 404 });
+    }
+    if (exam.userId !== userId) {
+      return NextResponse.json({ error: '无权访问' }, { status: 403 });
+    }
+
+    // Also unlink any KnowledgeNode that was created from this exam
+    // (the create-node route stores 'exam:<examId>' in the node's
+    // keywords array so we can find it). We remove the marker but
+    // keep the node itself — the user can re-link it via ICAP
+    // training if they want, or delete it manually later.
+    const linkedNodes = await prisma.knowledgeNode.findMany({
+      where: { keywords: { has: `exam:${id}` } },
+      select: { id: true, keywords: true },
+    });
+    for (const node of linkedNodes) {
+      const next = node.keywords.filter((k) => k !== `exam:${id}`);
+      await prisma.knowledgeNode.update({
+        where: { id: node.id },
+        data: { keywords: next },
+      });
+    }
+
+    await prisma.examUpload.delete({ where: { id } });
+    return NextResponse.json({ success: true, unlinkedNodes: linkedNodes.length });
+  } catch (error: unknown) {
+    console.error('[exam/delete] Error:', error);
+    return NextResponse.json(
+      { error: getErrorMessage(error) },
+      { status: 500 },
+    );
+  }
+}
