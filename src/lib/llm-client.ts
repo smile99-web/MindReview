@@ -177,28 +177,34 @@ function normalizeDecomposeKnowledgeResult(value: unknown): DecomposeKnowledgeRe
 }
 
 function normalizeGenerateQuestionsResult(value: unknown): GenerateQuestionsResult {
-  const root = isRecord(value) ? value : {};
-  const questions = Array.isArray(root.questions)
-    ? root.questions
-        .filter(isRecord)
-        .map((question): GeneratedQuestion => {
-          const stem = asString(question.stem || question.question);
-          return {
-            questionType: asString(question.questionType),
-            icapLevel: VALID_ICAP_LEVELS.includes(asString(question.icapLevel))
-              ? asString(question.icapLevel)
-              : undefined,
-            stem,
-            question: stem,
-            options: normalizeOptions(question.options),
-            answer: asString(question.answer),
-            explanation: asString(question.explanation),
-            difficulty: clampInt(question.difficulty, 1, 5, 3),
-            cognitiveLoad: clampInt(question.cognitiveLoad, 1, 5, 3),
-          };
-        })
-        .filter((question) => !!question.stem && !!question.answer)
-    : [];
+  // The LLM sometimes returns a bare array (new prompt format) and
+  // sometimes wraps it in {questions: [...]}. Handle both.
+  let rawQuestions: unknown[] = [];
+  if (Array.isArray(value)) {
+    rawQuestions = value;
+  } else if (isRecord(value) && Array.isArray((value as Record<string,unknown>).questions)) {
+    rawQuestions = (value as Record<string,unknown>).questions as unknown[];
+  }
+
+  const questions = rawQuestions
+    .filter(isRecord)
+    .map((question): GeneratedQuestion => {
+      const stem = asString(question.stem || question.question);
+      return {
+        questionType: asString(question.questionType),
+        icapLevel: VALID_ICAP_LEVELS.includes(asString(question.icapLevel))
+          ? asString(question.icapLevel)
+          : undefined,
+        stem,
+        question: stem,
+        options: normalizeOptions(question.options),
+        answer: asString(question.answer),
+        explanation: asString(question.explanation),
+        difficulty: clampInt(question.difficulty, 1, 5, 3),
+        cognitiveLoad: clampInt(question.cognitiveLoad, 1, 5, 3),
+      };
+    })
+    .filter((question) => !!question.stem && !!question.answer);
 
   return { questions };
 }
