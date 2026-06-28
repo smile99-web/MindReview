@@ -275,8 +275,10 @@ export default function SubjectDetailPage() {
           <TextbookGenerateForm
             initialSubject={subject.name as SubjectName}
             onGenerated={() => {
-              setShowTextbookGenerate(false);
-              void loadData(); router.refresh();
+              // 不要收起 — 让用户继续看 subject/grade/volume chips
+              // 和生成结果。仅刷新学科数据。
+              void loadData();
+              router.refresh();
             }}
           />
         </div>
