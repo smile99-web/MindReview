@@ -320,7 +320,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '请选择有效年级和册别' }, { status: 400 });
     }
 
-    const generated = await generateChapterOutlines(subject, grade, volume);
+    // 用户可以在 /textbook/chapter-list 端点拉取 AI 给的"最新人教版"
+    // 候选单元列表后，手动覆盖单元名（解决 LLM 训练数据滞后 /
+    // 地区版差异问题）。如果客户端传入了 chapters，跳过 LLM 自动出
+    // 大纲步骤，直接用用户确认的单元名生成知识点。
+    let generated: Awaited<ReturnType<typeof generateChapterOutlines>>;
+    const userChapters = Array.isArray(body.chapters) ? body.chapters : null;
+    if (userChapters && userChapters.length > 0) {
+      // 客户端传了 {title, overview}[] — 直接用，不调 LLM 出大纲
+      const cleaned = userChapters
+        .map((c: unknown, i: number) => {
+          if (!c || typeof c !== 'object') return null;
+          const obj = c as Record<string, unknown>;
+          const title = cleanText(obj.title);
+          if (!title) return null;
+          return {
+            title,
+            overview: cleanText(obj.overview, `${title}导学概览`),
+            sortOrder: i + 1,
+          };
+        })
+        .filter((c: ChapterOutline | null): c is ChapterOutline => Boolean(c));
+      if (cleaned.length === 0) {
+        return NextResponse.json(
+          { error: 'chapters 列表中至少需要一个有效的 title' },
+          { status: 400 },
+        );
+      }
+      generated = {
+        editionNote: '（使用用户手动确认的单元列表）',
+        chapters: cleaned,
+      };
+    } else {
+      // 旧流程：让 LLM 直接出大纲
+      generated = await generateChapterOutlines(subject, grade, volume);
+    }
     const failedChapters: string[] = [];
 
     // 并行生成每章知识点（之前是串行 for-of，4 章 × 30s = 120s+ 触发 Nginx 504）
