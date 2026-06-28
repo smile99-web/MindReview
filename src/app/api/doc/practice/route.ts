@@ -12,20 +12,17 @@ type QuestionTypeConfig = {
   count: number; // 每种题型出几道
 };
 
-const DEFAULT_TYPES: QuestionTypeConfig[] = [
-  { type: 'multiple_choice', label: '选择题', count: 3 },
-  { type: 'fill_blank', label: '填空题', count: 2 },
-  { type: 'short_answer', label: '问答题', count: 2 },
-];
-
 // POST /api/doc/practice
-// Body: { docId: string, types?: [{type, count}] }
+// Body: { docId: string }
 // Returns: { questions: [{ questionType, stem, options?, answer, explanation }] }
 //
-// Generates practice questions for each requested type. Defaults to
-// 3 选择题 + 2 填空题 + 2 问答题. Uses the same generateQuestions
-// LLM helper as the exist
-// 练习的类型有选择、填空、问答三种类型
+// 根据拆解出的知识点数量自动分配题型比例：
+// - 选择题 50%（4 个选项）
+// - 填空题 30%（___ 标记）
+// - 问答题 20%（开放式简答）
+//
+// 例如 10 个知识点 → 5 选择 + 3 填空 + 2 问答 = 10 道。
+// 最少 3 道（知识点 < 3 时），各题型上限 20/10/10 防 LLM 超时。
 export async function POST(req: NextRequest) {
   try {
     const userId = await resolveUserIdFromRequest(req);
@@ -55,13 +52,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '无权访问' }, { status: 403 });
     }
 
-    const typesToGenerate =
-      Array.isArray(body.types) && body.types.length > 0
-        ? body.types.map((t) => ({
-            type: typeof t.type === 'string' ? t.type : 'multiple_choice',
-            count: Math.max(1, Math.min(5, typeof t.count === 'number' ? Math.floor(t.count) : 2)),
-          }))
-        : DEFAULT_TYPES;
+    // 按知识点数量分配题型比例：选择 50% / 填空 30% / 问答 20%。
+    // 有 10 个知识点 → 5 选择 + 3 填空 + 2 问答 = 10 题。
+    const kpNodes = (doc.knowledgePoints as { nodes?: Array<{ title?: string }> }) || {};
+    const total = Math.max(3, (kpNodes.nodes || []).length);
+    const mc = Math.floor(total * 0.5);
+    const fb = Math.floor(total * 0.3);
+    const sa = total - mc - fb; // remainder to short_answer
+
+    const typesToGenerate: QuestionTypeConfig[] = [
+      { type: 'multiple_choice', label: '选择题', count: Math.min(20, mc) },
+      { type: 'fill_blank', label: '填空题', count: Math.min(10, fb) },
+      { type: 'short_answer', label: '问答题', count: Math.min(10, sa) },
+    ];
 
     // Build a conditioning snippet from the file content that tells
     // the LLM what the material is about.
