@@ -4,6 +4,7 @@ import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { getErrorMessage } from '@/lib/errors';
 import { generateQuestions } from '@/lib/llm-client';
 import type { GenerateQuestionsResult } from '@/lib/llm-client';
+import { splitIntoPoints } from '@/lib/answer-points';
 
 type QuestionTypeConfig = {
   type: string; // 'multiple_choice' | 'fill_blank' | 'short_answer'
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest) {
       where: { id: docId },
       select: {
         userId: true,
+        fileName: true,
         content: true,
         subjectName: true,
         knowledgePoints: true,
@@ -71,21 +73,33 @@ export async function POST(req: NextRequest) {
     const allQuestions: Array<Record<string, unknown>> = [];
 
     // Generate questions for each type IN PARALLEL (3 LLM calls at once)
+    // generateQuestions signature: (knowledgeTitle, knowledgeSummary,
+    // subject, questionType, icapLevel, count). Previous caller was
+    // passing the subject name as the title, which made the LLM ignore
+    // the actual document content and produce generic questions
+    // with no anchor to the parsed knowledge points.
+    const docTitle = doc.fileName?.replace(/\.\w+$/, '') || '上传文件';
+    const knowledgeSummary =
+      kpSummary || doc.content.slice(0, 400) || '教材内容';
     const results = await Promise.all(
       typesToGenerate.map((cfg) =>
         generateQuestions(
+          docTitle,
+          knowledgeSummary,
           doc.subjectName || '通用',
-          kpSummary || doc.content.slice(0, 80) || '知识点',
           cfg.type,
           'Active',
-          String(cfg.count),
+          cfg.count,
         ).then((r: GenerateQuestionsResult) => ({
           type: cfg.type,
           questions: (r.questions || []).map((q) => ({
             questionType: cfg.type,
             stem: q.stem || q.question || '',
-            options: q.options || (cfg.type === 'multiple_choice' ? undefined : undefined),
+            // 短问答给出答案不给选项 — 用户自己打字，不选 ABC。
+            // 选择题才给选项（multiple_choice 的 LLM 输出里才有）。
+            options: cfg.type === 'multiple_choice' ? (q.options || []) : undefined,
             answer: q.answer || '',
+            points: cfg.type === 'short_answer' ? splitIntoPoints(q.answer || '') : undefined,
             explanation: q.explanation || '',
             difficulty: q.difficulty || 3,
             cognitiveLoad: q.cognitiveLoad || 3,

@@ -70,12 +70,23 @@ ${kpSummary ? `拆解出的关键知识点：\n${kpSummary}\n` : ''}
     // questions are stored on the exam, not as Question rows). The
     // generateQuestions LLM client handles the (subject, topic, icap,
     // count) shape, so we ask for 4-option multiple choice.
+    // generateQuestions signature: (knowledgeTitle, knowledgeSummary,
+    // subject, questionType, icapLevel, count). Previous caller was
+    // passing the subject name as the title and an 80-char OCR slice
+    // as the summary — the LLM had no anchor to the actual question
+    // text and produced generic questions. Use the OCR text as the
+    // knowledge title (the question itself is what the student is
+    // studying) and a longer summary slice.
+    const ocrSummary = exam.ocrText.length > 80
+      ? exam.ocrText.slice(0, 400) + '...'
+      : exam.ocrText;
     const result: GenerateQuestionsResult = await generateQuestions(
+      exam.ocrText.slice(0, 80) || '拍照题目',
+      ocrSummary || '拍照题目',
       subject,
-      exam.ocrText.slice(0, 80) + (exam.ocrText.length > 80 ? '...' : ''),
       'multiple_choice',
       'Active',
-      String(count),
+      count,
     );
 
     const questions = (result.questions || []).map((q) => ({
