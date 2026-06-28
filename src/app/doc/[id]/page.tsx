@@ -367,7 +367,7 @@ export default function DocDetailPage({
                   loading={phase === 'practicing'}
                   disabled={phase === 'practicing'}
                 >
-                  {phase === 'practicing' ? '出题中...' : '✨ 出练习题'}
+                  {phase === 'practicing' ? 'AI出题中...' : '✨ AI生成题目'}
                 </Button>
               </div>
             </div>
