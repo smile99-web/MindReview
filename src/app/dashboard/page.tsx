@@ -9,8 +9,7 @@ import { Badge } from '@/components/ui/Badge';
 import { MasteryBar } from '@/components/ui/MasteryBar';
 import { LatexText } from '@/components/ui/LatexText';
 import LearnerProfileCard from '@/components/learner/LearnerProfileCard';
-import { ExamPhotoCard } from '@/components/exam/ExamPhotoCard';
-import { DocUploadCard } from '@/components/doc/DocUploadCard';
+import { QuickEntryCards } from '@/components/dashboard/QuickEntryCards';
 import { useUserId } from '@/components/auth/AuthProvider';
 import type { ActionableStep } from '@/lib/learner-model';
 
@@ -451,9 +450,8 @@ export default function DashboardPage() {
 
       {/* 📷 拍照讲题 — 上传一张题目图片，AI 识别 → 拆解基础知识点 → 出类似题训练。
           放在顶部是为了让用户登录后第一眼看到（这是项目最新 + 最直接的入口）。 */}
-      <div className="mb-6 space-y-6">
-        <ExamPhotoCard />
-        <DocUploadCard />
+      <div className="mb-6">
+        <QuickEntryCards />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
