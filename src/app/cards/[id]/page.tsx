@@ -358,9 +358,11 @@ export default function KnowledgeCardPage() {
     };
   }, [id]);
 
-  const handleGenerateQuestions = async () => {
+  const handleGenerateQuestions = useCallback(async () => {
     setGeneratingQuestions(true);
     setQuestionError('');
+    const t0 = Date.now();
+    console.log('[generateQuestions] start, id:', id);
     try {
       const res = await authFetch('/api/ai', {
         method: 'POST',
@@ -373,22 +375,31 @@ export default function KnowledgeCardPage() {
           count: 3,
         }),
       });
+      console.log('[generateQuestions] response', res.status, 'in', Date.now() - t0, 'ms');
       const data = await res.json();
       if (!res.ok) {
         const msg = typeof data.error === 'string' ? data.error : `生成失败 (${res.status})`;
-        throw new Error(msg);
+        console.log('[generateQuestions] error:', msg);
+        setQuestionError(msg);
+        return;
       }
-      if (data.questions) {
-        setQuestions(data.questions);
+      const qs = data.questions || data.data?.questions || [];
+      console.log('[generateQuestions] got', qs.length, 'questions');
+      if (qs.length > 0) {
+        setQuestions(qs);
       } else {
         setQuestionError('AI 未返回题目，请重试');
       }
-    } catch (err) {
-      setQuestionError(err instanceof Error ? err.message : '生成题目失败，请重试');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '生成题目失败，请重试';
+      console.log('[generateQuestions] catch:', msg, err);
+      setQuestionError(msg);
+      // 如果有全局 auth 重定向（AuthExpiredError），authFetch 已经处理了。
+      // 这里只捕获网络/解析类错误。
     } finally {
       setGeneratingQuestions(false);
     }
-  };
+  }, [id]);
 
   const handleGenerateImage = async (prompt: string) => {
     setGeneratingImage(true);
