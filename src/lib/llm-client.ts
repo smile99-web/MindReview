@@ -530,6 +530,65 @@ export async function decomposeKnowledge(
 }
 
 // ========== 题目生成 ==========
+
+/** 按题型生成不同的系统提示和 JSON 格式，防止 LLM 把简答题也出成选择题。 */
+function buildQuestionPrompt(
+  subject: string,
+  questionType: string,
+  count: number,
+): string {
+  const header = `你是一位中学${subject}出题专家。请根据知识点生成 ${count} 道"${questionType}"题目。`;
+  const footer = '注意：只输出 JSON 数组，不附加解释文字。每题 difficulty 为 1-5（5 最难）。';
+
+  switch (questionType) {
+    case 'multiple_choice':
+      return `${header}
+
+=== 题型要求 ===
+- 4 个选项，标 A/B/C/D
+- 题干不得包含"以下哪一项"等提示性词语（除非知识点的核心就是区分概念）
+- answer 填正确选项的字母（如 "C"）
+
+=== 输出格式（严格 JSON）===
+{"stem": "题干", "options": [{"label": "A", "text": "…"}, {"label": "B", "text": "…"}, {"label": "C", "text": "…"}, {"label": "D", "text": "…"}], "answer": "C", "explanation": "解析", "difficulty": 3}
+
+${footer}`;
+
+    case 'fill_blank':
+      return `${header}
+
+=== 题型要求 ===
+- 题干中用 "___" 标记空缺
+- 一个空填一个简短答案（词、数、公式）
+- answer 填空缺处的准确答案
+- 不要配 options
+
+=== 输出格式（严格 JSON）===
+{"stem": "题干（含 ___ 标记）", "answer": "正确答案", "explanation": "解析", "difficulty": 3}
+
+${footer}`;
+
+    case 'short_answer':
+      return `${header}
+
+=== 题型要求 ===
+- 题干为开放式问题：为什么？如何？请解释……
+- **不要出选择题**（不要用"下列/哪一项/以下"等选择题措辞）
+- **禁止配 options 字段** — 简答题不需要 ABCD 选项
+- answer 为 3-6 句话的参考答案（段落，不是字母/单词）
+
+=== 输出格式（严格 JSON）===
+{"stem": "题干", "answer": "参考答案（3-6 句话）", "explanation": "解析", "difficulty": 3}
+
+${footer}`;
+
+    default:
+      return `${header}
+输出 JSON：{"stem": "题干", "options": [{"label": "A", "text": "选项"}], "answer": "答案", "explanation": "解析", "difficulty": 3}
+${footer}`;
+  }
+}
+
 export async function generateQuestions(
   knowledgeTitle: string,
   knowledgeSummary: string,
@@ -538,15 +597,7 @@ export async function generateQuestions(
   icapLevel: string,
   count: number = 3,
 ): Promise<GenerateQuestionsResult> {
-  const systemPrompt = `你是一位中学${subject}出题专家。请根据知识点生成${count}道${questionType}题目。
-ICAP层级：${icapLevel}
-题目要求：
-- Passive: 基础识记题
-- Active: 填空、判断、选择
-- Constructive: 简答、总结归纳
-- Interactive: 变式题、综合应用题
-
-输出严格JSON格式：{"questions": [{"stem": "题干", "options": [{"label": "A", "text": "选项"}], "answer": "答案", "explanation": "解析", "difficulty": 3, "cognitiveLoad": 3}]}`;
+  const systemPrompt = buildQuestionPrompt(subject, questionType, count);
 
   const result = await llmCall({
     messages: [
