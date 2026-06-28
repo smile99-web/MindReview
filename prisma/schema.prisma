@@ -33,6 +33,7 @@ model User {
   studyTimeLogs     StudyTimeLog[]
   examUploads       ExamUpload[]
   docUploads        DocUpload[]
+  textbookUploads  TextbookUpload[]
 }
 
 model RefreshToken {
@@ -53,9 +54,10 @@ model Subject {
   description String?
   createdAt   DateTime @default(now())
 
-  chapters       Chapter[]
-  knowledgeNodes KnowledgeNode[]
-  mistakes       Mistake[]
+  chapters        Chapter[]
+  knowledgeNodes  KnowledgeNode[]
+  mistakes        Mistake[]
+  textbookUploads TextbookUpload[]
 }
 
 model Chapter {
@@ -433,6 +435,30 @@ model DocUpload {
   updatedAt         DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// 教材上传（PDF / DOCX / TXT）。
+// 复用 Subject→Chapter→KnowledgeNode 的层级结构：用户上传一个
+// 教材 PDF 后，pipeline 拆出 chapters，导入到对应 Subject 下。
+model TextbookUpload {
+  id                String   @id @default(cuid())
+  userId            String
+  subjectId         String?
+  fileName          String
+  fileType          String // pdf / docx / txt
+  content           String
+  // 是否已触发 chapters 拆解（teachflow 拆解出 N 个 chapter 标题）
+  decomposedChapters Json   @default("[]")
+  // 是否已触发某个 chapter 的 knowledge points 拆解（cascaded）
+  // Each entry: { chapterTitle, status: 'pending' | 'imported' | 'failed' }
+  chapterImports     Json   @default("[]")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
 }

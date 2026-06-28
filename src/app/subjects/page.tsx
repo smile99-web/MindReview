@@ -63,6 +63,12 @@ export default function SubjectsPage() {
           <p className="text-slate-500 mt-1.5 text-[15px]">选择学科查看知识点和思维导图</p>
         </div>
         <div className="flex gap-2">
+          <Link
+            href="/subjects/textbook/new"
+            className="px-4 py-2 rounded-xl bg-indigo-500 text-white text-sm font-medium hover:bg-indigo-600 transition-colors"
+          >
+            📘 上传教材
+          </Link>
           <Button
             variant="secondary"
             onClick={() => {
