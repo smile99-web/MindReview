@@ -75,46 +75,61 @@ export async function POST(req: NextRequest) {
 
     const allQuestions: Array<Record<string, unknown>> = [];
 
-    // Generate questions for each type IN PARALLEL (3 LLM calls at once)
-    // generateQuestions signature: (knowledgeTitle, knowledgeSummary,
-    // subject, questionType, icapLevel, count). Previous caller was
-    // passing the subject name as the title, which made the LLM ignore
-    // the actual document content and produce generic questions
-    // with no anchor to the parsed knowledge points.
+    // Single LLM call for all question types — the original 3-call
+    // Promise.all waited for the slowest (often 30s+), and the UI
+    // hung at "出题中..." until every question was in.
+    //
+    // Now we build one prompt listing each type + count, and the LLM
+    // returns all questions at once with a `questionType` key per
+    // item. 1 call instead of 3; results arrive together but
+    // wall-clock latency ≈ max-of-three → single-call (~10s).
     const docTitle = doc.fileName?.replace(/\.\w+$/, '') || '上传文件';
     const knowledgeSummary =
       kpSummary || doc.content.slice(0, 400) || '教材内容';
-    const results = await Promise.all(
-      typesToGenerate.map((cfg) =>
-        generateQuestions(
-          docTitle,
-          knowledgeSummary,
-          doc.subjectName || '通用',
-          cfg.type,
-          'Active',
-          cfg.count,
-        ).then((r: GenerateQuestionsResult) => ({
-          type: cfg.type,
-          questions: (r.questions || []).map((q) => ({
-            questionType: cfg.type,
-            stem: q.stem || q.question || '',
-            // 短问答给出答案不给选项 — 用户自己打字，不选 ABC。
-            // 选择题才给选项（multiple_choice 的 LLM 输出里才有）。
-            options: cfg.type === 'multiple_choice' ? (q.options || []) : undefined,
-            answer: q.answer || '',
-            points: cfg.type === 'short_answer' ? splitIntoPoints(q.answer || '') : undefined,
-            explanation: q.explanation || '',
-            difficulty: q.difficulty || 3,
-            cognitiveLoad: q.cognitiveLoad || 3,
-          })),
-        })).catch((err: unknown) => {
-          console.warn(`[doc/practice] generate failed for ${cfg.type}:`, err);
-          return { type: cfg.type, questions: [] };
-        })
-      ),
+    const subject = doc.subjectName || '通用';
+
+    const typeSpecs = typesToGenerate
+      .map((t) => `${t.count} 道 ${t.label}（questionType="multiple_choice"）`)
+      .join('；');
+
+    const mixedPrompt =
+      '你是一位中学' + subject + '出题专家。请根据知识点生成以下题目：\n\n' +
+      typesToGenerate.map(function(t) { return '- ' + t.count + ' 道' + t.label + '（questionType="' + t.type + '"）'; }).join('\n') +
+      '\n\n=== 格式要求 ===\n' +
+      '- 选择题：4 个选项 A/B/C/D，answer=字母\n' +
+      '- 填空题：___ 标记空缺，answer=简短\n' +
+      '- 问答题：开放式题干，answer=3-6 句段落，禁止配 options\n\n' +
+      '=== JSON 示例 ===\n' +
+      '{"questions": [' +
+      '{"questionType": "multiple_choice", "stem": "...", "options": [{"label": "A", "text": "..."}, {"label": "B", "text": "..."}, {"label": "C", "text": "..."}, {"label": "D", "text": "..."}], "answer": "C", "explanation": "...", "difficulty": 3},' +
+      '{"questionType": "fill_blank", "stem": "______是光合作用的原料之一。", "answer": "水", "explanation": "...", "difficulty": 3},' +
+      '{"questionType": "short_answer", "stem": "请解释……", "answer": "参考答案段落", "explanation": "...", "difficulty": 3}' +
+      ']}\n\n' +
+      '只输出 JSON，不附加解释。每题 difficulty 1-5。';
+
+    const mixedResult = await generateQuestions(
+      docTitle,
+      knowledgeSummary,
+      subject,
+      mixedPrompt,
+      'Active',
+      typesToGenerate.reduce((s, t) => s + t.count, 0),
     );
-    for (const r of results) {
-      allQuestions.push(...r.questions);
+
+    // Tag each question with its type from the LLM response, then
+    // normalize the same way the old per-type map did.
+    for (const q of mixedResult.questions || []) {
+      const qType = (q as { questionType?: string }).questionType || 'multiple_choice';
+      allQuestions.push({
+        questionType: qType,
+        stem: q.stem || (q as { question?: string }).question || '',
+        options: qType === 'multiple_choice' ? (q.options || []) : undefined,
+        answer: q.answer || '',
+        points: qType === 'short_answer' ? splitIntoPoints(q.answer || '') : undefined,
+        explanation: q.explanation || '',
+        difficulty: q.difficulty || 3,
+        cognitiveLoad: q.cognitiveLoad || 3,
+      });
     }
 
     await prisma.docUpload.update({
