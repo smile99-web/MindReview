@@ -313,6 +313,17 @@ export function TextbookGenerateForm({ initialSubject, onGenerated }: TextbookGe
 
       {step === 'done' && result && (
         <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
+              📚 {subject}
+            </span>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
+              🎓 {grade}
+            </span>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
+              📖 {volume}
+            </span>
+          </div>
           <div className="bg-emerald-50/80 border border-emerald-200/60 rounded-xl px-4 py-3 text-sm text-emerald-700">
             已生成 {result.counts?.chapters || 0} 个章节、{result.counts?.knowledgeNodes || 0} 个知识点、{result.counts?.cards || 0} 张教程卡片、{result.counts?.edges || 0} 条导图关系
             {result.editionNote ? `。${result.editionNote}` : ''}
