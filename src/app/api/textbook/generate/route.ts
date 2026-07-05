@@ -90,6 +90,7 @@ interface GeneratedNode {
   difficulty?: unknown;
   cognitiveLoad?: unknown;
   icapLevel?: unknown;
+  gradeLevel?: string;
 }
 
 interface GeneratedChapter {
@@ -488,6 +489,11 @@ export async function POST(req: NextRequest) {
           difficulty: clampNumber(nodeItem.difficulty, 3, 1, 5),
           cognitiveLoad: clampNumber(nodeItem.cognitiveLoad, 3, 1, 5),
           icapLevel: icapLevel as IcapLevel,
+          // Use the LLM-supplied gradeLevel, falling back to the
+          // user's grade+volume selection. KB.gradeLevel is what the
+          // subjects page uses to group chapters by semester.
+          gradeLevel: (nodeItem.gradeLevel ||
+            `${grade}${volume === '上册' ? '上' : volume === '下册' ? '下' : '上'}`),
         };
         const node = existingNode
           ? await prisma.knowledgeNode.update({
