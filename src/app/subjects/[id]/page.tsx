@@ -155,20 +155,36 @@ function groupChapters(chapters: ChapterItem[]): ChapterGroup[] {
   }
   if (current.length > 0) volumes.push(current);
 
-  // If only 1 volume was detected but we have multiple chapters,
-  // split it evenly: 6 → 3+3, 10 → 4+3+3 (typical 人教版
-  // 单元/章 分布: 6 单元 = 七上 3 + 七下 3, 10 章 = 七上 4 +
-  // 七下 3 + 八上 3). Prevents single-semester subjects (e.g.
-  // 语文 七上 only 6 单元) from being labeled as "第 1 册".
-  if (volumes.length === 1 && sorted.length === 6) {
-    volumes.length = 0;
-    volumes.push(sorted.slice(0, 3));
-    volumes.push(sorted.slice(3));
-  } else if (volumes.length === 1 && sorted.length === 10) {
-    volumes.length = 0;
-    volumes.push(sorted.slice(0, 4));
-    volumes.push(sorted.slice(4, 7));
-    volumes.push(sorted.slice(7));
+  // If only 1 volume was detected and the chapter titles have NO
+  // '第N单元' pattern (i.e. we can't tell grade from the title
+  // itself), keep them as a single unlabeled group. We can only
+  // safely split 6/10 chapters when the original LLM prompt
+  // produced ordered 1-6/1-10 titles — which we can detect by
+  // checking that the sortOrder spans 1..N and the chapter
+  // number in the title is also a clean 1..N sequence.
+  if (volumes.length === 1 && sorted.length > 1) {
+    // Check sortOrder is 1..N (uninterrupted) and chapter numbers
+    // in titles also form a 1..N sequence — that's the LLM-emitted
+    // 'clean' case.
+    const sortOrderIsSequential =
+      sorted.every((ch, i) => ch.sortOrder === i + 1);
+    const titleNums = sorted.map((ch) => chapterNum(ch.title));
+    const titleNumsAreSequential =
+      titleNums.length > 0 &&
+      titleNums.every((n, i) => n === i + 1) &&
+      titleNums[titleNums.length - 1] === sorted.length;
+    const cleanLLMOutput = sortOrderIsSequential && titleNumsAreSequential;
+
+    if (cleanLLMOutput && sorted.length === 6) {
+      volumes.length = 0;
+      volumes.push(sorted.slice(0, 3));
+      volumes.push(sorted.slice(3));
+    } else if (cleanLLMOutput && sorted.length === 10) {
+      volumes.length = 0;
+      volumes.push(sorted.slice(0, 4));
+      volumes.push(sorted.slice(4, 7));
+      volumes.push(sorted.slice(7));
+    }
   }
 
   // Label volumes based on detected count:
