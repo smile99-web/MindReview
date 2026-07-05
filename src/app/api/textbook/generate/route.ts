@@ -193,6 +193,7 @@ function buildChapterPrompt(subject: SubjectName, grade: string, volume: string,
 - 只生成本章 3 到 5 个核心可复习知识点，避免过细。
 - summary 控制在40到90字；tutorial 控制在80到160字，适合作为知识卡片正文。
 - difficulty 和 cognitiveLoad 为1到5；icapLevel 只能是 Passive、Active、Constructive、Interactive。
+- 每个 KnowledgeNode 必须填 gradeLevel 字段（不是 generation 字段），是 6 个固定值之一："七年级上"|"七年级下"|"八年级上"|"八年级下"|"九年级上"|"九年级下"|"高一"|"高二"|"高三"。gradeLevel 必须与年级册别参数完全一致 (${grade}${volume} = ${grade}上册 → "七年级上" 等)。
 - 只输出严格JSON，不要Markdown，不要额外解释。`;
 
   const userPrompt = `请生成：
@@ -217,7 +218,8 @@ JSON格式：
       "typicalQuestions": ["典型题型"],
       "difficulty": 3,
       "cognitiveLoad": 3,
-      "icapLevel": "Active"
+      "icapLevel": "Active",
+      "gradeLevel": "${grade}${volume === '上册' ? '上' : volume === '下册' ? '下' : '上'}"
     }
   ]
 }`;

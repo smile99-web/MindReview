@@ -15,6 +15,7 @@ interface DecomposedNode {
   difficulty?: number;
   cognitiveLoad?: number;
   icapLevel?: string;
+  gradeLevel?: string;
 }
 
 // POST /api/textbook/import-chapter
@@ -133,6 +134,7 @@ export async function POST(req: NextRequest) {
       difficulty: typeof n.difficulty === 'number' ? n.difficulty : 3,
       cognitiveLoad: typeof n.cognitiveLoad === 'number' ? n.cognitiveLoad : 3,
       icapLevel: n.icapLevel || 'Active',
+      gradeLevel: n.gradeLevel || null,
     }));
 
     // Bulk-create KnowledgeNode rows in a callback-style transaction.
@@ -160,6 +162,10 @@ export async function POST(req: NextRequest) {
                   difficulty: n.difficulty,
                   cognitiveLoad: n.cognitiveLoad,
                   icapLevel: n.icapLevel,
+                  // LLM-supplied grade tag — drives subject/[id] chapter
+                  // grouping. May be missing for legacy data; UI
+                  // gracefully falls back to sortOrder-based grouping.
+                  gradeLevel: n.gradeLevel || null,
                 },
                 select: { id: true, title: true },
               });

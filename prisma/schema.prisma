@@ -81,6 +81,12 @@ model KnowledgeNode {
   parentId           String?
   title              String
   summary            String? // 简明解释
+  // 学段标签 — 让 subjects/[id] 页面按"七年级上/下/八年级上/下..."
+  // 分组章节，而不再依赖 sortOrder 重置猜测（math 数据混乱时猜
+  // 不准）。LLM 在 generateChapterKnowledge 时会填入"七年级上"、
+  // "八年级下"等。旧数据为 null，会在 subjects/[id] 退回到按
+  // sortOrder 排序（不再被错切）。
+  gradeLevel         String?  // "七年级上" | "七年级下" | "八年级上" | "八年级下" | "九年级上" | "九年级下" | "高一" | "高二" | "高三"
   keywords           String[]                     @default([])
   prerequisites      String[]                     @default([])
   commonMistakes     String[]                     @default([])

@@ -106,14 +106,37 @@ function chineseToNumber(s: string): number {
   if (!isNaN(n)) return n;
   return map[s] || 0;
 }
+type ChapterItemWithGrade = ChapterItem & {
+  knowledgeNodes?: Array<{ gradeLevel: string | null }>;
+};
+
+function chapterGrade(ch: ChapterItemWithGrade): string | null {
+  const levels = (ch.knowledgeNodes || [])
+    .map((n) => n.gradeLevel)
+    .filter((l): l is string => !!l);
+  if (levels.length === 0) return null;
+  const counts: Record<string, number> = {};
+  for (const l of levels) counts[l] = (counts[l] || 0) + 1;
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+}
+
 type ChapterGroup = { label: string; icon: string; chapters: ChapterItem[] };
 function groupChapters(chapters: ChapterItem[]): ChapterGroup[] {
-  // Physics-style: uses "第X章" with absolute numbering.
-  // Map chapter numbers to grade levels.
-  const hasAbsoluteChapters = chapters.some((ch) => chapterNum(ch.title) > 0);
+  const chs = chapters as ChapterItemWithGrade[];
+  const withGrade = chs.filter((c) => chapterGrade(c) !== null);
+  if (withGrade.length >= Math.max(2, Math.floor(chs.length * 0.6))) {
+    const groups: Record<string, ChapterItem[]> = {};
+    for (const ch of chs) {
+      const k = chapterGrade(ch) || '其他';
+      if (!groups[k]) groups[k] = [];
+      groups[k].push(ch);
+    }
+    return gradeLevelLabelsOrder(groups);
+  }
+  const hasAbsoluteChapters = chs.some((ch) => chapterNum(ch.title) > 0);
   if (hasAbsoluteChapters) {
     const groups: Record<string, ChapterItem[]> = {};
-    for (const ch of chapters) {
+    for (const ch of chs) {
       const n = chapterNum(ch.title);
       let key: string;
       if (n >= 1 && n <= 6) key = '八年级上';
@@ -125,28 +148,14 @@ function groupChapters(chapters: ChapterItem[]): ChapterGroup[] {
       if (!groups[key]) groups[key] = [];
       groups[key].push(ch);
     }
-    const order = ['八年级上', '八年级下', '九年级上', '九年级下', '高中', '其他'];
-    const icons: Record<string, string> = {
-      '八年级上': '📘', '八年级下': '📗', '九年级上': '📙', '九年级下': '📕', '高中': '📓', '其他': '📂',
-    };
-    return order
-      .filter((k) => groups[k] && groups[k].length > 0)
-      .map((k) => ({ label: k, icon: icons[k] || '📂', chapters: groups[k] }));
+    return gradeLevelLabelsOrder(groups);
   }
-
-  // History-style: uses "第X单元" with per-volume numbering.
-  // Detect volume boundaries by sortOrder rollover (sortOrder
-  // resets to 1 when a new volume starts).
-  const sorted = [...chapters].sort((a, b) => {
-    // primary sort: scan order (original list is DB-ordered)
-    return 0; // keep original order
-  });
+  const sorted = [...chs].sort((a, b) => 0);
   const volumes: ChapterItem[][] = [];
   let current: ChapterItem[] = [];
   let prevSort = 999;
   for (const ch of sorted) {
     if (ch.sortOrder < prevSort && current.length > 0) {
-      // sortOrder dropped → new volume
       volumes.push(current);
       current = [];
     }
@@ -154,52 +163,28 @@ function groupChapters(chapters: ChapterItem[]): ChapterGroup[] {
     prevSort = ch.sortOrder;
   }
   if (current.length > 0) volumes.push(current);
-
-  // If only 1 volume was detected and the chapter titles have NO
-  // '第N单元' pattern (i.e. we can't tell grade from the title
-  // itself), keep them as a single unlabeled group. We can only
-  // safely split 6/10 chapters when the original LLM prompt
-  // produced ordered 1-6/1-10 titles — which we can detect by
-  // checking that the sortOrder spans 1..N and the chapter
-  // number in the title is also a clean 1..N sequence.
   if (volumes.length === 1 && sorted.length > 1) {
-    // Check sortOrder is 1..N (uninterrupted) and chapter numbers
-    // in titles also form a 1..N sequence — that's the LLM-emitted
-    // 'clean' case.
-    const sortOrderIsSequential =
-      sorted.every((ch, i) => ch.sortOrder === i + 1);
+    const sortOrderIsSequential = sorted.every((ch, i) => ch.sortOrder === i + 1);
     const titleNums = sorted.map((ch) => chapterNum(ch.title));
-    const titleNumsAreSequential =
-      titleNums.length > 0 &&
-      titleNums.every((n, i) => n === i + 1) &&
-      titleNums[titleNums.length - 1] === sorted.length;
+    const titleNumsAreSequential = titleNums.length > 0 && titleNums.every((n, i) => n === i + 1) && titleNums[titleNums.length - 1] === sorted.length;
     const cleanLLMOutput = sortOrderIsSequential && titleNumsAreSequential;
-
-    if (cleanLLMOutput && sorted.length === 6) {
-      volumes.length = 0;
-      volumes.push(sorted.slice(0, 3));
-      volumes.push(sorted.slice(3));
-    } else if (cleanLLMOutput && sorted.length === 10) {
-      volumes.length = 0;
-      volumes.push(sorted.slice(0, 4));
-      volumes.push(sorted.slice(4, 7));
-      volumes.push(sorted.slice(7));
-    }
+    if (cleanLLMOutput && sorted.length === 6) { volumes.length = 0; volumes.push(sorted.slice(0, 3)); volumes.push(sorted.slice(3)); }
+    else if (cleanLLMOutput && sorted.length === 10) { volumes.length = 0; volumes.push(sorted.slice(0, 4)); volumes.push(sorted.slice(4, 7)); volumes.push(sorted.slice(7)); }
   }
-
-  // Label volumes based on detected count:
-  // 2 → 七上/七下, 3 → 七上/七下/八上, otherwise generic.
   const labels: string[] = [];
   if (volumes.length === 3) labels.push('七年级上', '七年级下', '八年级上');
   else if (volumes.length === 2) labels.push('七年级上', '七年级下');
   else volumes.forEach((_, i) => labels.push(`第${i + 1} 册`));
-
   const icons = ['📘', '📗', '📙', '📕', '📓'];
-  return volumes.map((chs, i) => ({
-    label: labels[i] || `第${i + 1} 册`,
-    icon: icons[i % icons.length] || '📂',
-    chapters: chs,
-  }));
+  return volumes.map((chs, i) => ({ label: labels[i] || `第${i + 1} 册`, icon: icons[i % icons.length] || '📂', chapters: chs }));
+}
+
+function gradeLevelLabelsOrder(groups: Record<string, ChapterItem[]>): ChapterGroup[] {
+  const order = ['七年级上', '七年级下', '八年级上', '八年级下', '九年级上', '九年级下', '高一', '高二', '高三', '其他'];
+  const icons: Record<string, string> = { '七年级上': '📘', '七年级下': '📗', '八年级上': '📙', '八年级下': '📕', '九年级上': '📓', '九年级下': '📒', '高一': '📔', '高二': '📓', '高三': '📒', '其他': '📂' };
+  const known = order.filter((k) => groups[k]);
+  const unknown = Object.keys(groups).filter((k) => !order.includes(k));
+  return [...known, ...unknown].map((k) => ({ label: k, icon: icons[k] || '📂', chapters: groups[k] }));
 }
 
 export default function SubjectDetailPage() {

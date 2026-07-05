@@ -45,6 +45,10 @@ interface DecomposedKnowledgeNode {
   difficulty?: number;
   cognitiveLoad?: number;
   icapLevel?: string;
+  // LLM-emitted grade tag — drives subjects/[id] chapter grouping.
+  // Values: "七年级上"|"七年级下"|"八年级上"|"八年级下"|
+  // "九年级上"|"九年级下"|"高一"|"高二"|"高三". Optional.
+  gradeLevel?: string;
 }
 
 interface DecomposedKnowledgeEdge {

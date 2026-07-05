@@ -17,6 +17,13 @@ export async function GET(req: NextRequest) {
       include: {
         _count: { select: { knowledgeNodes: true } },
         children: true,
+        // Expose each knowledge node's gradeLevel so the subjects
+        // page can group chapters by 七年级上/下/... (the LLM tags
+        // each node when generating the textbook). Pick the most
+        // common gradeLevel per chapter for the grouping key.
+        knowledgeNodes: {
+          select: { gradeLevel: true },
+        },
       },
       orderBy: { sortOrder: 'asc' },
     });
