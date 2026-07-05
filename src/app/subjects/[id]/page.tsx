@@ -155,8 +155,24 @@ function groupChapters(chapters: ChapterItem[]): ChapterGroup[] {
   }
   if (current.length > 0) volumes.push(current);
 
-  // Label volumes based on convention: if 3 volumes → 七年级上/下,
-  // 八年级上. If 2 → 七年级上/下. Otherwise use generic labels.
+  // If only 1 volume was detected but we have multiple chapters,
+  // split it evenly: 6 → 3+3, 10 → 4+3+3 (typical 人教版
+  // 单元/章 分布: 6 单元 = 七上 3 + 七下 3, 10 章 = 七上 4 +
+  // 七下 3 + 八上 3). Prevents single-semester subjects (e.g.
+  // 语文 七上 only 6 单元) from being labeled as "第 1 册".
+  if (volumes.length === 1 && sorted.length === 6) {
+    volumes.length = 0;
+    volumes.push(sorted.slice(0, 3));
+    volumes.push(sorted.slice(3));
+  } else if (volumes.length === 1 && sorted.length === 10) {
+    volumes.length = 0;
+    volumes.push(sorted.slice(0, 4));
+    volumes.push(sorted.slice(4, 7));
+    volumes.push(sorted.slice(7));
+  }
+
+  // Label volumes based on detected count:
+  // 2 → 七上/七下, 3 → 七上/七下/八上, otherwise generic.
   const labels: string[] = [];
   if (volumes.length === 3) labels.push('七年级上', '七年级下', '八年级上');
   else if (volumes.length === 2) labels.push('七年级上', '七年级下');
