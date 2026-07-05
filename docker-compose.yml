@@ -1,6 +1,10 @@
 x-app-env: &app-env
   DATABASE_URL: postgresql://mindreview:mindreview@db:5432/mindreview
-  JWT_SECRET_KEY: ${JWT_SECRET_KEY:-mindreview-dev-secret-change-me}
+  # 必须显式设置（docker compose up 前 export JWT_SECRET_KEY=...）。
+  # 之前默认是 'mindreview-dev-secret-change-me'，跟 proxy.ts / secrets.ts
+  # 里的 dev fallback 同字串 → 忘设 env 时会签名可伪造的 token。
+  # 现在直接 unset 让容器启动失败，强制运维必须配。
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required — generate one with: openssl rand -hex 32}
   DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
   DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
   DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}

@@ -136,6 +136,7 @@ export default function KnowledgeCardPage() {
   }, [id, router]);
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
       try {
         setLoading(true);
@@ -146,9 +147,13 @@ export default function KnowledgeCardPage() {
         setUnmetPrerequisites([]);
         setReadCompletedAt(null);
         setPracticedCompletedAt(null);
+        setConstructiveCompletedAt(null);
+        setInteractiveCompletedAt(null);
         const res = await authFetch(`/api/knowledge/${id}`);
+        if (cancelled) return;
         if (!res.ok) throw new Error('知识点不存在');
         const data = await res.json();
+        if (cancelled) return;
         setNode(data);
         setQuestions(data.questions || []);
         setReadCompletedAt(data.readCompletedAt || null);
@@ -165,6 +170,7 @@ export default function KnowledgeCardPage() {
           });
           const prereqData = await prereqRes.json();
           if (prereqData.results?.[id] && !prereqData.results[id].canAccess) {
+            if (cancelled) return;
             setUnmetPrerequisites(prereqData.results[id].blockedBy || []);
           }
         } catch { /* ignore */ }
@@ -175,11 +181,21 @@ export default function KnowledgeCardPage() {
       }
     }
 
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
     async function loadImage() {
       try {
         const res = await authFetch(`/api/image?contentRefId=${id}&status=success&limit=1`);
+        if (cancelled) return;
         const images = await res.json();
         if (Array.isArray(images) && images.length > 0 && images[0].imageUrl) {
+          if (cancelled) return;
           setImageUrl(images[0].imageUrl);
         }
       } catch {
@@ -190,8 +206,10 @@ export default function KnowledgeCardPage() {
     async function loadAudio() {
       try {
         const res = await authFetch(`/api/tts?contentType=card&contentRefId=${id}&limit=1`);
+        if (cancelled) return;
         const assets = await res.json();
         if (Array.isArray(assets) && assets.length > 0 && assets[0].audioUrl) {
+          if (cancelled) return;
           setAudioUrl(assets[0].audioUrl);
         }
       } catch {
@@ -199,9 +217,11 @@ export default function KnowledgeCardPage() {
       }
     }
 
-    load();
     loadImage();
     loadAudio();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   // 节点加载后，把当前知识点的上下文推到全局 ChatProvider，让 AI 老师对话知道学生在学什么。

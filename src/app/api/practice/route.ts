@@ -659,27 +659,30 @@ async function handleSubmitAnswer(body: PracticeRequestBody, uid: string) {
     lastReviewAt: progress.lastReviewAt,
   });
 
-  await updateUserKnowledgeProgress(uid, node.id, sm2Result.state, prisma);
-
-  // --- create ReviewLog ---
-  await prisma.reviewLog.create({
-    data: {
-      userId: uid,
-      knowledgeNodeId: node.id,
-      action: isCorrect ? 'solved' : 'mistake',
-      quality,
-      masteryBefore: progress.masteryLevel,
-      masteryAfter: sm2Result.state.masteryLevel,
-      easeFactorBefore: sm2Result.log.easeFactorBefore,
-      easeFactorAfter: sm2Result.log.easeFactorAfter,
-      intervalBefore: sm2Result.log.intervalBefore,
-      intervalAfter: sm2Result.log.intervalAfter,
-      // repetitionsAfter: matches the ReviewLog.repetitions schema comment
-      // ('本次复习时的连续正确次数' = the count as of this review).
-      repetitions: sm2Result.log.repetitionsAfter,
-      forgetRisk: sm2Result.log.forgetRisk,
-      durationSeconds: durationSeconds || null,
-    },
+  // --- atomic transaction: SM-2 progress + ReviewLog must advance together ---
+  // If the request fails mid-way, the user shouldn't end up with
+  // an advanced mastery but no audit row (or vice versa) — the
+  // analytics dashboard reads ReviewLog to compute averages, so
+  // partial writes corrupt the 30-day stats.
+  await prisma.$transaction(async (tx) => {
+    await updateUserKnowledgeProgress(uid, node.id, sm2Result.state, tx as unknown as typeof prisma);
+    await tx.reviewLog.create({
+      data: {
+        userId: uid,
+        knowledgeNodeId: node.id,
+        action: isCorrect ? 'solved' : 'mistake',
+        quality,
+        masteryBefore: progress.masteryLevel,
+        masteryAfter: sm2Result.state.masteryLevel,
+        easeFactorBefore: sm2Result.log.easeFactorBefore,
+        easeFactorAfter: sm2Result.log.easeFactorAfter,
+        intervalBefore: sm2Result.log.intervalBefore,
+        intervalAfter: sm2Result.log.intervalAfter,
+        repetitions: sm2Result.log.repetitionsAfter,
+        forgetRisk: sm2Result.log.forgetRisk,
+        durationSeconds: durationSeconds || null,
+      },
+    });
   });
 
   // --- if wrong, also record in Mistake (错题本) so the user can review it later ---

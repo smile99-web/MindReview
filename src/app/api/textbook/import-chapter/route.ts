@@ -135,27 +135,39 @@ export async function POST(req: NextRequest) {
       icapLevel: n.icapLevel || 'Active',
     }));
 
-    // Bulk-create KnowledgeNode rows linked to the new chapter.
-    const createdNodes = knowledgeNodes.length > 0
+    // Bulk-create KnowledgeNode rows in a callback-style transaction.
+    // The previous $transaction([...]) array form is "interactive"
+    // — Prisma creates the rows as the array is evaluated, so a
+    // mid-stream failure leaves partial nodes + the chapter
+    // stamped 'imported' with inconsistent nodeIds. The callback
+    // form runs all creates inside one DB transaction that
+    // either commits or rolls back atomically.
+    const createdNodes: { id: string; title: string }[] = knowledgeNodes.length > 0
       ? await prisma.$transaction(
-          knowledgeNodes.map((n) =>
-            prisma.knowledgeNode.create({
-              data: {
-                subjectId,
-                chapterId: newChapter.id,
-                title: n.title,
-                summary: n.summary,
-                keywords: n.keywords,
-                prerequisites: n.prerequisites,
-                commonMistakes: n.commonMistakes,
-                typicalQuestions: n.typicalQuestions,
-                difficulty: n.difficulty,
-                cognitiveLoad: n.cognitiveLoad,
-                icapLevel: n.icapLevel,
-              },
-              select: { id: true, title: true },
-            }),
-          ),
+          async (tx) => {
+            const rows: { id: string; title: string }[] = [];
+            for (const n of knowledgeNodes) {
+              const row = await tx.knowledgeNode.create({
+                data: {
+                  subjectId,
+                  chapterId: newChapter.id,
+                  title: n.title,
+                  summary: n.summary,
+                  keywords: n.keywords,
+                  prerequisites: n.prerequisites,
+                  commonMistakes: n.commonMistakes,
+                  typicalQuestions: n.typicalQuestions,
+                  difficulty: n.difficulty,
+                  cognitiveLoad: n.cognitiveLoad,
+                  icapLevel: n.icapLevel,
+                },
+                select: { id: true, title: true },
+              });
+              rows.push(row);
+            }
+            return rows;
+          },
+          { timeout: 60000 },
         )
       : [];
 
