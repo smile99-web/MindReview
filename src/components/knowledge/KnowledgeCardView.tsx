@@ -1,6 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/auth';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -37,6 +38,7 @@ interface KnowledgeCardNode {
   commonMistakes: string[];
   typicalQuestions: string[];
   prerequisites: string[];
+  prerequisiteNodes?: { id: string; title: string }[];
   knowledgeCards: unknown[];
   representationType?: string | null;
   representationData?: unknown;
@@ -598,15 +600,36 @@ export function KnowledgeCardView({
         <Card>
           <CardTitle className="text-[15px]">前置知识</CardTitle>
           <ul className="mt-3 space-y-1.5">
-            {node.prerequisites.map((pre, i) => (
-              <li
-                key={i}
-                className="text-sm text-slate-600 flex items-start gap-2.5"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                <LatexText text={pre} />
-              </li>
-            ))}
+            {node.prerequisites.map((pre, i) => {
+              // Find the matching node ID from the server response so we
+              // can link to /cards/[id] for that prerequisite's own ICAP
+              // training + practice page.
+              const pnode = (node.prerequisiteNodes || []).find(
+                (n) => n.title === pre,
+              );
+              if (pnode) {
+                return (
+                  <li key={i} className="text-sm flex items-start gap-2.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
+                    <Link
+                      href={`/cards/${pnode.id}`}
+                      className="text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+                    >
+                      <LatexText text={pre} />
+                    </Link>
+                  </li>
+                );
+              }
+              return (
+                <li
+                  key={i}
+                  className="text-sm text-slate-600 flex items-start gap-2.5"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
+                  <LatexText text={pre} />
+                </li>
+              );
+            })}
           </ul>
         </Card>
       )}

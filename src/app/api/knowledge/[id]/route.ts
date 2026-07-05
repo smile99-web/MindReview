@@ -85,9 +85,22 @@ export async function GET(
           scopeLabel,
         };
 
+    // Resolve prerequisite titles to node IDs so the frontend can
+    // render clickable links instead of just text.
+    let prerequisiteNodes: { id: string; title: string }[] = [];
+    if (node.prerequisites.length > 0) {
+      const prerow = await prisma.knowledgeNode.findMany({
+        where: { title: { in: node.prerequisites } },
+        select: { id: true, title: true },
+        take: 20,
+      });
+      prerequisiteNodes = prerow;
+    }
+
     return NextResponse.json({
       ...node,
       navigation,
+      prerequisiteNodes,
       readCompletedAt: progress?.readCompletedAt ?? null,
       practicedCompletedAt: progress?.practicedCompletedAt ?? null,
       constructiveCompletedAt: progress?.constructiveCompletedAt ?? null,
