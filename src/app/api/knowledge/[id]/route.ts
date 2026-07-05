@@ -87,14 +87,30 @@ export async function GET(
 
     // Resolve prerequisite titles to node IDs so the frontend can
     // render clickable links instead of just text.
+    // Use OR of contains queries — exact match (title: {in: [...]})
+    // misses nodes generated from exam photos where the title has
+    // extra context like '[物理] 热量' vs just '热量'.
     let prerequisiteNodes: { id: string; title: string }[] = [];
     if (node.prerequisites.length > 0) {
+      const ors = node.prerequisites.map((p) => ({
+        title: { contains: p, mode: 'insensitive' as const },
+      }));
       const prerow = await prisma.knowledgeNode.findMany({
-        where: { title: { in: node.prerequisites } },
+        where: { OR: ors },
         select: { id: true, title: true },
         take: 20,
       });
-      prerequisiteNodes = prerow;
+      // Deduplicate and pick the best match per prerequisite
+      for (const pre of node.prerequisites) {
+        const match = prerow.find(
+          (r) =>
+            r.title.includes(pre) ||
+            pre.includes(r.title),
+        );
+        if (match && !prerequisiteNodes.find((n) => n.id === match.id)) {
+          prerequisiteNodes.push(match);
+        }
+      }
     }
 
     return NextResponse.json({

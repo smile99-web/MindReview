@@ -601,11 +601,11 @@ export function KnowledgeCardView({
           <CardTitle className="text-[15px]">前置知识</CardTitle>
           <ul className="mt-3 space-y-1.5">
             {node.prerequisites.map((pre, i) => {
-              // Find the matching node ID from the server response so we
-              // can link to /cards/[id] for that prerequisite's own ICAP
-              // training + practice page.
+              // Exact node match (from prerequisiteNodes in the API
+              // response) — direct link to the card page for full
+              // ICAP training + practice.
               const pnode = (node.prerequisiteNodes || []).find(
-                (n) => n.title === pre,
+                (n) => n.title === pre || n.title.includes(pre) || pre.includes(n.title),
               );
               if (pnode) {
                 return (
@@ -620,13 +620,19 @@ export function KnowledgeCardView({
                   </li>
                 );
               }
+              // Fallback: no exact node match — link to the search
+              // page so the user can find this prerequisite in the
+              // knowledge graph (or start an exam-photo
+              // retrospective there).
               return (
-                <li
-                  key={i}
-                  className="text-sm text-slate-600 flex items-start gap-2.5"
-                >
+                <li key={i} className="text-sm flex items-start gap-2.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                  <LatexText text={pre} />
+                  <Link
+                    href={`/search?q=${encodeURIComponent(pre)}`}
+                    className="text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+                  >
+                    <LatexText text={pre} />
+                  </Link>
                 </li>
               );
             })}
