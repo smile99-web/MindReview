@@ -620,19 +620,38 @@ export function KnowledgeCardView({
                   </li>
                 );
               }
-              // Fallback: no exact node match — link to the search
-              // page so the user can find this prerequisite in the
-              // knowledge graph (or start an exam-photo
-              // retrospective there).
+              // Fallback: no exact node match — inline button that calls
+              // the AI to generate a friendly explanation + examples,
+              // creates a KnowledgeNode, and redirects to /cards/[id].
               return (
                 <li key={i} className="text-sm flex items-start gap-2.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                  <Link
-                    href={`/search?q=${encodeURIComponent(pre)}`}
-                    className="text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await authFetch('/api/knowledge/explain-concept', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            concept: pre,
+                            subject: node.subject?.name || '通用',
+                            contextTitle: node.title,
+                          }),
+                        });
+                        const data = (await res.json()) as { nodeId?: string; error?: string };
+                        if (!res.ok || !data.nodeId) throw new Error(data.error || '解释生成失败');
+                        window.location.href = `/cards/${data.nodeId}`;
+                      } catch {
+                        // fallback to search on failure
+                        window.location.href = `/search?q=${encodeURIComponent(pre)}`;
+                      }
+                    }}
+                    className="text-amber-600 hover:text-amber-800 hover:underline transition-colors text-left"
                   >
                     <LatexText text={pre} />
-                  </Link>
+                    <span className="ml-1 text-[10px] text-amber-500">🤖 AI解释+举例</span>
+                  </button>
                 </li>
               );
             })}
