@@ -81,6 +81,48 @@ interface GeneratePathResponse {
   blockedNodes?: BlockedNode[];
 }
 
+// Parse "第X章" → chapter number. Returns 0 if not matched.
+function chapterNum(title: string): number {
+  const m = title.match(/第([一二三四五六七八九十百零\d]+)章/);
+  if (!m) return 0;
+  return chineseToNumber(m[1]);
+}
+function chineseToNumber(s: string): number {
+  const map: Record<string, number> = {
+    '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6,
+    '七': 7, '八': 8, '九': 9, '十': 10,
+    '十一': 11, '十二': 12, '十三': 13, '十四': 14,
+    '十五': 15, '十六': 16, '十七': 17, '十八': 18,
+    '十九': 19, '二十': 20,
+  };
+  const n = parseInt(s, 10);
+  if (!isNaN(n)) return n;
+  return map[s] || 0;
+}
+type ChapterGroup = { label: string; icon: string; chapters: ChapterItem[] };
+function groupChapters(chapters: ChapterItem[]): ChapterGroup[] {
+  const groups: Record<string, ChapterItem[]> = {};
+  for (const ch of chapters) {
+    const n = chapterNum(ch.title);
+    let key: string;
+    if (n >= 1 && n <= 6) key = '八年级上';
+    else if (n >= 7 && n <= 12) key = '八年级下';
+    else if (n >= 13 && n <= 18) key = '九年级上';
+    else if (n >= 19 && n <= 24) key = '九年级下';
+    else if (n >= 25) key = '高中';
+    else key = '其他';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(ch);
+  }
+  const order = ['八年级上', '八年级下', '九年级上', '九年级下', '高中', '其他'];
+  const icons: Record<string, string> = {
+    '八年级上': '📘', '八年级下': '📗', '九年级上': '📙', '九年级下': '📕', '高中': '📓', '其他': '📂',
+  };
+  return order
+    .filter((k) => groups[k] && groups[k].length > 0)
+    .map((k) => ({ label: k, icon: icons[k] || '📂', chapters: groups[k] }));
+}
+
 export default function SubjectDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -220,6 +262,55 @@ export default function SubjectDetailPage() {
     { key: 'chapters' as const, label: '章节', icon: '📂', count: chapters.length },
     { key: 'nodes' as const, label: '知识点', icon: '🧩', count: nodes.length },
   ];
+
+  let chaptersContent: React.ReactNode;
+  if (chapters.length === 0) {
+    chaptersContent = (
+      <div className="text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200/80">
+        <p className="text-4xl mb-3">📭</p>
+        <p className="text-slate-400 font-medium">暂无章节，请先拆解教材内容</p>
+      </div>
+    );
+  } else {
+    chaptersContent = (
+      <div className="space-y-8">
+        {groupChapters(chapters).map((grp) => (
+          <div key={grp.label}>
+            <div className="flex items-center gap-3 mb-3">
+              <h3 className="text-base font-semibold text-slate-800">{grp.icon} {grp.label}</h3>
+              <span className="text-xs text-slate-500">({grp.chapters.length} 章)</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {grp.chapters.map((ch) => (
+                <Card key={ch.id} hover>
+                  <div className="flex items-start gap-3">
+                    <Link href={`/chapters/${ch.id}`} className="flex items-start gap-3 flex-1 min-w-0">
+                      <span className="text-2xl shrink-0">📂</span>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-semibold text-slate-800 truncate text-sm">{ch.title}</h4>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {ch._count?.knowledgeNodes || 0} 个知识点
+                        </p>
+                      </div>
+                    </Link>
+                    <button
+                      className="shrink-0 p-1 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                      title="删除章节"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmDelete({ type: 'chapter', id: ch.id, title: ch.title }); }}
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
@@ -370,45 +461,7 @@ export default function SubjectDetailPage() {
         ))}
       </div>
 
-      {activeTab === 'chapters' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {chapters.map((ch) => (
-            <Card key={ch.id} hover>
-              <div className="flex items-start gap-3">
-                <Link href={`/chapters/${ch.id}`} className="flex items-start gap-3 flex-1 min-w-0">
-                  <span className="text-2xl shrink-0">📂</span>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-slate-800 truncate">{ch.title}</h3>
-                    <p className="text-sm text-slate-500 mt-1">
-                      {ch._count?.knowledgeNodes || 0} 个知识点
-                    </p>
-                    {(ch.children?.length ?? 0) > 0 && (
-                      <p className="text-xs text-slate-400 mt-1">
-                        含 {ch.children?.length ?? 0} 个子章节
-                      </p>
-                    )}
-                  </div>
-                </Link>
-                <button
-                  className="shrink-0 p-1 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
-                  title="删除章节"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmDelete({ type: 'chapter', id: ch.id, title: ch.title }); }}
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              </div>
-            </Card>
-          ))}
-          {chapters.length === 0 && (
-            <div className="col-span-full text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200/80">
-              <p className="text-4xl mb-3">📭</p>
-              <p className="text-slate-400 font-medium">暂无章节，请先拆解教材内容</p>
-            </div>
-          )}
-        </div>
-      ) : (
+      {activeTab === 'chapters' ? chaptersContent : (
         <div className="space-y-2">
           {nodes.map((node) => (
             <Card key={node.id} hover padding="sm">
