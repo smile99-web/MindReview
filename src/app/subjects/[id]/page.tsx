@@ -25,6 +25,7 @@ interface SubjectDetail {
 interface ChapterItem {
   id: string;
   title: string;
+  sortOrder: number;
   children?: { id: string }[];
   _count?: {
     knowledgeNodes?: number;
@@ -81,7 +82,13 @@ interface GeneratePathResponse {
   blockedNodes?: BlockedNode[];
 }
 
-// Parse "第X章" → chapter number. Returns 0 if not matched.
+// Parse "第X章" or "第X单元" → absolute sequence number.
+// Physics chapters use global numbering (1-18 across
+// 八年级上/下/九年级上).
+// History units use per-volume numbering (1-4 for each
+// semester). For the "单元" pattern we return 0 —
+// the grouping logic handles this case via sortOrder
+// rollover detection.
 function chapterNum(title: string): number {
   const m = title.match(/第([一二三四五六七八九十百零\d]+)章/);
   if (!m) return 0;
@@ -101,26 +108,66 @@ function chineseToNumber(s: string): number {
 }
 type ChapterGroup = { label: string; icon: string; chapters: ChapterItem[] };
 function groupChapters(chapters: ChapterItem[]): ChapterGroup[] {
-  const groups: Record<string, ChapterItem[]> = {};
-  for (const ch of chapters) {
-    const n = chapterNum(ch.title);
-    let key: string;
-    if (n >= 1 && n <= 6) key = '八年级上';
-    else if (n >= 7 && n <= 12) key = '八年级下';
-    else if (n >= 13 && n <= 18) key = '九年级上';
-    else if (n >= 19 && n <= 24) key = '九年级下';
-    else if (n >= 25) key = '高中';
-    else key = '其他';
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(ch);
+  // Physics-style: uses "第X章" with absolute numbering.
+  // Map chapter numbers to grade levels.
+  const hasAbsoluteChapters = chapters.some((ch) => chapterNum(ch.title) > 0);
+  if (hasAbsoluteChapters) {
+    const groups: Record<string, ChapterItem[]> = {};
+    for (const ch of chapters) {
+      const n = chapterNum(ch.title);
+      let key: string;
+      if (n >= 1 && n <= 6) key = '八年级上';
+      else if (n >= 7 && n <= 12) key = '八年级下';
+      else if (n >= 13 && n <= 18) key = '九年级上';
+      else if (n >= 19 && n <= 24) key = '九年级下';
+      else if (n >= 25) key = '高中';
+      else key = '其他';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(ch);
+    }
+    const order = ['八年级上', '八年级下', '九年级上', '九年级下', '高中', '其他'];
+    const icons: Record<string, string> = {
+      '八年级上': '📘', '八年级下': '📗', '九年级上': '📙', '九年级下': '📕', '高中': '📓', '其他': '📂',
+    };
+    return order
+      .filter((k) => groups[k] && groups[k].length > 0)
+      .map((k) => ({ label: k, icon: icons[k] || '📂', chapters: groups[k] }));
   }
-  const order = ['八年级上', '八年级下', '九年级上', '九年级下', '高中', '其他'];
-  const icons: Record<string, string> = {
-    '八年级上': '📘', '八年级下': '📗', '九年级上': '📙', '九年级下': '📕', '高中': '📓', '其他': '📂',
-  };
-  return order
-    .filter((k) => groups[k] && groups[k].length > 0)
-    .map((k) => ({ label: k, icon: icons[k] || '📂', chapters: groups[k] }));
+
+  // History-style: uses "第X单元" with per-volume numbering.
+  // Detect volume boundaries by sortOrder rollover (sortOrder
+  // resets to 1 when a new volume starts).
+  const sorted = [...chapters].sort((a, b) => {
+    // primary sort: scan order (original list is DB-ordered)
+    return 0; // keep original order
+  });
+  const volumes: ChapterItem[][] = [];
+  let current: ChapterItem[] = [];
+  let prevSort = 999;
+  for (const ch of sorted) {
+    if (ch.sortOrder < prevSort && current.length > 0) {
+      // sortOrder dropped → new volume
+      volumes.push(current);
+      current = [];
+    }
+    current.push(ch);
+    prevSort = ch.sortOrder;
+  }
+  if (current.length > 0) volumes.push(current);
+
+  // Label volumes based on convention: if 3 volumes → 七年级上/下,
+  // 八年级上. If 2 → 七年级上/下. Otherwise use generic labels.
+  const labels: string[] = [];
+  if (volumes.length === 3) labels.push('七年级上', '七年级下', '八年级上');
+  else if (volumes.length === 2) labels.push('七年级上', '七年级下');
+  else volumes.forEach((_, i) => labels.push(`第${i + 1} 册`));
+
+  const icons = ['📘', '📗', '📙', '📕', '📓'];
+  return volumes.map((chs, i) => ({
+    label: labels[i] || `第${i + 1} 册`,
+    icon: icons[i % icons.length] || '📂',
+    chapters: chs,
+  }));
 }
 
 export default function SubjectDetailPage() {
