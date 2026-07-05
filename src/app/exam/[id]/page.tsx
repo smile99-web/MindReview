@@ -56,6 +56,7 @@ export default function ExamDetailPage({
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [learningIdx, setLearningIdx] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [practiceAnswers, setPracticeAnswers] = useState<Record<number, string>>({});
   const [practiceSubmitted, setPracticeSubmitted] = useState(false);
@@ -135,6 +136,20 @@ export default function ExamDetailPage({
     } catch (err: unknown) {
       setError(getErrorMessage(err, '启动 ICAP 训练失败'));
       setPhase('idle');
+    }
+  };
+
+  const handleLearnPoint = async (idx: number) => {
+    setError('');
+    setLearningIdx(idx);
+    try {
+      const res = await authFetch(`/api/exam/${exam!.id}/learn/${idx}`, { method: 'POST' });
+      const data = (await res.json()) as { nodeId?: string; error?: string };
+      if (!res.ok || !data.nodeId) throw new Error(data.error || '创建失败');
+      router.push(`/cards/${data.nodeId}`);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, '创建知识点失败'));
+      setLearningIdx(null);
     }
   };
 
@@ -256,17 +271,30 @@ export default function ExamDetailPage({
 
           {knowledgePoints.length > 0 ? (
             <div className="space-y-3">
+              <p className="text-xs text-slate-500">点击任意知识点卡片即可进入专项学习（ICAP训练 + 练习题）</p>
               {knowledgePoints.map((kp, i) => (
                 <div
                   key={i}
-                  className="p-3 bg-gradient-to-br from-indigo-50/60 to-white rounded-lg border border-indigo-100"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => void handleLearnPoint(i)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleLearnPoint(i); }}
+                  className={`group p-3 bg-gradient-to-br from-indigo-50/60 to-white rounded-lg border transition-all cursor-pointer ${
+                    learningIdx === i
+                      ? 'border-indigo-400 ring-2 ring-indigo-200 scale-[1.01]'
+                      : 'border-indigo-100 hover:border-indigo-300 hover:shadow-md'
+                  }`}
                 >
                   <div className="flex items-start gap-2">
-                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 text-xs font-bold shrink-0 mt-0.5">
-                      {i + 1}
+                    <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold shrink-0 mt-0.5 transition-colors ${
+                      learningIdx === i
+                        ? 'bg-indigo-500 text-white animate-pulse'
+                        : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-200'
+                    }`}>
+                      {learningIdx === i ? '⋯' : i + 1}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-slate-800">
+                      <div className="text-sm font-semibold text-slate-800 group-hover:text-indigo-700 transition-colors">
                         {kp.title}
                       </div>
                       {kp.summary && (
@@ -286,6 +314,11 @@ export default function ExamDetailPage({
                           ))}
                         </div>
                       )}
+                      {/* hover 提示：点击进入学习 */}
+                      <div className="mt-2 text-[10px] text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                        <span>🧠 进入 ICAP 学习</span>
+                        <span>→</span>
+                      </div>
                     </div>
                   </div>
                 </div>
