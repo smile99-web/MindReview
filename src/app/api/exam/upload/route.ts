@@ -48,7 +48,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const buf = Buffer.from(await blob.arrayBuffer());
+    let buf = Buffer.from(await blob.arrayBuffer());
+    let finalMimeType = mimeType;
+
+    // iPad / iPhone 拍照默认是 HEIC/HEIF 格式。大多数多模态 LLM
+    // (DeepSeek / MiniMax / GPT-4o 等) 只接受 PNG / JPEG / WebP /
+    // GIF。HEIC 直接传会让 API 报错或返回空内容。
+    //
+    // 用 sharp (Next.js 内置的图片处理库) 把 HEIC 转 JPEG 再传
+    // 给 vision LLM。Sharp 是 transitive 依赖 (next -> sharp)，
+    // 不需要额外安装。
+    if (
+      mimeType === 'image/heic' ||
+      mimeType === 'image/heif' ||
+      mimeType === 'image/heic-sequence' ||
+      mimeType === 'image/heif-sequence'
+    ) {
+      try {
+        const sharp = (await import('sharp')).default;
+        const converted = await sharp(buf).jpeg({ quality: 90 }).toBuffer();
+        buf = Buffer.from(converted);
+        finalMimeType = 'image/jpeg';
+      } catch (convErr: unknown) {
+        console.error('[exam/upload] HEIC->JPEG conversion failed:', convErr);
+        return NextResponse.json(
+          { error: '图片格式转换失败（HEIC -> JPEG）。请尝试在 iPad 设置 -> 相机 -> 格式 中改为"兼容性最好"，或用截图后上传。' },
+          { status: 422 },
+        );
+      }
+    }
+
     const imageBase64 = buf.toString('base64');
 
     // Ask the vision LLM to extract the question text and guess the
@@ -67,7 +96,7 @@ export async function POST(req: NextRequest) {
     const raw = await llmVisionCall({
       prompt: userPrompt,
       imageBase64,
-      mimeType,
+      mimeType: finalMimeType,
       systemPrompt,
       temperature: 0.1,
       maxTokens: 2048,
