@@ -2,6 +2,7 @@ import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
+import type { Prisma } from '@prisma/client';
 import {
   detectRepresentationType,
   generateRepresentationContent,
@@ -54,16 +55,23 @@ export async function POST(req: NextRequest) {
       keywords,
     );
 
-    // 3. 生成表征内容
-    const repData = await generateRepresentationContent(
-      nodeTitle,
-      nodeSummary,
-      subject,
-      repType,
-    );
+    // 3. 生成表征内容（如果 LLM 超时或 prompt 不在 REPRESENTATION_PROMPTS
+    //    中，回退到 concept_map 数据，不抛错 — 用户至少能看到一个视图）
+    let repData: Record<string, unknown> = { concepts: [{ name: nodeTitle, description: nodeSummary }], relations: [] };
+    try {
+      const generated = await generateRepresentationContent(
+        nodeTitle,
+        nodeSummary,
+        subject,
+        repType,
+      );
+      if (generated && typeof generated === 'object') repData = generated as Record<string, unknown>;
+    } catch (genErr: unknown) {
+      console.error('[Representation Detect] generate failed, using concept_map fallback:', genErr);
+    }
 
     // 4. 保存到数据库
-    await saveRepresentation(knowledgeNodeId, repType, repData);
+    await saveRepresentation(knowledgeNodeId, repType, repData as Prisma.InputJsonValue);
 
     return NextResponse.json({
       success: true,
@@ -74,7 +82,7 @@ export async function POST(req: NextRequest) {
   } catch (error: unknown) {
     console.error('[Representation Detect] Error:', error);
     return NextResponse.json(
-      { error: `表征检测失败: ${getErrorMessage(error)}` },
+      { error: `表征生成失败: ${getErrorMessage(error)}` },
       { status: 500 },
     );
   }

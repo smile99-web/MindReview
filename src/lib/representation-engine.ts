@@ -256,11 +256,24 @@ export async function detectRepresentationType(
         },
       ],
       temperature: 0.1,
-      maxTokens: 256,
+      maxTokens: 512, // bumped from 256 — Chinese "reason" text + JSON wrapper can exceed 256 tokens and get truncated
       jsonMode: true,
     });
 
-    const parsed = JSON.parse(sanitizeJsonString(result)) as unknown;
+    let parsed: unknown;
+    try {
+      const cleaned = sanitizeJsonString(result);
+      parsed = JSON.parse(cleaned);
+    } catch {
+      // JSON might be wrapped in ``` fences even with jsonMode=true,
+      // or truncated. Try extracting just the JSON object.
+      const m = result.match(/\{[^}]+\}/);
+      if (m) {
+        try { parsed = JSON.parse(m[0]); } catch { parsed = {}; }
+      } else {
+        parsed = {};
+      }
+    }
     const type = isRecord(parsed) && typeof parsed.type === 'string'
       ? parsed.type.trim()
       : 'concept_map';
