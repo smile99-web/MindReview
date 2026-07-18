@@ -7,6 +7,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, PieLabelRenderProps,
 } from 'recharts';
+import { getErrorMessage } from '@/lib/errors';
 
 // --- Color palette ---
 const COLORS = ['#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899'];
@@ -59,6 +60,23 @@ interface AnalyticsData {
   nodeGrowth: { date: string; count: number }[];
 }
 
+interface ChartTooltipEntry {
+  name?: React.ReactNode;
+  value?: React.ReactNode;
+  color?: string;
+  payload?: Record<string, unknown>;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: ChartTooltipEntry[];
+  label?: React.ReactNode;
+}
+
+interface TooltipFormatterProps {
+  payload?: Record<string, unknown>;
+}
+
 // --- Helper ---
 const typeLabels: Record<string, string> = {
   conceptual: '概念错误',
@@ -108,12 +126,12 @@ function ChartPanel({ title, children }: { title: string; children: React.ReactN
 }
 
 // --- Custom Tooltip ---
-function CustomTooltip({ active, payload, label }: any) {
+function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-3 text-sm">
       <p className="font-medium text-slate-700 mb-1">{label}</p>
-      {payload.map((entry: any, idx: number) => (
+      {payload.map((entry, idx) => (
         <p key={idx} className="text-slate-600" style={{ color: entry.color }}>
           {entry.name}: <span className="font-semibold">{entry.value}</span>
         </p>
@@ -138,8 +156,8 @@ export default function AnalyticsPage() {
         if (!res.ok) throw new Error('Failed to load analytics');
         const json = await res.json();
         setData(json);
-      } catch (err: any) {
-        setError(err.message || '加载失败');
+      } catch (err: unknown) {
+        setError(getErrorMessage(err) || '加载失败');
       } finally {
         setLoading(false);
       }
@@ -367,9 +385,9 @@ export default function AnalyticsPage() {
                   tick={{ fontSize: 12, fill: '#64748b' }}
                 />
                 <Tooltip
-                  formatter={(value: unknown, name: unknown, props: any) => [
-                    `${value} 个 (${props.payload.percentage}%)`,
-                    props.payload.level,
+                  formatter={(value: unknown, name: unknown, props: TooltipFormatterProps) => [
+                    `${value} 个 (${Number(props.payload?.percentage ?? 0)}%)`,
+                    String(props.payload?.level ?? name),
                   ]}
                 />
                 <Bar dataKey="count" radius={[0, 6, 6, 0]}>
@@ -475,8 +493,9 @@ export default function AnalyticsPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748b' }} />
                 <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} allowDecimals={false} />
-                <Tooltip formatter={(value: unknown, _: unknown, props: any) => [
-                  `${value} 次`, props.payload.label,
+                <Tooltip formatter={(value: unknown, _: unknown, props: TooltipFormatterProps) => [
+                  `${value} 次`,
+                  String(props.payload?.label ?? ''),
                 ]} />
                 <Bar dataKey="count" radius={[6, 6, 0, 0]} name="回忆次数">
                   {data.qualityDistribution.map((entry, i) => (

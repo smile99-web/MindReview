@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
+import { getErrorMessage } from '@/lib/errors';
 
 export async function GET(req: NextRequest) {
   try {
@@ -21,7 +22,6 @@ export async function GET(req: NextRequest) {
       mistakeLogs30d,
       reviewTasks,
       studyTimeLogs30d,
-      userProgress,
     ] = await Promise.all([
       prisma.knowledgeNode.findMany({
         select: {
@@ -107,26 +107,6 @@ export async function GET(req: NextRequest) {
           startedAt: true,
           durationSeconds: true,
         },
-      }),
-      loadProgressByNodeId(
-        userId,
-        [] as string[], // we'll merge with node data below
-        prisma,
-      ).then(async () => {
-        // Fetch user knowledge progress for all nodes
-        return prisma.userKnowledgeProgress.findMany({
-          where: { userId },
-          select: {
-            knowledgeNodeId: true,
-            masteryLevel: true,
-            easeFactor: true,
-            intervalDays: true,
-            repetitions: true,
-            forgetRisk: true,
-            nextReviewAt: true,
-            lastReviewAt: true,
-          },
-        });
       }),
     ]);
 
@@ -225,7 +205,7 @@ export async function GET(req: NextRequest) {
     const icapDistribution = Object.entries(icapMap).map(([level, count]) => ({
       level,
       count,
-      percentage: Math.round((count / allNodes.length) * 100),
+      percentage: allNodes.length > 0 ? Math.round((count / allNodes.length) * 100) : 0,
     }));
 
     // --- 5. SM-2 Memory Statistics ---
@@ -379,8 +359,8 @@ export async function GET(req: NextRequest) {
       taskTypeDistribution,
       nodeGrowth: nodeGrowthByDay,
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Analytics error';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
