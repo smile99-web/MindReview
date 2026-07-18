@@ -50,7 +50,16 @@ export async function POST(req: NextRequest) {
     }
     // --- End Validation ---
 
-    const subject = await prisma.subject.create({ data: body });
+    // 字段白名单：直接传 body 会让多余字段触发 Prisma 校验错误（500），
+    // 也可能写入调用方本不该控制的列
+    const subject = await prisma.subject.create({
+      data: {
+        name: body.name.trim(),
+        icon: body.icon ?? null,
+        colorClass: body.colorClass ?? null,
+        description: body.description ?? null,
+      },
+    });
     return NextResponse.json(subject);
   } catch (error: unknown) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });

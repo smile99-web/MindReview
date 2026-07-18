@@ -30,7 +30,9 @@ export async function POST(
     };
 
     const rating = Number(body.rating);
-    if (!Number.isFinite(rating) || rating < 0 || rating > 3) {
+    // 必须为整数：0.5 这类浮点值在 fsrsReview 的三个 === 分支都不命中，
+    // 会落入 else（Easy）分支拿满加成
+    if (!Number.isInteger(rating) || rating < 0 || rating > 3) {
       return NextResponse.json(
         { error: 'rating must be 0|1|2|3' },
         { status: 400 },

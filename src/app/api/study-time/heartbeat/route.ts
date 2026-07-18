@@ -7,6 +7,10 @@ import { appDateKey, startOfAppDay } from '@/lib/date-utils';
 // 单次心跳最多承认 5 分钟，防客户端时钟漂移 / 长时挂起后回传巨大值。
 const MAX_HEARTBEAT_SECONDS = 300;
 const MIN_HEARTBEAT_SECONDS = 1;
+// 心跳是近实时上报：endedAt 距今超过 10 分钟的记录视为回填历史日期，
+// 会污染按天统计（streak/dailyActivity），直接拒绝。
+// 容忍窗口覆盖挂起恢复 + 时钟漂移（单条上限才 5 分钟，10 分钟足够宽）。
+const MAX_HEARTBEAT_AGE_MS = 10 * 60 * 1000;
 
 interface HeartbeatBody {
   startedAt?: string;
@@ -59,6 +63,9 @@ export async function POST(req: NextRequest) {
   }
   if (endedAt.getTime() > now.getTime() + 2 * 60 * 1000) {
     return NextResponse.json({ error: 'endedAt 不能是未来时间' }, { status: 400 });
+  }
+  if (endedAt.getTime() < now.getTime() - MAX_HEARTBEAT_AGE_MS) {
+    return NextResponse.json({ error: '心跳时间过旧，已丢弃' }, { status: 400 });
   }
 
   const source = typeof body.source === 'string' && body.source.trim()

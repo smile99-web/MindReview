@@ -52,6 +52,13 @@ export function ChatPanel() {
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // 会话切换竞态守卫：loadConversation 的请求序号，过期响应直接丢弃
+  const loadReqRef = useRef(0);
+  // activeId 的 ref 镜像：handleSend 的异步回调里需要拿到"发送后是否已切会话"
+  const activeIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
 
   // 加载会话列表
   const loadConversations = useCallback(async () => {
@@ -73,21 +80,27 @@ export function ChatPanel() {
 
   // 加载单个会话消息
   const loadConversation = useCallback(async (id: string) => {
+    const reqId = ++loadReqRef.current;
     setLoadingMessages(true);
     setError(null);
     try {
       const res = await authFetch(`/api/chat/${id}`);
+      // 快速连点切换会话时，先发出的请求可能后返回——过期响应必须丢弃，
+      // 否则 A 会话的消息会覆盖正在看的 B 会话
+      if (reqId !== loadReqRef.current) return;
       if (!res.ok) {
         const err = await res.json().catch(() => null);
         throw new Error(err?.error || `加载失败 (${res.status})`);
       }
       const data = (await res.json()) as ConversationDetail;
+      if (reqId !== loadReqRef.current) return;
       setMessages(data.messages || []);
     } catch (err) {
+      if (reqId !== loadReqRef.current) return;
       setError(err instanceof Error ? err.message : "加载失败");
       setMessages([]);
     } finally {
-      setLoadingMessages(false);
+      if (reqId === loadReqRef.current) setLoadingMessages(false);
     }
   }, []);
 
@@ -137,6 +150,7 @@ export function ChatPanel() {
     };
     setMessages((prev) => [...prev, tempUser]);
     setSending(true);
+    const convAtSend = activeId;
 
     try {
       const res = await authFetch("/api/chat", {
@@ -160,7 +174,11 @@ export function ChatPanel() {
         imagePrompt: data.assistantMessage.imagePrompt,
         createdAt: data.assistantMessage.createdAt,
       };
-      setMessages((prev) => [...prev, assistant]);
+      // 等待响应期间用户已切走：消息已落库，切回去时会重新加载，
+      // 这里不能把 A 会话的回复插进 B 会话的消息列表
+      if (activeIdRef.current === convAtSend) {
+        setMessages((prev) => [...prev, assistant]);
+      }
       if (data.isNewConversation) {
         setActiveId(data.conversationId);
         // 顺手刷新列表

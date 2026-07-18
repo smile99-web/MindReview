@@ -108,8 +108,10 @@ export function applyProgressToNode<T extends ProgressAwareNode>(
     repetitions: progress.repetitions ?? node.repetitions,
     easeFactor: progress.easeFactor ?? node.easeFactor,
     intervalDays: progress.intervalDays ?? node.intervalDays,
-    nextReviewAt: progress.nextReviewAt ?? node.nextReviewAt,
-    lastReviewAt: progress.lastReviewAt ?? node.lastReviewAt,
+    // nullable 日期字段：progress 行里显式 null 表示"该用户未排期"，
+    // 不能用 ?? 回退到节点全局值，否则"未排期"会错显成全局排期时间
+    nextReviewAt: progress.nextReviewAt !== undefined ? progress.nextReviewAt : node.nextReviewAt,
+    lastReviewAt: progress.lastReviewAt !== undefined ? progress.lastReviewAt : node.lastReviewAt,
     forgetRisk: progress.forgetRisk ?? node.forgetRisk,
   };
 }

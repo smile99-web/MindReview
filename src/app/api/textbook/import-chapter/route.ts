@@ -43,12 +43,14 @@ export async function POST(req: NextRequest) {
       chapterIdx?: unknown;
     };
     const textbookId = typeof body.textbookId === 'string' ? body.textbookId.trim() : '';
-    const chapterIdx = typeof body.chapterIdx === 'number' ? body.chapterIdx : -1;
+    // 必须是非负整数：小数（如 1.5）会通过 <0 检查但索引到错误章节，NaN 会绕过所有检查
+    const chapterIdx =
+      typeof body.chapterIdx === 'number' && Number.isInteger(body.chapterIdx) ? body.chapterIdx : -1;
     if (!textbookId) {
       return NextResponse.json({ error: 'textbookId is required' }, { status: 400 });
     }
     if (chapterIdx < 0) {
-      return NextResponse.json({ error: 'chapterIdx is required' }, { status: 400 });
+      return NextResponse.json({ error: 'chapterIdx 必须是非负整数' }, { status: 400 });
     }
 
     const tb = await prisma.textbookUpload.findUnique({

@@ -86,12 +86,14 @@ export function useStudyTimeTracker(enabled: boolean) {
 
     let cancelled = false;
 
+    // 返回是否已发出：上一次心跳还在途时返回 false，
+    // 调用方据此把本次时长保留到下轮（否则会静默丢失最多 15 秒）
     function sendHeartbeat(body: {
       startedAt: string;
       endedAt: string;
       durationSeconds: number;
-    }) {
-      if (inFlightRef.current) return;
+    }): boolean {
+      if (inFlightRef.current) return false;
       inFlightRef.current = true;
       try {
         const url = "/api/study-time/heartbeat";
@@ -103,7 +105,7 @@ export function useStudyTimeTracker(enabled: boolean) {
           setTimeout(() => {
             inFlightRef.current = false;
           }, 0);
-          return;
+          return true;
         }
       } catch {
         /* 退回到 fetch */
@@ -113,9 +115,14 @@ export function useStudyTimeTracker(enabled: boolean) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         keepalive: true,
-      }).finally(() => {
-        inFlightRef.current = false;
-      });
+      })
+        .catch(() => {
+          /* 心跳失败静默丢弃，下轮继续，避免 unhandled rejection */
+        })
+        .finally(() => {
+          inFlightRef.current = false;
+        });
+      return true;
     }
 
     function flushHeartbeat() {
@@ -129,11 +136,15 @@ export function useStudyTimeTracker(enabled: boolean) {
 
       const startedAt = new Date(s.activeSince);
       const endedAt = new Date(s.activeSince + seconds * 1000);
-      sendHeartbeat({
+      const sent = sendHeartbeat({
         startedAt: startedAt.toISOString(),
         endedAt: endedAt.toISOString(),
         durationSeconds: seconds,
       });
+      if (!sent) {
+        // 上一次心跳还在途：本次时长保留在 accumulatedSeconds 里下轮再发，不清零
+        return;
+      }
 
       const now = Date.now();
       const stillActive =

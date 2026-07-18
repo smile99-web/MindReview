@@ -286,8 +286,9 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
 
   useEffect(() => {
     authFetch(`/api/knowledge/${knowledgeNodeId}`)
-      .then(r => r.json())
-      .then(setNode)
+      // 失败响应（401/404/500）的 body 不是节点数据，不能塞进 setNode
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => { if (data) setNode(data); })
       .catch(() => {});
   }, [knowledgeNodeId]);
 
@@ -369,6 +370,8 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ questionId, userAnswer }),
       });
+      // 提交失败不能标记"已提交"并显示答案——用户会以为成绩已记录
+      if (!res.ok) return;
       const data = await res.json();
       setShowAnswer(prev => ({ ...prev, [questionId]: true }));
       setSubmitted(prev => ({ ...prev, [questionId]: true }));
@@ -639,7 +642,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
         <div className="space-y-4">
           <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl p-5 border border-indigo-100/60">
             <h4 className="font-semibold text-slate-800 mb-2">{node.title}</h4>
-            <p className="text-sm text-slate-600 leading-relaxed"><LatexText text={node.summary || "暂无摘要"} /></p>
+            <div className="text-sm text-slate-600 leading-relaxed"><LatexText text={node.summary || "暂无摘要"} /></div>
             {(node.keywords?.length ?? 0) > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-3">
                 {node.keywords?.map((kw: string, i: number) => (

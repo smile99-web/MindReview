@@ -81,6 +81,8 @@ export default function NewDocPage() {
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void handleFile(f);
+              // 清空 value：否则再次选择同一个文件不会触发 change
+              e.target.value = '';
             }}
           />
           <div

@@ -90,9 +90,12 @@ export async function listSessions(
     where.model = knowledgeNodeId;
   }
 
+  // contains 前缀通配无索引可用，必须限上限——随聊天增长全扫会把请求拖垮。
+  // 1000 条消息足够覆盖正常用户的会话列表（超出部分老会话被截断）
   const logs = await prisma.aiGenerationLog.findMany({
     where,
     orderBy: { createdAt: 'desc' },
+    take: 1000,
   });
 
   const sessionMap = new Map<string, ChatSession>();

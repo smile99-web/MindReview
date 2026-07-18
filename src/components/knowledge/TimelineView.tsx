@@ -137,9 +137,10 @@ export function TimelineView({
                     </span>
                   )}
                 </div>
-                <h5 className="text-sm font-medium text-slate-800">
+                {/* LatexText 根元素是 div，不能套在 <h5> 里（标题只允许 phrasing 内容） */}
+                <div className="text-sm font-medium text-slate-800">
                   <LatexText text={event.title} />
-                </h5>
+                </div>
                 {/* Description from engine (description field) or significance */}
                 {(event.description || event.significance) && (
                   <div className="text-xs text-slate-500 mt-1 leading-relaxed">

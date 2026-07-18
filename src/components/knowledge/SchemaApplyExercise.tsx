@@ -327,9 +327,8 @@ export function SchemaApplyExercise({
                   {problemSetup.problemTitle}
                 </span>
               </div>
-              <p className="text-sm text-slate-700 leading-relaxed">
-                <LatexText text={problemSetup.problemDescription} className="text-sm text-slate-700 leading-relaxed" />
-              </p>
+              {/* LatexText 根元素是 div，不能套在 <p> 里（非法嵌套 → hydration 报错） */}
+              <LatexText text={problemSetup.problemDescription} className="text-sm text-slate-700 leading-relaxed" />
             </div>
 
             {/* Schema selection (pre-filled) */}
@@ -427,9 +426,7 @@ export function SchemaApplyExercise({
                                 {feedback.score}/100
                               </span>
                             </div>
-                            <p className="text-sm text-slate-600 leading-relaxed">
-                              <LatexText text={feedback.explanation} className="text-sm text-slate-600 leading-relaxed" />
-                            </p>
+                            <LatexText text={feedback.explanation} className="text-sm text-slate-600 leading-relaxed" />
 
                             {/* Show expected answer toggle */}
                             {feedback.status !== 'correct' && (

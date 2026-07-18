@@ -62,7 +62,9 @@ const RATING_COLOR: Record<Rating, string> = {
  *
  * Parameters follow the simplified FSRS algorithm (Anki-derived):
  *   - again (0): reset stability to ~1 day, difficulty += 0.2 (capped 1-10),
- *     lapses += 1, state → 'relearning' if was 'review' else 'learning'.
+ *     lapses += 1, reps += 1（reps 语义 = 总复习次数，含 lapse；
+ *     毕业判定另有 stability >= 5 门槛，Again 后 stability 被压低，不会误毕业）,
+ *     state → 'relearning' if was 'review' else 'learning'.
  *     nextReviewAt = now + 1 day (capped at 1d so the user sees it
  *     again in the next session at the latest).
  *   - hard (1): small difficulty bump, stability multiplied by 1.1
@@ -94,7 +96,7 @@ export function fsrsReview(
       state: wasReview ? 'relearning' : 'learning',
       stability: Math.max(0.5, prev.stability * 0.4),
       difficulty: clampDifficulty(prev.difficulty + 0.2),
-      reps: prev.reps,
+      reps: prev.reps + 1,
       lapses: prev.lapses + 1,
       lastReviewAt: now,
       nextReviewAt: addDays(now, 1),

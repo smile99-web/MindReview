@@ -18,7 +18,8 @@ export function splitIntoPoints(answer: string): string[] {
   if (!text) return [];
 
   // Pre-normalize: drop leading "答：" / "答案：" / "参考答案："
-  const norm = text.replace(/^\s*(答[案案]?[：:]?)\s*/, '').trim();
+  //（ alternation 顺序保证"参考答案"优先匹配；旧正则 `答[案案]?` 匹配不到"参"开头的串 ）
+  let norm = text.replace(/^\s*(?:参考答案|答案|答)\s*[：:]?\s*/, '').trim();
   if (!norm) return [];
 
   let parts: string[] = [];
@@ -29,6 +30,16 @@ export function splitIntoPoints(answer: string): string[] {
   const allListLines = lines.length > 1 && lines.every((l) => listRe.test(l));
   if (allListLines) {
     parts = lines.map((l) => l.replace(listRe, '').trim()).filter((l) => l.length > 0);
+  }
+
+  // 单行带列表编号（如 "1. 加速度是矢量"）：先剥掉行首编号，
+  // 否则下方英文句号切分会把 "1" 切出来变成垃圾要点。
+  // 要求编号后紧跟空白，避免误剥 "1.5 倍" 这类小数。
+  if (parts.length <= 1 && lines.length === 1) {
+    const stripped = lines[0]
+      .replace(/^\s*(?:\d+[.、)]\s+|①\s+|②\s+|③\s+|④\s+|⑤\s+|⑥\s+|[•·]\s+|[（(]\d+[）)]\s+|[一二三四五六七八九十]+[、.]\s+)/, '')
+      .trim();
+    if (stripped) norm = stripped;
   }
 
   // 2. 分号切分

@@ -289,7 +289,8 @@ export async function GET(req: NextRequest) {
 
     const knowledgeNodeId = searchParams.get('knowledgeNodeId');
     const icapLevelRaw = searchParams.get('icapLevel') || 'Active';
-    const count = Math.min(parseInt(searchParams.get('count') || '3', 10) || 3, 10);
+    // 负数会穿透 Math.min 传进 Prisma take（负 take 语义为"从末尾取"，非预期）
+    const count = Math.min(Math.max(1, parseInt(searchParams.get('count') || '3', 10) || 3), 10);
     const forceGenerate = searchParams.get('forceGenerate') === 'true';
 
     // --- validation ---
@@ -471,12 +472,14 @@ async function handlePracticeRecommendations(uid: string) {
       },
     },
     orderBy: { createdAt: 'desc' },
-    take: 12,
+    // 先取 100 条再去重：只取 12 条时若都是同一节点，去重后可能只剩 1 条推荐
+    take: 100,
   });
 
   const seen = new Set<string>();
   const recommendations = logs
     .filter((log) => log.knowledgeNode && !seen.has(log.knowledgeNode.id))
+    .slice(0, 12)
     .map((log) => {
       seen.add(log.knowledgeNode!.id);
       return {
@@ -537,7 +540,9 @@ async function handlePracticeHistory(uid: string) {
 async function handleGenerateQuestion(body: PracticeRequestBody) {
   const knowledgeNodeId = typeof body.knowledgeNodeId === 'string' ? body.knowledgeNodeId : '';
   const icapLevelRaw = typeof body.icapLevel === 'string' ? body.icapLevel : 'Active';
-  const count = typeof body.count === 'number' ? body.count : Number(body.count ?? 3);
+  // NaN/Infinity 会穿透 Math.min/max 得到 NaN，导致 LLM 调用拿到非法 count
+  const rawCount = typeof body.count === 'number' ? body.count : Number(body.count ?? 3);
+  const count = Number.isFinite(rawCount) ? rawCount : 3;
 
   if (!knowledgeNodeId) {
     return NextResponse.json({ error: 'knowledgeNodeId is required' }, { status: 400 });

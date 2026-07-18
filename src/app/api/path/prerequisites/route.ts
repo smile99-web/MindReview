@@ -31,6 +31,10 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(nodeIds) || nodeIds.length === 0) {
       return NextResponse.json({ results: {} });
     }
+    // nodeIds 上限：批量检查会按入参规模加载 prerequisite 边，无上限可被放大成资源问题
+    if (nodeIds.length > 100 || !nodeIds.every((id) => typeof id === 'string')) {
+      return NextResponse.json({ error: 'nodeIds 最多 100 个且必须为字符串' }, { status: 400 });
+    }
 
     const userId = await resolveUserIdFromRequest(req);
 

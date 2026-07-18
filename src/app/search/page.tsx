@@ -172,9 +172,8 @@ export default function SearchPage() {
                         </Badge>
                       )}
                     </div>
-                    <p className="text-sm text-slate-500 line-clamp-2">
-                      <LatexText text={result.summary || "暂无摘要"} />
-                    </p>
+                    {/* LatexText 根元素是 div，不能套在 <p> 里（非法嵌套 → hydration 报错） */}
+                    <LatexText text={result.summary || "暂无摘要"} className="text-sm text-slate-500 line-clamp-2" />
                   </div>
                   <div className="text-right shrink-0">
                     <span className="text-xs text-slate-400">

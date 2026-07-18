@@ -100,6 +100,8 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  // null/undefined 必须先回退：Number(null) === 0 会通过 isFinite 被钳到 min
+  if (value == null) return fallback;
   const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.min(max, Math.max(min, numeric));
@@ -339,33 +341,39 @@ ${edgeLines.length > 0 ? edgeLines.join('\n') : '(no relations)'}`,
   const finalName = customName || schemaResult.name;
   const representationData = schemaResult.representationData;
 
-  const schemaNode = await prisma.knowledgeNode.create({
-    data: {
-      subjectId,
-      title: finalName,
-      summary: schemaResult.description,
-      keywords: members.flatMap((member: SchemaMemberNode) => member.keywords || []).slice(0, 20),
-      representationType: 'schema',
-      representationData,
-      difficulty: Math.round(members.reduce((sum: number, member: SchemaMemberNode) => sum + member.difficulty, 0) / members.length),
-      cognitiveLoad: Math.round(members.reduce((sum: number, member: SchemaMemberNode) => sum + member.cognitiveLoad, 0) / members.length),
-      icapLevel: 'Constructive',
-      masteryLevel: Math.round(members.reduce((sum: number, member: SchemaMemberNode) => sum + member.masteryLevel, 0) / members.length),
-    },
-  });
+  // 节点 + 成员边包进一个事务：之前先建节点再逐条建边，
+  // 边创建中途失败（如成员节点被并发删除）会留下无成员边的孤儿 schema
+  const schemaNode = await prisma.$transaction(async (tx) => {
+    const node = await tx.knowledgeNode.create({
+      data: {
+        subjectId,
+        title: finalName,
+        summary: schemaResult.description,
+        keywords: members.flatMap((member: SchemaMemberNode) => member.keywords || []).slice(0, 20),
+        representationType: 'schema',
+        representationData,
+        difficulty: Math.round(members.reduce((sum: number, member: SchemaMemberNode) => sum + member.difficulty, 0) / members.length),
+        cognitiveLoad: Math.round(members.reduce((sum: number, member: SchemaMemberNode) => sum + member.cognitiveLoad, 0) / members.length),
+        icapLevel: 'Constructive',
+        masteryLevel: Math.round(members.reduce((sum: number, member: SchemaMemberNode) => sum + member.masteryLevel, 0) / members.length),
+      },
+    });
 
-  await Promise.all(
-    members.map((member: SchemaMemberNode) =>
-      prisma.knowledgeEdge.create({
-        data: {
-          fromId: schemaNode.id,
-          toId: member.id,
-          relationType: 'schema_member',
-          label: `Member of schema "${finalName}"`,
-        },
-      }),
-    ),
-  );
+    await Promise.all(
+      members.map((member: SchemaMemberNode) =>
+        tx.knowledgeEdge.create({
+          data: {
+            fromId: node.id,
+            toId: member.id,
+            relationType: 'schema_member',
+            label: `Member of schema "${finalName}"`,
+          },
+        }),
+      ),
+    );
+
+    return node;
+  });
 
   const model = await resolveLlmModel(prisma);
   await prisma.aiGenerationLog.create({

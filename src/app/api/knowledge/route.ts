@@ -59,9 +59,9 @@ export async function GET(req: NextRequest) {
 
     const nodesWithRealMastery = nodes.map((node) => {
       const real = progressByNodeId?.get(node.id)?.masteryLevel;
-      return real != null && real > node.masteryLevel
-        ? { ...node, masteryLevel: real }
-        : node;
+      // 用户进度存在时一律采用（含下降）：max 合并会让遗忘后的
+      // 掌握度永远停在历史峰值，显示失真
+      return real != null ? { ...node, masteryLevel: real } : node;
     });
 
     return NextResponse.json({ nodes: nodesWithRealMastery, total, page, limit });

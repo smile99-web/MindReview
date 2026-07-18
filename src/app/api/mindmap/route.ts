@@ -45,6 +45,10 @@ export async function GET(req: NextRequest) {
         chapter: { select: { id: true, title: true } },
         children: { select: { id: true } },
       },
+      // 上限保护：无 scope 时全库节点会让前端图谱渲染崩溃；
+      // 思维导图超过几百个节点本就不可用，调用方应传 subjectId/chapterId 收敛
+      take: 1000,
+      orderBy: { createdAt: 'asc' },
     });
 
     // 获取所有边
@@ -152,7 +156,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'label 必须是字符串' }, { status: 400 });
     }
 
-    const edge = await prisma.knowledgeEdge.create({ data: body });
+    const fromId = body.fromId.trim();
+    const toId = body.toId.trim();
+    if (fromId === toId) {
+      return NextResponse.json({ error: 'fromId 与 toId 不能相同（不允许自环）' }, { status: 400 });
+    }
+
+    // 两端节点必须真实存在，否则 create 撞外键约束（500）
+    const endpoints = await prisma.knowledgeNode.findMany({
+      where: { id: { in: [fromId, toId] } },
+      select: { id: true },
+    });
+    if (endpoints.length !== 2) {
+      return NextResponse.json({ error: '边的端点节点不存在' }, { status: 400 });
+    }
+
+    // 字段白名单：直接传 body 会让多余字段触发 Prisma 校验错误（500）
+    const edge = await prisma.knowledgeEdge.create({
+      data: {
+        fromId,
+        toId,
+        relationType: body.relationType.trim(),
+        label: body.label ?? null,
+      },
+    });
     return NextResponse.json(edge);
   } catch (error: unknown) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });

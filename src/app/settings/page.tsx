@@ -245,7 +245,8 @@ export default function SettingsPage() {
 
       setKeys((prev) => ({
         ...prev,
-        [svc]: { ...prev[svc], testing: false, result: data, saved: true },
+        // 只有测试成功才标记 saved：失败也标 saved 会让 UI 显示"已保存"的假状态
+        [svc]: { ...prev[svc], testing: false, result: data, saved: data?.ok === true ? true : prev[svc].saved },
       }));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Connection test failed";

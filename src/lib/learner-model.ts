@@ -94,6 +94,7 @@ export async function buildLearnerProfile(
     reviewLogs,
     sessionDurations,
     reviewedToday,
+    totalReviewSessions,
 
     // Mistake logs
     mistakeCounts,
@@ -157,6 +158,12 @@ export async function buildLearnerProfile(
           gte: new Date(new Date().setHours(0, 0, 0, 0)),
         },
       },
+    }),
+
+    // 总复习会话数（attentionProfile.totalSessions 用；
+    // 之前误赋 reviewedToday——那只是"今日复习条数"，每天清零）
+    prisma.reviewLog.count({
+      where: { userId },
     }),
 
     // Mistake (NOT MistakeLog) — the rich practice-mistake table is what
@@ -358,7 +365,7 @@ export async function buildLearnerProfile(
       avgSessionMinutes,
       optimalSessionMinutes,
       breakFrequency,
-      totalSessions: reviewedToday,
+      totalSessions: totalReviewSessions,
     },
     knowledgeGraphStats: {
       totalNodes,

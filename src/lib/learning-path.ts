@@ -620,8 +620,9 @@ export async function adaptPath(
         reason: `正确率仅${Math.round(perf.accuracy * 100)}%，大幅降低难度`,
       });
 
-      // Try to insert a remedial node (prerequisite) before this one
-      if (prisma && i > 0) {
+      // Try to insert a remedial node (prerequisite) before this one.
+      // splice(0,0,...) 在首步位置同样可行，最差的节点排在第 0 位时也该补前置
+      if (prisma) {
         try {
           const prereqEdges = await prisma.knowledgeEdge.findMany({
             where: {

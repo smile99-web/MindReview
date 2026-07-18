@@ -249,9 +249,11 @@ function PracticeContent() {
         const data = await res.json() as { recommendations?: PracticeRecommendation[] };
         const recommendations = data.recommendations || [];
         setReviewRecommendations(recommendations);
-        if (!recommendedNodeId && recommendations.length > 0) {
-          setRecommendedNodeId(recommendations[0].nodeId);
-        }
+        // 函数式更新：不把 recommendedNodeId 列入依赖——否则 set 触发依赖变化、
+        // 依赖变化又触发本 effect，造成重复拉取（effect 依赖循环）
+        setRecommendedNodeId((prev) =>
+          prev ?? (recommendations.length > 0 ? recommendations[0].nodeId : null),
+        );
       } catch {
         // Recommendations are optional.
       }
@@ -259,7 +261,7 @@ function PracticeContent() {
     queueMicrotask(() => {
       void loadReviewRecommendations();
     });
-  }, [userId, recommendedNodeId]);
+  }, [userId]);
 
   useEffect(() => {
     async function loadPracticeHistory() {

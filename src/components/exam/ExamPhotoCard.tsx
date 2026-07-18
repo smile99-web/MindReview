@@ -81,6 +81,14 @@ export function ExamPhotoCard() {
     })();
   }, []);
 
+  // 卸载/更换时释放 blob URL：注释声称"revoked on unmount"但之前没有
+  // 对应 effect，组件卸载会泄漏 ObjectURL（长期挂着占内存）
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
   const handleFile = async (file: File) => {
     setError('');
     // local preview (revoked on unmount/new file)

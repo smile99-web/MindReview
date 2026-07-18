@@ -60,54 +60,77 @@ export async function POST(
       subjectId = s?.id || null;
     }
 
-    let recorded = 0;
-    for (const item of arr.slice(0, 20)) {
-      if (!item.questionText || !item.correctAnswer) continue;
-
-      // Optional: run the LLM mistake analyzer for a richer
-      // error-type tag. The fire-and-forget approach means a
-      // slow LLM doesn't block the response.
-      let mistakeType: string | null = null;
-      let analysis: string | null = null;
-      try {
-        const result = await analyzeMistake(
-          doc.subjectName || '通用',
-          item.questionText.slice(0, 500),
-          item.wrongAnswer || undefined,
-          item.correctAnswer,
-        );
-        mistakeType = result.mistakeType || null;
-        analysis = result.analysis || null;
-      } catch {
-        // LLM failure is non-fatal; the mistake row still gets
-        // created with the question text + correct answer.
-      }
-
-      // FSRS initial state — same as practice/route.ts
-      const nextReviewAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-      await prisma.mistake.create({
-        data: {
-          userId,
-          knowledgeNodeId: null,
-          subjectId,
-          questionText: item.questionText.slice(0, 2000),
-          wrongAnswer: (item.wrongAnswer || '').slice(0, 500),
-          correctAnswer: item.correctAnswer.slice(0, 500),
-          mistakeType,
-          analysis,
-          state: 'new',
-          stability: 1,
-          difficulty: 5,
-          reps: 0,
-          lapses: 0,
-          lastReviewAt: null,
-          nextReviewAt,
-          history: [],
-        },
-      });
-      recorded++;
+    // 数组内按 questionText 去重：双击提交/前端重复 push 会写重复行
+    const seen = new Set<string>();
+    const items = arr.slice(0, 20).filter((item) => {
+      const key = (item.questionText || '').slice(0, 2000).trim();
+      if (!key || !item.correctAnswer || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (items.length === 0) {
+      return NextResponse.json({ recorded: 0 });
     }
+
+    // 同一 questionText 已有错题记录则跳过：重复建档会产生两条 FSRS 调度
+    const existing = await prisma.mistake.findMany({
+      where: {
+        userId,
+        questionText: { in: items.map((i) => i.questionText.slice(0, 2000)) },
+      },
+      select: { questionText: true },
+    });
+    const existingTexts = new Set(existing.map((e) => e.questionText));
+    const toCreate = items.filter((i) => !existingTexts.has(i.questionText.slice(0, 2000)));
+
+    // LLM 分析 + 写库按条并行（allSettled）：单条失败不影响其余条目
+    const results = await Promise.allSettled(
+      toCreate.map(async (item) => {
+        // Optional: run the LLM mistake analyzer for a richer
+        // error-type tag. Failure is non-fatal — the row is still
+        // created with question text + correct answer.
+        let mistakeType: string | null = null;
+        let analysis: string | null = null;
+        try {
+          const result = await analyzeMistake(
+            doc.subjectName || '通用',
+            item.questionText.slice(0, 500),
+            item.wrongAnswer || undefined,
+            item.correctAnswer,
+          );
+          mistakeType = result.mistakeType || null;
+          analysis = result.analysis || null;
+        } catch {
+          // LLM failure is non-fatal; the mistake row still gets
+          // created with the question text + correct answer.
+        }
+
+        // FSRS initial state — same as practice/route.ts
+        const nextReviewAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+        await prisma.mistake.create({
+          data: {
+            userId,
+            knowledgeNodeId: null,
+            subjectId,
+            questionText: item.questionText.slice(0, 2000),
+            wrongAnswer: (item.wrongAnswer || '').slice(0, 500),
+            correctAnswer: item.correctAnswer.slice(0, 500),
+            mistakeType,
+            analysis,
+            state: 'new',
+            stability: 1,
+            difficulty: 5,
+            reps: 0,
+            lapses: 0,
+            lastReviewAt: null,
+            nextReviewAt,
+            history: [],
+          },
+        });
+      }),
+    );
+    const recorded = results.filter((r) => r.status === 'fulfilled').length;
 
     return NextResponse.json({ recorded });
   } catch (error: unknown) {

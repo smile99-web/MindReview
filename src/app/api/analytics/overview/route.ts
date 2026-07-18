@@ -15,6 +15,10 @@ export async function GET(req: NextRequest) {
     const days7Ago = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
     // Fetch all base data in parallel
+    // 注：allNodes / mistakes / reviewTasks 是无界查询（全表）。当前数据规模
+    // （单用户、中学知识量级，节点数千行内）可接受；若将来节点数过万，
+    // 需要改为按 subjectId 过滤或聚合查询（groupBy），不要直接加 take 截断
+    // —— 统计数据截断会产生看似正常但错误的百分比。
     const [
       allNodes,
       subjects,
@@ -122,8 +126,9 @@ export async function GET(req: NextRequest) {
     const todayKey = appDateKey(now);
     const startOfToday = startOfAppDay(todayKey);
     const dailyActivityMap = new Map<string, { count: number; duration: number }>();
-    for (let i = 0; i < 31; i++) {
-      const d = new Date(startOfToday.getTime() - (30 - i) * 24 * 60 * 60 * 1000);
+    // 30 个点：29 天前 … 今天（含今天共 30 天）
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(startOfToday.getTime() - (29 - i) * 24 * 60 * 60 * 1000);
       dailyActivityMap.set(appDateKey(d), { count: 0, duration: 0 });
     }
     for (const log of reviewLogs30d) {
@@ -186,10 +191,10 @@ export async function GET(req: NextRequest) {
     }));
     const resolvedMistakes = mistakes.filter((m) => m.resolved).length;
 
-    // Mistake trend (last 7 days, inclusive of today)
+    // Mistake trend (last 7 days, inclusive of today) — 7 个点：6 天前 … 今天
     const last7DailyMistakes: { date: string; count: number }[] = [];
-    for (let i = 0; i < 8; i++) {
-      const d = new Date(startOfToday.getTime() - (7 - i) * 24 * 60 * 60 * 1000);
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startOfToday.getTime() - (6 - i) * 24 * 60 * 60 * 1000);
       const key = appDateKey(d);
       const count = mistakeLogs30d.filter(
         (m) => appDateKey(m.createdAt) === key,

@@ -122,7 +122,7 @@ export function sm2(quality: number, previous: SM2Input["previous"]): SM2Result 
   const strength = calcMemoryStrength(newEF, newReps, q);
   // 预测在 newInterval 天后的保留率
   const retention = calcRetention(newInterval, strength);
-  const forgetRisk = Math.round((1 - retention) * 100) / 100;
+  let forgetRisk = Math.round((1 - retention) * 100) / 100;
 
   // 如果预测遗忘风险 > 20%，缩短间隔
   // 如果预测遗忘风险 < 5%，可以适当延长
@@ -136,6 +136,9 @@ export function sm2(quality: number, previous: SM2Input["previous"]): SM2Result 
 
   // 强制上限: 365 天
   newInterval = Math.min(365, newInterval);
+
+  // 间隔被上方规则调整过，用最终值重算 forgetRisk，保证展示的风险与实际排期自洽
+  forgetRisk = Math.round((1 - calcRetention(newInterval, strength)) * 100) / 100;
 
   // 计算下次复习时间。之前的实现 setHours(8, 0, 0, 0) 把时间钉死到
   // 服务器本地时区的 08:00。Postgres 存的是绝对时间（UTC），所以不同

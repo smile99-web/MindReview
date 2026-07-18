@@ -31,6 +31,16 @@ export async function POST(req: NextRequest) {
       );
     }
     const subjectId = (form.get('subjectId') as string | null) || null;
+    // 客户端传入的 subjectId 必须真实存在，否则写入时触发 FK 异常（500）
+    if (subjectId) {
+      const subject = await prisma.subject.findUnique({
+        where: { id: subjectId },
+        select: { id: true },
+      });
+      if (!subject) {
+        return NextResponse.json({ error: '所选学科不存在' }, { status: 400 });
+      }
+    }
 
     const blob = file as unknown as {
       name: string;

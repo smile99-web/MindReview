@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { llmCallWithLog } from '@/lib/llm-client';
 import { sanitizeJsonString } from '@/lib/utils';
+import { getErrorStatus } from '@/lib/errors';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { SUBJECT_CONFIG, SUBJECTS } from '@/types';
 import type { IcapLevel, SubjectName } from '@/types';
@@ -569,6 +570,11 @@ export async function POST(req: NextRequest) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '教材生成失败';
     console.error('[Textbook Generate] Error:', error);
-    return NextResponse.json({ error: message }, { status: 400 });
+    // 之前一律返回 400：DB 故障/LLM 故障是服务端问题（500），认证失败是 401，
+    // 只有参数类错误才该是 400
+    return NextResponse.json(
+      { error: message },
+      { status: getErrorStatus(error) },
+    );
   }
 }

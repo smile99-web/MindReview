@@ -73,6 +73,8 @@ function asStringArray(value: unknown): string[] {
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  // null/undefined 必须先回退：Number(null) === 0 会通过 isFinite 被钳到 min
+  if (value == null) return fallback;
   const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.min(max, Math.max(min, Math.round(numeric)));

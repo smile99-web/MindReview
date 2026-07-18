@@ -34,18 +34,28 @@ export async function POST(request: Request) {
     const hashed = hashPassword(password);
     const now = new Date();
 
-    const user = await prisma.user.create({
-      data: {
-        id: crypto.randomUUID(),
-        username: normalizedUsername,
-        email: normalizedEmail || null,
-        passwordHash: hashed,
-        name: normalizedName || null,
-        grade: null,
-        updatedAt: now,
-      },
-      select: { id: true, username: true, email: true, name: true, grade: true, avatarUrl: true },
-    });
+    // 上面的 findUnique 预检存在 TOCTOU 竞态：两个并发请求可同时通过检查，
+    // 其中一个在 create 时撞唯一约束（P2002）→ 返回 409 而非 500
+    let user;
+    try {
+      user = await prisma.user.create({
+        data: {
+          id: crypto.randomUUID(),
+          username: normalizedUsername,
+          email: normalizedEmail || null,
+          passwordHash: hashed,
+          name: normalizedName || null,
+          grade: null,
+          updatedAt: now,
+        },
+        select: { id: true, username: true, email: true, name: true, grade: true, avatarUrl: true },
+      });
+    } catch (err: unknown) {
+      if ((err as { code?: string })?.code === 'P2002') {
+        return NextResponse.json({ detail: '用户名或邮箱已存在' }, { status: 409 });
+      }
+      throw err;
+    }
 
     const refreshValue = createRefreshTokenValue();
     const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);

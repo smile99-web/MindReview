@@ -60,6 +60,16 @@ export async function POST(req: NextRequest) {
     // pre-empts the per-chapter import step needing to ask).
     let subjectId = (typeof body.subjectId === 'string' ? body.subjectId.trim() : '') || tb.subjectId || '';
     if (subjectId) {
+      // 客户端传入的 subjectId 必须真实存在，否则 update 时触发 FK 异常（500）
+      if (subjectId !== tb.subjectId) {
+        const subject = await prisma.subject.findUnique({
+          where: { id: subjectId },
+          select: { id: true },
+        });
+        if (!subject) {
+          return NextResponse.json({ error: '所选学科不存在' }, { status: 400 });
+        }
+      }
       await prisma.textbookUpload.update({
         where: { id: textbookId },
         data: { subjectId },

@@ -277,16 +277,20 @@ export default function KnowledgeCardPage() {
   }, [navigateToCard, node?.navigation]);
 
   useEffect(() => {
+    // cancelled 守卫：id 快速切换（键盘左右翻卡片）时，旧请求后返回会
+    // 把上一个卡片的 schema 建议写进新卡片的状态
+    let cancelled = false;
     async function loadSchemas() {
       setSchemasLoading(true);
       try {
         const res = await authFetch(`/api/schema/suggest?knowledgeNodeId=${id}`);
         const data = await res.json();
-        setSchemas(data.suggestions || []);
+        if (!cancelled) setSchemas(data.suggestions || []);
       } catch { /* ignore */ }
-      setSchemasLoading(false);
+      if (!cancelled) setSchemasLoading(false);
     }
     loadSchemas();
+    return () => { cancelled = true; };
   }, [id]);
 
   // ---------- 学习完成度追踪 ----------

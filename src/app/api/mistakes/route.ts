@@ -67,7 +67,22 @@ export async function POST(req: NextRequest) {
     let subjectName = '未知学科';
     if (subjectId) {
       const subject = await prisma.subject.findUnique({ where: { id: subjectId } });
-      if (subject) subjectName = subject.name;
+      // 学科不存在时若继续 create，会撞外键约束 P2003 → 500；提前返回 400
+      if (!subject) {
+        return NextResponse.json({ error: '所选学科不存在' }, { status: 400 });
+      }
+      subjectName = subject.name;
+    }
+
+    // knowledgeNodeId 同理：不存在的节点会让 create 撞外键约束
+    if (knowledgeNodeId) {
+      const node = await prisma.knowledgeNode.findUnique({
+        where: { id: knowledgeNodeId },
+        select: { id: true },
+      });
+      if (!node) {
+        return NextResponse.json({ error: '知识点不存在' }, { status: 400 });
+      }
     }
 
     let analysis: MistakeAnalysis = {};

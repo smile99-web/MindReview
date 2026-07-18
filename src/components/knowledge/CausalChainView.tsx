@@ -221,9 +221,10 @@ export function CausalChainView({
                     {i + 1}
                   </span>
                   <div className="flex-1">
-                    <h5 className="text-sm font-medium text-slate-800">
+                    {/* LatexText 根元素是 div，不能套在 <h5> 里（标题只允许 phrasing 内容） */}
+                    <div className="text-sm font-medium text-slate-800">
                       <LatexText text={node.label || node.event} />
-                    </h5>
+                    </div>
                     {node.description && (
                       <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">
                         <LatexText text={node.description} />

@@ -32,17 +32,40 @@ export async function POST(request: Request) {
     // Atomic delete-then-create: a crash between the two used to leave the
     // user with no valid token (logged out). The transaction also closes a
     // race where two concurrent refreshes would both create new rows.
-    await prisma.$transaction([
-      prisma.refreshToken.delete({ where: { token: refresh_token } }),
-      prisma.refreshToken.create({
-        data: {
-          id: crypto.randomUUID(),
-          token: newRefresh,
-          userId: row.userId,
-          expiresAt: newExpires,
-        },
-      }),
-    ]);
+    try {
+      await prisma.$transaction([
+        prisma.refreshToken.delete({ where: { token: refresh_token } }),
+        prisma.refreshToken.create({
+          data: {
+            id: crypto.randomUUID(),
+            token: newRefresh,
+            userId: row.userId,
+            expiresAt: newExpires,
+          },
+        }),
+      ]);
+    } catch (err: unknown) {
+      // 并发 refresh 的败者：delete 时记录已被胜者删掉（P2025）。
+      // 调用方刚刚持有有效旧 token（胜者几毫秒前才轮换），证明身份，
+      // 直接返回胜者创建的最新 token，避免该设备被误登出 + 误导性 500。
+      if ((err as { code?: string })?.code === 'P2025') {
+        const latest = await prisma.refreshToken.findFirst({
+          where: { userId: row.userId },
+          orderBy: { expiresAt: 'desc' },
+        });
+        if (latest) {
+          const accessToken = createAccessToken(row.user.id, row.user.username);
+          return NextResponse.json({
+            access_token: accessToken,
+            refresh_token: latest.token,
+            token_type: 'bearer',
+            user: row.user,
+          });
+        }
+        return NextResponse.json({ detail: '登录状态已失效，请重新登录' }, { status: 401 });
+      }
+      throw err;
+    }
 
     const accessToken = createAccessToken(row.user.id, row.user.username);
 

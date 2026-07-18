@@ -93,7 +93,7 @@ function getEdgeKey(edge: RenderableMindMapEdge): string {
 }
 
 export function MindMap({
-  nodes: dataNodes,
+  nodes: rawDataNodes,
   edges: dataEdges,
   onNodeClick,
   className,
@@ -104,6 +104,18 @@ export function MindMap({
   const [hoveredSchemaNode, setHoveredSchemaNode] = useState<string | null>(null);
   const [internalFilter, setInternalFilter] = useState('');
   const activeFilter = relationTypeFilter || internalFilter;
+
+  // API 可能返回重复 id 的节点（如 schema 节点同时出现在常规列表和
+  // includeSchemas 分支），ReactFlow 遇到重复 id 会告警并渲染异常——先按 id 去重
+  const dataNodes = useMemo(() => {
+    if (!rawDataNodes) return rawDataNodes;
+    const seen = new Set<string>();
+    return rawDataNodes.filter((n) => {
+      if (seen.has(n.id)) return false;
+      seen.add(n.id);
+      return true;
+    });
+  }, [rawDataNodes]);
 
   const treeGroups = useMemo(() => {
     const groups = new Map<string, { id: string; title: string; nodes: MindMapDataNode[] }>();

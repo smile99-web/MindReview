@@ -2,7 +2,7 @@
 
 import { authFetch } from '@/lib/auth';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -185,6 +185,22 @@ export function KnowledgeCardView({
   const [weError, setWeError] = useState<string | null>(null);
   const [weResult, setWeResult] = useState<WorkedExample | null>(null);
 
+  // 当前播放的 TTS 音频句柄：组件卸载时必须暂停，否则页面切走后声音还在播
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    };
+  }, []);
+
+  const playAudio = (url: string) => {
+    audioRef.current?.pause();
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    void audio.play();
+  };
+
   const handleTTS = async () => {
     if (onTTS) {
       onTTS(`${node.title}。${node.summary}`);
@@ -192,8 +208,7 @@ export function KnowledgeCardView({
     }
 
     if (audioUrl) {
-      const audio = new Audio(audioUrl);
-      audio.play();
+      playAudio(audioUrl);
       return;
     }
 
@@ -211,8 +226,7 @@ export function KnowledgeCardView({
       const data = await res.json() as TtsResponse;
       if (data.audioUrl) {
         setAudioUrl(data.audioUrl);
-        const audio = new Audio(data.audioUrl);
-        audio.play();
+        playAudio(data.audioUrl);
       }
     } catch (err) {
       console.error('TTS failed:', err);

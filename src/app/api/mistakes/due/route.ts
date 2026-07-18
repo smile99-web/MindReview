@@ -33,13 +33,14 @@ export async function GET(req: NextRequest) {
       },
       // 同题答错 N 次 → N 行，今日待复习列表会出现 10 道完全相同的题。
       // `distinct` 让 Prisma 在 SELECT 里加 DISTINCT ON (questionText)，
-      // 每个题干只保留第一行（按 orderBy 排序，最早创建的优先）。
+      // 每个题干只保留第一行；按 nextReviewAt 降序让 FSRS 进度最深
+      // （调度最远）的那行胜出，而不是最早创建的旧状态行。
       distinct: ['questionText'],
       include: {
         knowledgeNode: { select: { id: true, title: true } },
         subject: { select: { id: true, name: true, icon: true, colorClass: true } },
       },
-      orderBy: [{ questionText: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ questionText: 'asc' }, { nextReviewAt: 'desc' }],
       take: limit,
     });
 

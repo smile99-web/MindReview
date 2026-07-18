@@ -31,8 +31,30 @@ export async function POST(req: NextRequest) {
     const subject = (body.subject || '通用').trim();
     const context = (body.contextTitle || '').trim();
 
+    // Resolve subject FIRST: 标题前缀必须与实际挂载的学科一致——
+    // 请求的学科不存在时会挂到「通用」，若标题仍写 [请求学科] 则名实不符
+    let subjectId: string;
+    let mountedSubjectName: string;
+    const existingSubject = await prisma.subject.findFirst({
+      where: { name: subject },
+      select: { id: true, name: true },
+    });
+    if (existingSubject) {
+      subjectId = existingSubject.id;
+      mountedSubjectName = existingSubject.name;
+    } else {
+      const newSubj = await prisma.subject.upsert({
+        where: { name: '通用' },
+        update: {},
+        create: { name: '通用', icon: '📝' },
+        select: { id: true },
+      });
+      subjectId = newSubj.id;
+      mountedSubjectName = '通用';
+    }
+
     // Build the title: "[subject] concept" so it's unique per subject
-    const title = `[${subject}] ${concept}`;
+    const title = `[${mountedSubjectName}] ${concept}`;
     const existing = await prisma.knowledgeNode.findFirst({
       where: { title },
       select: { id: true },
@@ -91,16 +113,6 @@ export async function POST(req: NextRequest) {
     ])).slice(0, 10);
     const difficulty = typeof parsed.difficulty === 'number' ? Math.max(1, Math.min(5, parsed.difficulty)) : 3;
     const cognitiveLoad = typeof parsed.cognitiveLoad === 'number' ? Math.max(1, Math.min(5, parsed.cognitiveLoad)) : 3;
-
-    // Resolve subject
-    let subjectId: string;
-    const existingSubject = await prisma.subject.findFirst({ where: { name: subject }, select: { id: true } });
-    if (existingSubject) {
-      subjectId = existingSubject.id;
-    } else {
-      const newSubj = await prisma.subject.upsert({ where: { name: '通用' }, update: {}, create: { name: '通用', icon: '📝' }, select: { id: true } });
-      subjectId = newSubj.id;
-    }
 
     const node = await prisma.knowledgeNode.create({
       data: {

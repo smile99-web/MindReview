@@ -31,6 +31,15 @@ const ACCESS_COOKIE = "mindreview_access_token";
 const DEV_JWT_SECRET = "mindreview-dev-secret-change-me";
 
 /**
+ * 精确前缀匹配：`/review-x` 不应命中 `/review`。
+ * startsWith 裸用会把 `/api/auth/loginAnything` 误判为公开接口（认证绕过），
+ * 也会把 `/cards-gallery` 这类公开页误判为受保护页。
+ */
+function matchesPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(prefix + "/");
+}
+
+/**
  * Resolve the JWT secret. In production, refuse to fall back to a hardcoded
  * dev secret — that would silently let an attacker forge a valid token and
  * bypass the proxy's 401 check. Mirrors the guard in src/lib/server-auth.ts
@@ -117,7 +126,7 @@ export async function proxy(request: NextRequest) {
   const authCookie = request.cookies.get("auth_status");
   const hasValidAccessToken = await verifyAccessToken(getBearerToken(request));
 
-  const isPublicApi = PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p));
+  const isPublicApi = PUBLIC_API_PREFIXES.some((p) => matchesPrefix(pathname, p));
   if (pathname.startsWith("/api/") && !isPublicApi && !hasValidAccessToken) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -126,12 +135,12 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  if (AUTH_PAGES.some((p) => pathname.startsWith(p)) && authCookie?.value === "1") {
+  if (AUTH_PAGES.some((p) => matchesPrefix(pathname, p)) && authCookie?.value === "1") {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   if (
-    PROTECTED_PREFIXES.some((p) => pathname.startsWith(p)) &&
+    PROTECTED_PREFIXES.some((p) => matchesPrefix(pathname, p)) &&
     authCookie?.value !== "1"
   ) {
     return NextResponse.redirect(new URL("/", request.url));

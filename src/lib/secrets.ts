@@ -8,6 +8,11 @@ const DEV_SECRET = "mindreview-dev-secret-change-me";
  * to fall back to a hardcoded dev secret — that would silently encrypt
  * every stored API key with a key the public source code already leaks,
  * making the encryption a no-op.
+ *
+ * ⚠️ 耦合警告：未设置 API_KEY_ENCRYPTION_SECRET 时回退用 JWT_SECRET_KEY 派生密钥。
+ * 这意味着**轮换 JWT_SECRET_KEY 会使所有已加密的 API key 无法解密**（GCM auth tag
+ * 校验失败抛错），用户需在设置页重新填写。生产环境应同时设置两个独立变量，
+ * 避免该耦合；如已耦合需轮换 JWT，先迁移 API key 再换。
  */
 function getKey(): Buffer {
   const envSecret = process.env.API_KEY_ENCRYPTION_SECRET || process.env.JWT_SECRET_KEY;

@@ -63,7 +63,14 @@ export async function GET(req: NextRequest) {
 // Returns diagnostic results: { score, level, strengths, gaps, ... }
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    // 非法 JSON / null body 返回 400 而非 500
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: '请求体必须是有效的 JSON 对象' },
+        { status: 400 },
+      );
+    }
 
     // Always require an authenticated user. The previous version accepted
     // `body.userId` as a fallback, which was an IDOR: a caller without a
@@ -77,8 +84,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const grade = body.grade as string;
-    const subjectId = body.subjectId as string;
+    // typeof 校验而非断言：传 number 等真值类型会透传进诊断逻辑
+    const grade = typeof body.grade === 'string' ? body.grade : '';
+    const subjectId = typeof body.subjectId === 'string' ? body.subjectId : '';
 
     if (!grade || !subjectId) {
       return NextResponse.json(

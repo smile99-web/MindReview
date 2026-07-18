@@ -92,21 +92,30 @@ export async function GET(
     // extra context like '[物理] 热量' vs just '热量'.
     let prerequisiteNodes: { id: string; title: string }[] = [];
     if (node.prerequisites.length > 0) {
-      const ors = node.prerequisites.map((p) => ({
-        title: { contains: p, mode: 'insensitive' as const },
-      }));
-      const prerow = await prisma.knowledgeNode.findMany({
-        where: { OR: ors },
+      const ors = node.prerequisites
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0)
+        .map((p) => ({
+          title: { contains: p, mode: 'insensitive' as const },
+        }));
+      // 限定同学科内匹配：contains 匹配会跨学科误链（如语文的"热量"）
+      const prerow = ors.length > 0 ? await prisma.knowledgeNode.findMany({
+        where: { OR: ors, subjectId: node.subjectId },
         select: { id: true, title: true },
         take: 20,
-      });
-      // Deduplicate and pick the best match per prerequisite
+      }) : [];
+      // Deduplicate and pick the best match per prerequisite:
+      // 精确匹配优先，其次才是双向包含；空标题不参与匹配
       for (const pre of node.prerequisites) {
-        const match = prerow.find(
-          (r) =>
-            r.title.includes(pre) ||
-            pre.includes(r.title),
-        );
+        const p = pre.trim();
+        if (!p) continue;
+        const match =
+          prerow.find((r) => r.title === p) ??
+          prerow.find(
+            (r) =>
+              r.title.trim().length > 0 &&
+              (r.title.includes(p) || p.includes(r.title)),
+          );
         if (match && !prerequisiteNodes.find((n) => n.id === match.id)) {
           prerequisiteNodes.push(match);
         }
@@ -193,9 +202,22 @@ export async function PATCH(
     }
     // --- end validation ---
 
+    // 字段白名单：body 原样传入会让未知字段触发 Prisma 校验错误（500），
+    // 也可能写入调用方本不该控制的列
+    const allowedKeys = [
+      ...requiredStrings, ...optionalStrings, ...arrayFields,
+      ...numberFields, ...dateFields, ...jsonFields,
+    ];
+    const data: Record<string, unknown> = {};
+    for (const key of allowedKeys) {
+      if (Object.prototype.hasOwnProperty.call(body, key)) {
+        data[key] = body[key];
+      }
+    }
+
     const node = await prisma.knowledgeNode.update({
       where: { id },
-      data: body,
+      data: data as Prisma.KnowledgeNodeUpdateInput,
     });
 
     return NextResponse.json(node);

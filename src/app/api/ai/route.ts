@@ -1,4 +1,4 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
@@ -452,6 +452,10 @@ ${stepsContext}`,
     }
   } catch (error: unknown) {
     console.error('[AI API] Error:', error);
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    // 认证失败返回 401 而非 500，客户端才能触发 token 刷新流程
+    return NextResponse.json(
+      { error: getErrorMessage(error) },
+      { status: getErrorStatus(error) },
+    );
   }
 }
