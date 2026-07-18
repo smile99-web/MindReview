@@ -177,7 +177,8 @@ export default function KnowledgeCardPage() {
       } catch (err) {
         console.error(err);
       } finally {
-        setLoading(false);
+        // 快速切换卡片时，旧请求的 finally 不得把新卡片的 loading 置 false
+        if (!cancelled) setLoading(false);
       }
     }
 

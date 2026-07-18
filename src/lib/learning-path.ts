@@ -8,6 +8,7 @@
 
 import type { PrismaClient } from '@prisma/client';
 import { resolveUserId } from '@/lib/user-context';
+import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -268,6 +269,20 @@ export async function generatePath(
     };
   }
 
+  // --- 叠加当前用户的真实掌握度 ---
+  // KnowledgeNode.masteryLevel 是全局默认值，不能直接用于 ICAP 分级和排序；
+  // 用 UserKnowledgeProgress 覆盖（无进度记录则保留节点默认值），
+  // 与 learner-model.ts 的 withUserMastery 同一思路。
+  const progressByNodeId = await loadProgressByNodeId(
+    uid,
+    dbNodes.map((n: NodeRecord) => n.id),
+    prisma,
+  );
+  const nodes = dbNodes.map((n: NodeRecord) => ({
+    ...n,
+    masteryLevel: progressByNodeId.get(n.id)?.masteryLevel ?? n.masteryLevel,
+  }));
+
   // --- Fetch prerequisite edges ---
   const dbEdges = await prisma.knowledgeEdge.findMany({
     where: {
@@ -282,7 +297,7 @@ export async function generatePath(
   });
 
   // --- Topological sort ---
-  const levels = topologicalSortByLevel(dbNodes, dbEdges);
+  const levels = topologicalSortByLevel(nodes, dbEdges);
 
   // --- Flatten and assign ICAP levels ---
   const allSteps: PathStep[] = [];
@@ -422,12 +437,16 @@ export async function checkPrerequisites(
  *
  * Optimised: fetches all prerequisite edges in one query, then computes
  * transitive closure in-memory.
+ *
+ * 可选 scopeNodeIds：传入时仅加载该节点集合内的边（fromId/toId 均在集合内），
+ * 避免全表扫描；不传则保持原行为（加载全库 prerequisite 边）。
  */
 export async function batchCheckPrerequisites(
   nodeIds: string[],
   userId: string | null | undefined,
   prisma: PrismaClient,
   requiredLevel: number = 60,
+  scopeNodeIds?: string[],
 ): Promise<Record<string, PrerequisiteCheck>> {
   if (nodeIds.length === 0) return {};
 
@@ -440,6 +459,10 @@ export async function batchCheckPrerequisites(
   const allEdges = await prisma.knowledgeEdge.findMany({
     where: {
       relationType: 'prerequisite',
+      // scopeNodeIds 传入时限定边在相关节点集合内，避免全表扫描
+      ...(scopeNodeIds && scopeNodeIds.length > 0
+        ? { fromId: { in: scopeNodeIds }, toId: { in: scopeNodeIds } }
+        : {}),
     },
     select: {
       fromId: true,

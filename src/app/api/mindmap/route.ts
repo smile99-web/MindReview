@@ -22,28 +22,20 @@ export async function GET(req: NextRequest) {
     if (chapterId) baseWhere.chapterId = chapterId;
     if (rootId) baseWhere.parentId = rootId;
 
-    // Build the where clause with proper schema filtering
-    const conditions: Prisma.KnowledgeNodeWhereInput[] = [];
-    if (subjectId || chapterId || rootId) {
-      conditions.push({ ...baseWhere });
-    }
-    if (includeSchemas) {
-      conditions.push({ representationType: 'schema' });
-    }
-
+    // Build the where clause with proper schema filtering.
+    // 注意：schema 节点创建时就带 subjectId（schema-builder.ts），所以 baseWhere
+    // 本身就包含本学科的 schema。之前 includeSchemas=true 会额外追加一个
+    // 无学科限定的 OR 分支，把全库其他学科的 schema 也混进思维导图。
+    const hasScope = Boolean(subjectId || chapterId || rootId);
     let where: Prisma.KnowledgeNodeWhereInput;
-    if (conditions.length === 0) {
+    if (hasScope) {
+      where = includeSchemas
+        ? { ...baseWhere }
+        : { ...baseWhere, OR: nonSchemaNodeConditions };
+    } else {
       where = includeSchemas
         ? { representationType: 'schema' }
         : { OR: nonSchemaNodeConditions };
-    } else if (conditions.length === 1) {
-      where = conditions[0];
-      // If we have subjectId/chapterId/rootId but not includeSchemas, exclude schemas
-      if (!includeSchemas) {
-        where = { ...where, OR: nonSchemaNodeConditions };
-      }
-    } else {
-      where = { OR: conditions };
     }
 
     const nodes = await prisma.knowledgeNode.findMany({

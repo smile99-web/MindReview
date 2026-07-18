@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
+import { appDateKey, startOfAppDay } from '@/lib/date-utils';
 
 export async function GET(req: NextRequest) {
   try {
     const userId = await resolveUserIdFromRequest(req);
 
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    // 用 UTC+8 日界锚定"今天"，与 analytics / heartbeat 口径一致（用户在中国）
+    const startOfToday = startOfAppDay(appDateKey(now));
+    const endOfToday = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
 
     const [
       totalNodes,

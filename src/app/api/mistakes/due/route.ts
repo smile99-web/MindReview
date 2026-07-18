@@ -4,10 +4,12 @@ import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { getErrorMessage } from '@/lib/errors';
 
 // GET /api/mistakes/due
-// Returns the user's unresolved mistakes whose nextReviewAt is
-// null or <= now. Used by the "今日待复习" widget on the
-// mistakes landing page. Limit defaults to 20; pass ?limit=N to
-// override.
+// Returns the user's mistakes that are due for review: unresolved
+// rows whose nextReviewAt is null or <= now, plus resolved rows
+// whose nextReviewAt has come due again (否则 resolved 错题到期后
+// 永远回不到复习列表，FSRS 闭环断裂). Used by the "今日待复习"
+// widget on the mistakes landing page. Limit defaults to 20;
+// pass ?limit=N to override.
 export async function GET(req: NextRequest) {
   try {
     const userId = await resolveUserIdFromRequest(req);
@@ -20,8 +22,14 @@ export async function GET(req: NextRequest) {
     const due = await prisma.mistake.findMany({
       where: {
         userId,
-        resolved: false,
-        OR: [{ nextReviewAt: null }, { nextReviewAt: { lte: now } }],
+        OR: [
+          {
+            resolved: false,
+            OR: [{ nextReviewAt: null }, { nextReviewAt: { lte: now } }],
+          },
+          // resolved 但已到期的错题要重新浮现
+          { resolved: true, nextReviewAt: { lte: now } },
+        ],
       },
       // 同题答错 N 次 → N 行，今日待复习列表会出现 10 道完全相同的题。
       // `distinct` 让 Prisma 在 SELECT 里加 DISTINCT ON (questionText)，

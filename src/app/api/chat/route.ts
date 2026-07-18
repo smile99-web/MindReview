@@ -187,13 +187,15 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // 拉历史
-  const history = await prisma.chatMessage.findMany({
+  // 拉历史：取最新 N 条再 reverse 恢复时间正序。
+  // 不能用 asc + take N，否则会话超过 N 条后 LLM 永远看不到最新消息。
+  const historyDesc = await prisma.chatMessage.findMany({
     where: { conversationId },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { createdAt: 'desc' },
     take: MAX_HISTORY_MESSAGES,
     select: { role: true, content: true },
   });
+  const history = historyDesc.reverse();
 
   // 构建 LLM messages
   const llmMessages = [

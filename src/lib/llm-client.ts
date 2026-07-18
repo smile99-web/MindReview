@@ -230,10 +230,14 @@ function normalizeAnswerGradeResult(value: unknown): AnswerGradeResult {
   const quality = clampInt(root.quality, 0, 5, score >= 0.75 ? 4 : score >= 0.5 ? 3 : 1);
   const isCorrect = typeof root.isCorrect === 'boolean' ? root.isCorrect : score >= 0.65;
 
+  // isCorrect 与 quality 强制调和：答对却 quality≤2 会被 SM-2 清零 repetitions；
+  // 答错却 quality≥3 反而会拉长间隔。两者必须一致，防止调度数据被污染。
+  const reconciledQuality = isCorrect ? Math.max(quality, 3) : Math.min(quality, 2);
+
   return {
     isCorrect,
     score,
-    quality,
+    quality: reconciledQuality,
     feedback: asString(root.feedback, isCorrect ? '回答基本正确。' : '答案还不够完整，请对照解析补充关键点。'),
     confidence: clampNumber(root.confidence, 0, 1, 0.6),
   };

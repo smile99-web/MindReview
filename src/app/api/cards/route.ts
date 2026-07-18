@@ -8,8 +8,11 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const knowledgeNodeId = searchParams.get('knowledgeNodeId');
     const cardType = searchParams.get('cardType');
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20')));
+    // parseInt 对非数字输入得 NaN，NaN 的 skip/take 会让 Prisma 忽略分页（全表扫描）
+    const rawPage = parseInt(searchParams.get('page') || '1', 10);
+    const rawLimit = parseInt(searchParams.get('limit') || '20', 10);
+    const page = Math.max(1, Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1);
+    const limit = Math.min(50, Math.max(1, Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 20));
 
     const where: Record<string, unknown> = {};
     if (knowledgeNodeId) where.knowledgeNodeId = knowledgeNodeId;

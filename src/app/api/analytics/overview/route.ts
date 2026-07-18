@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
+import { appDateKey, startOfAppDay } from '@/lib/date-utils';
 import { getErrorMessage } from '@/lib/errors';
 
 export async function GET(req: NextRequest) {
@@ -115,25 +116,25 @@ export async function GET(req: NextRequest) {
     const progressByNodeId = await loadProgressByNodeId(userId, nodeIds, prisma);
 
     // --- 1. Daily Review Activity (30 days, inclusive of today) ---
-    // 用 UTC 算"今天"和"今日 0:00"：VPS 是 CST (UTC+8)，如果用本地 Date(y,m,d) 构造的
-    // 0:00 在 UTC 里是前一天，导致 toISOString 切出来的 key 少一天。
+    // 全项目统一按 UTC+8 日界切"天"（用户在中国）：用 appDateKey 取日期 key、
+    // startOfAppDay 取当日零点。中国无夏令时，相邻零点恰好相隔 24h，可直接加减天数。
     // count = 复习次数（来自 ReviewLog），duration = 实际学习时长（来自 StudyTimeLog）。
-    const todayUtcKey = now.toISOString().slice(0, 10);
-    const startOfToday = new Date(todayUtcKey + 'T00:00:00.000Z');
+    const todayKey = appDateKey(now);
+    const startOfToday = startOfAppDay(todayKey);
     const dailyActivityMap = new Map<string, { count: number; duration: number }>();
     for (let i = 0; i < 31; i++) {
       const d = new Date(startOfToday.getTime() - (30 - i) * 24 * 60 * 60 * 1000);
-      dailyActivityMap.set(d.toISOString().slice(0, 10), { count: 0, duration: 0 });
+      dailyActivityMap.set(appDateKey(d), { count: 0, duration: 0 });
     }
     for (const log of reviewLogs30d) {
-      const key = log.createdAt.toISOString().slice(0, 10);
+      const key = appDateKey(log.createdAt);
       const entry = dailyActivityMap.get(key);
       if (entry) {
         entry.count += 1;
       }
     }
     for (const log of studyTimeLogs30d) {
-      const key = log.startedAt.toISOString().slice(0, 10);
+      const key = appDateKey(log.startedAt);
       const entry = dailyActivityMap.get(key);
       if (entry) {
         entry.duration += log.durationSeconds || 0;
@@ -189,9 +190,9 @@ export async function GET(req: NextRequest) {
     const last7DailyMistakes: { date: string; count: number }[] = [];
     for (let i = 0; i < 8; i++) {
       const d = new Date(startOfToday.getTime() - (7 - i) * 24 * 60 * 60 * 1000);
-      const key = d.toISOString().slice(0, 10);
+      const key = appDateKey(d);
       const count = mistakeLogs30d.filter(
-        (m) => m.createdAt.toISOString().slice(0, 10) === key,
+        (m) => appDateKey(m.createdAt) === key,
       ).length;
       last7DailyMistakes.push({ date: key, count });
     }
@@ -256,7 +257,7 @@ export async function GET(req: NextRequest) {
     const nodeGrowthByDay: { date: string; count: number }[] = [];
     for (let i = 0; i < 31; i++) {
       const d = new Date(startOfToday.getTime() - (30 - i) * 24 * 60 * 60 * 1000);
-      const key = d.toISOString().slice(0, 10);
+      const key = appDateKey(d);
       const nextD = new Date(d.getTime() + 24 * 60 * 60 * 1000);
       const count = allNodes.filter(
         (n) => n.createdAt < nextD,
@@ -278,18 +279,19 @@ export async function GET(req: NextRequest) {
     }));
 
     // --- 8. Weekly Consistency ---
-    // 用 UTC 0:00 锚定"今天"（VPS 是 CST，避免本地时区导致少算一天）
+    // 按 UTC+8 日界切"天"；星期标签由日期 key 推导（key 即 UTC+8 日历日，
+    // 将其按 UTC 零点解析后取 getUTCDay()，得到的正是 UTC+8 下的星期几）。
     const weekDays: { day: string; label: string; count: number }[] = [];
     const dayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(startOfToday.getTime() - i * 24 * 60 * 60 * 1000);
-      const key = d.toISOString().slice(0, 10);
+      const key = appDateKey(d);
       const dayLogs = reviewLogs30d.filter(
-        (l) => l.createdAt.toISOString().slice(0, 10) === key,
+        (l) => appDateKey(l.createdAt) === key,
       );
       weekDays.push({
         day: key,
-        label: dayLabels[d.getDay()],
+        label: dayLabels[new Date(key + 'T00:00:00.000Z').getUTCDay()],
         count: dayLogs.length,
       });
     }
@@ -339,8 +341,10 @@ export async function GET(req: NextRequest) {
         totalReviewCount30d,
         totalReviewCount7d: reviewLogs30d.filter((l) => new Date(l.createdAt) >= days7Ago).length,
         totalStudyMinutes30d,
-        avgMastery: subjectMastery.length > 0
-          ? Math.round(subjectMastery.reduce((s, sm) => s + sm.averageMastery, 0) / subjectMastery.length)
+        // 全节点加权平均：sum(每个节点的 mastery) / 总节点数。
+        // 与 dashboard 接口口径一致；空学科（0 节点）自然不参与，不再拉低均值。
+        avgMastery: nodesWithProgress.length > 0
+          ? Math.round(nodesWithProgress.reduce((s, n) => s + n.masteryLevel, 0) / nodesWithProgress.length)
           : 0,
         avgEaseFactor,
         avgInterval,

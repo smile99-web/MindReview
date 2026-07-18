@@ -116,6 +116,15 @@ export async function POST(req: NextRequest) {
       allQuestions.push(...r.questions);
     }
 
+    // 三种题型全部失败时不能落库 —— 否则会把之前已生成的
+    // 练习题静默覆盖成空数组。返回 502 让前端提示重试。
+    if (allQuestions.length === 0) {
+      return NextResponse.json(
+        { error: '题目生成失败，请稍后重试' },
+        { status: 502 },
+      );
+    }
+
     await prisma.docUpload.update({
       where: { id: docId },
       data: { practiceQuestions: allQuestions as unknown as object },

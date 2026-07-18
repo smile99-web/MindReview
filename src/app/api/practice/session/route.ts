@@ -93,51 +93,71 @@ export async function POST(req: NextRequest) {
     });
 
     if (!forceNew && existingIncomplete.length > 0) {
+      // Reuse the incomplete tasks and only back-fill the taskTypes that
+      // are missing. Previously a partially-completed session (any one of
+      // the 4 tasks done) fell through to the create path below, stacking
+      // 4 fresh tasks on top of the stale ones on every refresh.
       const existingLevels = new Set(
         existingIncomplete.map((t: { taskType: string }) => t.taskType),
       );
-      const allPresent = ICAP_TASK_TYPES.every((level) => existingLevels.has(level));
+      const missingLevels = ICAP_TASK_TYPES.filter((level) => !existingLevels.has(level));
 
-      if (allPresent) {
-        // Return existing session
-        const tasks = await prisma.reviewTask.findMany({
-          where: {
-            userId: uid,
-            knowledgeNodeId,
-            completed: false,
-          },
-          orderBy: { createdAt: 'asc' },
-        });
-
-        return NextResponse.json(buildSessionResponse(progressAwareNode, tasks, 'active'));
+      if (missingLevels.length > 0) {
+        const now = new Date();
+        await Promise.all(
+          missingLevels.map((taskType) =>
+            prisma.reviewTask.create({
+              data: {
+                userId: uid,
+                knowledgeNodeId,
+                taskType,
+                dueDate: now,
+              },
+            }),
+          ),
+        );
       }
-    }
 
-    // --- forceNew: delete stale incomplete tasks ---
-    if (forceNew) {
-      await prisma.reviewTask.deleteMany({
+      // Return the merged session (existing + just back-filled tasks)
+      const tasks = await prisma.reviewTask.findMany({
         where: {
           userId: uid,
           knowledgeNodeId,
           completed: false,
         },
+        orderBy: { createdAt: 'asc' },
       });
+
+      return NextResponse.json(buildSessionResponse(progressAwareNode, tasks, 'active'));
     }
 
-    // --- create exactly one ReviewTask per ICAP level ---
+    // --- fresh session (or forceNew): delete stale tasks + create 4 new
+    // ones atomically, so a mid-way failure can't leave a half session ---
     const now = new Date();
-    const tasks = await Promise.all(
-      ICAP_TASK_TYPES.map((taskType) =>
-        prisma.reviewTask.create({
-          data: {
+    const tasks = await prisma.$transaction(async (tx) => {
+      if (forceNew) {
+        await tx.reviewTask.deleteMany({
+          where: {
             userId: uid,
             knowledgeNodeId,
-            taskType,
-            dueDate: now,
+            completed: false,
           },
-        }),
-      ),
-    );
+        });
+      }
+
+      return Promise.all(
+        ICAP_TASK_TYPES.map((taskType) =>
+          tx.reviewTask.create({
+            data: {
+              userId: uid,
+              knowledgeNodeId,
+              taskType,
+              dueDate: now,
+            },
+          }),
+        ),
+      );
+    });
 
     return NextResponse.json(buildSessionResponse(progressAwareNode, tasks, 'active'));
   } catch (error: unknown) {

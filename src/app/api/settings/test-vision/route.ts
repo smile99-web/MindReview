@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { decryptSecret } from '@/lib/secrets';
-import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { requireAdmin } from '@/lib/require-admin';
 import { getErrorMessage } from '@/lib/errors';
 import { assertSafeExternalBaseUrl } from '@/lib/url-security';
 
@@ -16,8 +16,9 @@ import { assertSafeExternalBaseUrl } from '@/lib/url-security';
 // trying to upload a question photo.
 export async function POST(req: NextRequest) {
   try {
-    // Auth gate — this route reads the saved vision key.
-    await resolveUserIdFromRequest(req);
+    // 该路由会读取全局保存的 vision key，仅管理员可用
+    const denied = await requireAdmin(req);
+    if (denied) return denied;
 
     const { key, baseUrl, model } = (await req.json()) as {
       key?: string;
@@ -27,13 +28,18 @@ export async function POST(req: NextRequest) {
 
     // If no key supplied in body, fall back to the saved 'vision'
     // row so the user can also click "Test" without retyping.
+    // 只有用户显式提供自己的 key 时才允许自定义 baseUrl；
+    // 使用服务端保存的 key 时强制走服务端配置，防止 key 被发送到攻击者指定的 URL
     let effectiveKey = typeof key === 'string' ? key.trim() : '';
+    const hasOwnKey = effectiveKey.length > 0;
+    let savedBaseUrl = '';
     if (!effectiveKey) {
       const saved = await prisma.apiKey
         .findUnique({ where: { service: 'vision' } })
         .catch(() => null);
       if (saved?.isActive && saved.key) {
         effectiveKey = decryptSecret(saved.key);
+        savedBaseUrl = saved.baseUrl || '';
       }
     }
     if (!effectiveKey) {
@@ -43,9 +49,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const effectiveBaseUrl = (typeof baseUrl === 'string' && baseUrl.trim())
+    const effectiveBaseUrl = hasOwnKey && typeof baseUrl === 'string' && baseUrl.trim()
       ? assertSafeExternalBaseUrl(baseUrl.trim())
-      : 'https://api.minimaxi.com/v1';
+      : (savedBaseUrl ? assertSafeExternalBaseUrl(savedBaseUrl) : 'https://api.minimaxi.com/v1');
     const effectiveModel = (typeof model === 'string' && model.trim())
       ? model.trim()
       : 'MiniMax-M3';

@@ -1,7 +1,7 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { generatePath, checkPrerequisites, type PrerequisiteCheck } from '@/lib/learning-path';
+import { generatePath, batchCheckPrerequisites, type PrerequisiteCheck } from '@/lib/learning-path';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 
 /**
@@ -61,7 +61,8 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Generate path ---
-    const effectiveMaxSteps = maxSteps && maxSteps > 0 ? maxSteps : 20;
+    // maxSteps 上限 50：防止异常大值生成过长路径、放大后续查询压力
+    const effectiveMaxSteps = maxSteps && maxSteps > 0 ? Math.min(maxSteps, 50) : 20;
 
     const path = await generatePath(
       userId,
@@ -70,27 +71,29 @@ export async function POST(req: NextRequest) {
       prisma,
     );
 
-    // --- Prerequisite gating: check each step ---
+    // --- Prerequisite gating: 批量检查（一次取边 + 内存 BFS，避免逐步查询的 N+1） ---
     const blockedNodes: {
       nodeId: string;
       title: string;
       blockedBy: PrerequisiteCheck['blockedBy'];
     }[] = [];
 
-    const stepsWithLocks = await Promise.all(
-      path.steps.map(async (step) => {
-        const check = await checkPrerequisites(step.nodeId, userId, prisma, 60);
-        if (!check.canAccess) {
-          blockedNodes.push({
-            nodeId: step.nodeId,
-            title: step.title,
-            blockedBy: check.blockedBy,
-          });
-          return { ...step, locked: true };
-        }
-        return { ...step, locked: false };
-      }),
-    );
+    // scope 限定为路径涉及的节点，只加载相关 prerequisite 边
+    const stepNodeIds = path.steps.map((step) => step.nodeId);
+    const checks = await batchCheckPrerequisites(stepNodeIds, userId, prisma, 60, stepNodeIds);
+
+    const stepsWithLocks = path.steps.map((step) => {
+      const check = checks[step.nodeId];
+      if (!check.canAccess) {
+        blockedNodes.push({
+          nodeId: step.nodeId,
+          title: step.title,
+          blockedBy: check.blockedBy,
+        });
+        return { ...step, locked: true };
+      }
+      return { ...step, locked: false };
+    });
 
     const gatedPath = {
       ...path,

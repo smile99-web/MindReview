@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth';
@@ -95,6 +95,8 @@ export default function MistakeReviewPage({
   const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
   const [fsrsSubmitting, setFsrsSubmitting] = useState(false);
   const [fsrsResult, setFsrsResult] = useState<ReviewResult | null>(null);
+  // 题目展示时间戳：submitFSRS 用它计算本次复习耗时（durationMs）
+  const startTimeRef = useRef<number>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,7 +107,11 @@ export default function MistakeReviewPage({
           const data = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(data.error || `加载失败 (${res.status})`);
         }
-        if (!cancelled) setMistake((await res.json()) as MistakeDetail);
+        if (!cancelled) {
+          setMistake((await res.json()) as MistakeDetail);
+          // 题目加载展示出来即开始计时
+          startTimeRef.current = Date.now();
+        }
       } catch (err: unknown) {
         if (!cancelled) setError(getErrorMessage(err));
       } finally {
@@ -150,12 +156,13 @@ export default function MistakeReviewPage({
   const submitFSRS = async (rating: Rating) => {
     setFsrsSubmitting(true);
     setError('');
-    const t0 = Date.now();
+    // 耗时 = 从题目展示到点击评分的时间（startTimeRef 在 mistake 加载完成时记录）
+    const durationMs = startTimeRef.current ? Date.now() - startTimeRef.current : 0;
     try {
       const res = await authFetch(`/api/mistakes/${id}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rating, durationMs: Date.now() - t0 }),
+        body: JSON.stringify({ rating, durationMs }),
       });
       const data = (await res.json()) as ReviewResult & { error?: string };
       if (!res.ok) throw new Error(data.error || `提交失败 (${res.status})`);

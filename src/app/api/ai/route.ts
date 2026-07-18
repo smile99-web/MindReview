@@ -118,8 +118,11 @@ export async function GET(req: NextRequest) {
 
     if (action === 'list-logs') {
       const typesParam = searchParams.get('types');
-      const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-      const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
+      // parseInt 对非数字输入得 NaN，NaN 的 skip/take 会让 Prisma 忽略分页（全表扫描）
+      const rawPage = parseInt(searchParams.get('page') || '1', 10);
+      const rawLimit = parseInt(searchParams.get('limit') || '20', 10);
+      const page = Math.max(1, Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1);
+      const limit = Math.min(50, Math.max(1, Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 20));
 
       // UI 传 `types=llm,tts,image...` 多个值；空 / 'all' 不过滤。
       // AiGenerationLog.generatorType 实际值见代码各处写入：

@@ -106,7 +106,38 @@ export async function GET(req: NextRequest) {
     const maxTasks = mode === 'basic' ? 5 : mode === 'challenge' ? 12 : 8;
     const now = new Date();
 
+    // 候选池改为查询驱动：不再按 createdAt asc 截断取最旧 80 个节点
+    // （旧逻辑下 KnowledgeNode 总数超 80 后，新知识点永远进不了候选池，
+    // 最旧 80 个都未到期时复习页返回空）。分两路取候选 id 再合并：
+    // 1. userKnowledgeProgress 中 nextReviewAt 已到期（或为 null）的节点；
+    // 2. 尚无 progress 记录的新节点（应最优先首次回忆），按创建时间倒序限量。
+    const [dueProgressRows, newNodeRows] = await Promise.all([
+      prisma.userKnowledgeProgress.findMany({
+        where: {
+          userId,
+          OR: [{ nextReviewAt: { lte: now } }, { nextReviewAt: null }],
+        },
+        orderBy: { nextReviewAt: 'asc' },
+        take: 200,
+        select: { knowledgeNodeId: true },
+      }),
+      prisma.knowledgeNode.findMany({
+        where: { userProgress: { none: { userId } } },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: { id: true },
+      }),
+    ]);
+
+    const candidateIds = Array.from(
+      new Set([
+        ...dueProgressRows.map((row) => row.knowledgeNodeId),
+        ...newNodeRows.map((row) => row.id),
+      ]),
+    );
+
     const candidateNodes = await prisma.knowledgeNode.findMany({
+      where: { id: { in: candidateIds } },
       include: {
         subject: { select: { name: true } },
         chapter: { select: { title: true } },
@@ -119,8 +150,6 @@ export async function GET(req: NextRequest) {
           take: 1,
         },
       },
-      orderBy: { createdAt: 'asc' },
-      take: Math.max(maxTasks * 8, 80),
     });
 
     const dueNodes = candidateNodes
@@ -154,20 +183,54 @@ export async function GET(req: NextRequest) {
 
       if (!task) {
         const taskType = getReviewTaskType(node);
-        const createdTask = await prisma.reviewTask.create({
-          data: {
-            userId,
-            knowledgeNodeId: node.id,
-            taskType,
-            dueDate: now,
-          },
-        });
-        task = {
-          id: createdTask.id,
-          taskType: createdTask.taskType,
-          completed: createdTask.completed,
-          score: createdTask.score,
-        };
+        // 检查 + 创建包进 Serializable 事务：双击/预取/多标签并发时，
+        // 先查后建无事务会为同一 user+node 建出多条未完成 ReviewTask。
+        try {
+          task = await prisma.$transaction(
+            async (tx) => {
+              const existingTask = await tx.reviewTask.findFirst({
+                where: { userId, knowledgeNodeId: node.id, completed: false },
+              });
+              if (existingTask) {
+                return {
+                  id: existingTask.id,
+                  taskType: existingTask.taskType,
+                  completed: existingTask.completed,
+                  score: existingTask.score,
+                };
+              }
+              const createdTask = await tx.reviewTask.create({
+                data: {
+                  userId,
+                  knowledgeNodeId: node.id,
+                  taskType,
+                  dueDate: now,
+                },
+              });
+              return {
+                id: createdTask.id,
+                taskType: createdTask.taskType,
+                completed: createdTask.completed,
+                score: createdTask.score,
+              };
+            },
+            { isolationLevel: 'Serializable' },
+          );
+        } catch (error: unknown) {
+          // Serializable 冲突（P2034）：并发请求已建好任务，重新查询返回已有任务
+          const code = (error as { code?: string } | null)?.code;
+          if (code !== 'P2034') throw error;
+          const existingTask = await prisma.reviewTask.findFirst({
+            where: { userId, knowledgeNodeId: node.id, completed: false },
+          });
+          if (!existingTask) throw error;
+          task = {
+            id: existingTask.id,
+            taskType: existingTask.taskType,
+            completed: existingTask.completed,
+            score: existingTask.score,
+          };
+        }
       }
 
       tasks.push({
@@ -228,6 +291,23 @@ export async function POST(req: NextRequest) {
     }
     const safeQuality = Math.max(0, Math.min(5, Math.round(quality)));
 
+    // 先校验 taskId 再推进 SM-2：旧逻辑先推进排程后 updateMany 校验，
+    // 传不存在/他人的 taskId 时进度已被推进且无 reviewLog；重试同一
+    // taskId 还会反复推进排程。
+    if (taskId) {
+      const existingTask = await prisma.reviewTask.findFirst({
+        where: { id: taskId, userId: uid },
+        select: { id: true, completed: true },
+      });
+      if (!existingTask) {
+        return NextResponse.json({ error: 'Review task not found' }, { status: 404 });
+      }
+      if (existingTask.completed) {
+        // 幂等：任务已完成，直接返回成功，不再推进 SM-2、不重复写 reviewLog
+        return NextResponse.json({ success: true, alreadyCompleted: true });
+      }
+    }
+
     let progress;
     try {
       progress = await getOrCreateUserKnowledgeProgress(uid, knowledgeNodeId, prisma);
@@ -245,41 +325,45 @@ export async function POST(req: NextRequest) {
       lastReviewAt: progress.lastReviewAt,
     });
 
-    await updateUserKnowledgeProgress(uid, knowledgeNodeId, result.state, prisma);
+    // progress 更新 + task 完成 + reviewLog 创建必须原子提交，
+    // 避免中途失败留下"进度已推进但任务未完成/无日志"的中间态。
+    const reviewLogData = {
+      userId: uid,
+      knowledgeNodeId,
+      action: quality !== undefined ? 'solved' : 'reviewed',
+      quality: result.log.quality,
+      masteryBefore: progress.masteryLevel,
+      masteryAfter: result.state.masteryLevel,
+      easeFactorBefore: result.log.easeFactorBefore,
+      easeFactorAfter: result.log.easeFactorAfter,
+      intervalBefore: result.log.intervalBefore,
+      intervalAfter: result.log.intervalAfter,
+      // After value: matches the ReviewLog.repetitions schema comment
+      // ('本次复习时的连续正确次数' = the count as of this review).
+      repetitions: result.log.repetitionsAfter,
+      forgetRisk: result.log.forgetRisk,
+      durationSeconds: typeof durationSeconds === 'number' ? durationSeconds : null,
+    };
 
     if (taskId) {
-      const updatedTask = await prisma.reviewTask.updateMany({
-        where: { id: taskId, userId: uid },
-        data: {
-          completed: true,
-          completedAt: new Date(),
-          score: Math.round(safeQuality * 20),
-        },
+      await prisma.$transaction(async (tx) => {
+        await updateUserKnowledgeProgress(uid, knowledgeNodeId, result.state, tx as unknown as typeof prisma);
+        await tx.reviewTask.updateMany({
+          where: { id: taskId, userId: uid, completed: false },
+          data: {
+            completed: true,
+            completedAt: new Date(),
+            score: Math.round(safeQuality * 20),
+          },
+        });
+        await tx.reviewLog.create({ data: reviewLogData });
       });
-      if (updatedTask.count === 0) {
-        return NextResponse.json({ error: 'Review task not found' }, { status: 404 });
-      }
+    } else {
+      await prisma.$transaction(async (tx) => {
+        await updateUserKnowledgeProgress(uid, knowledgeNodeId, result.state, tx as unknown as typeof prisma);
+        await tx.reviewLog.create({ data: reviewLogData });
+      });
     }
-
-    await prisma.reviewLog.create({
-      data: {
-        userId: uid,
-        knowledgeNodeId,
-        action: quality !== undefined ? 'solved' : 'reviewed',
-        quality: result.log.quality,
-        masteryBefore: progress.masteryLevel,
-        masteryAfter: result.state.masteryLevel,
-        easeFactorBefore: result.log.easeFactorBefore,
-        easeFactorAfter: result.log.easeFactorAfter,
-        intervalBefore: result.log.intervalBefore,
-        intervalAfter: result.log.intervalAfter,
-        // After value: matches the ReviewLog.repetitions schema comment
-        // ('本次复习时的连续正确次数' = the count as of this review).
-        repetitions: result.log.repetitionsAfter,
-        forgetRisk: result.log.forgetRisk,
-        durationSeconds: typeof durationSeconds === 'number' ? durationSeconds : null,
-      },
-    });
 
     if (quality !== undefined && safeQuality < 3) {
       const severity = safeQuality === 0 ? 5 : safeQuality <= 1 ? 4 : 3;

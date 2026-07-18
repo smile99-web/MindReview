@@ -2,16 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encryptSecret, maskSecret } from "@/lib/secrets";
 import { assertSafeExternalBaseUrl } from "@/lib/url-security";
-import { resolveUserIdFromRequest } from "@/lib/user-context";
+import { requireAdmin } from "@/lib/require-admin";
 
 const SERVICES = new Set(["llm", "tts", "image", "embedding", "vision"]);
 
 export async function GET(req: NextRequest) {
   try {
-    // Require auth — this route lists global API keys (even if masked).
-    // Defense in depth: the proxy already blocks unauthenticated requests,
-    // but a forged JWT slipping past the proxy could still read this list.
-    await resolveUserIdFromRequest(req);
+    // 全局 API Key 列表（即使已脱敏）仅管理员可读
+    const denied = await requireAdmin(req);
+    if (denied) return denied;
 
     const keys = await prisma.apiKey.findMany({
       select: {
@@ -41,10 +40,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    // Defense in depth: this route mutates global API keys shared by all
-    // users (LLM, TTS, Image, Embedding). Proxy already blocks unauth
-    // requests; this catches forged-JWT bypasses.
-    await resolveUserIdFromRequest(req);
+    // 全局 API Key 为全站共享配置，仅管理员可写
+    const denied = await requireAdmin(req);
+    if (denied) return denied;
 
     const body = await req.json();
     const service = typeof body.service === "string" ? body.service : "";
@@ -88,8 +86,9 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    // Defense in depth: this route deletes global API keys.
-    await resolveUserIdFromRequest(req);
+    // 全局 API Key 为全站共享配置，仅管理员可删
+    const denied = await requireAdmin(req);
+    if (denied) return denied;
 
     const { searchParams } = new URL(req.url);
     const service = searchParams.get('service');

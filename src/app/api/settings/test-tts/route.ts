@@ -2,15 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secrets";
 import { synthesizeSpeech } from "@/lib/tts-client";
-import { resolveUserIdFromRequest } from "@/lib/user-context";
+import { requireAdmin } from "@/lib/require-admin";
 
 const DEFAULT_RESOURCE_ID = process.env.DOUBAO_TTS_RESOURCE_ID || "seed-tts-2.0";
 const DEFAULT_VOICE_TYPE = process.env.DOUBAO_TTS_VOICE_TYPE || "zh_female_vv_uranus_bigtts";
 
 export async function POST(req: NextRequest) {
   try {
-    // Defense in depth: this route triggers a live TTS API call ($$$).
-    await resolveUserIdFromRequest(req);
+    // 该路由会真实调用 TTS API（消耗费用）并读取全局配置，仅管理员可用
+    const denied = await requireAdmin(req);
+    if (denied) return denied;
 
     const { key, baseUrl, cluster, model, resourceId, voiceType } = await req.json();
     const saved = await prisma.apiKey.findUnique({ where: { service: "tts" } });

@@ -42,10 +42,28 @@ export function sanitizeJsonString(raw: string): string {
 
     let depth = 0;
     let endIdx = -1;
+    // 跟踪字符串字面量与 \ 转义状态：字符串内容里的花括号不参与配对，
+    // 否则会提前截断（参考 tts-client.ts 的 parseConcatenatedJson）
+    let inString = false;
+    let escaped = false;
     for (let i = startIdx; i < cleaned.length; i++) {
-      if (cleaned[i] === openChar) {
+      const ch = cleaned[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === openChar) {
         depth++;
-      } else if (cleaned[i] === closeChar) {
+      } else if (ch === closeChar) {
         depth--;
         if (depth === 0) {
           endIdx = i;

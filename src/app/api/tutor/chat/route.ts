@@ -31,6 +31,11 @@ export async function POST(req: NextRequest) {
     if (!message || !message.trim()) {
       return NextResponse.json({ error: '缺少 message' }, { status: 400 });
     }
+    // sessionId 归属编码用 '::' 分隔（tutor-persistence.ts）。客户端提供的
+    // sessionId 若含 ':' 可伪造归属前缀、往他人会话列表注入伪造会话 → 拒绝
+    if (inputSessionId && (typeof inputSessionId !== 'string' || inputSessionId.includes(':'))) {
+      return NextResponse.json({ error: '无效的会话 ID' }, { status: 400 });
+    }
 
     // --- Fetch knowledge node ---
     const node = await prisma.knowledgeNode.findUnique({

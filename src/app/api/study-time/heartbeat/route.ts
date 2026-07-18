@@ -2,6 +2,7 @@ import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUserId } from '@/lib/server-auth';
+import { appDateKey, startOfAppDay } from '@/lib/date-utils';
 
 // 单次心跳最多承认 5 分钟，防客户端时钟漂移 / 长时挂起后回传巨大值。
 const MAX_HEARTBEAT_SECONDS = 300;
@@ -96,10 +97,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: '未登录或会话已过期' }, { status: 401 });
   }
 
-  // 用 UTC 锚定"今天"，与 analytics 一致（避免 VPS 时区切错日期）
+  // 用 UTC+8 日界锚定"今天"，与 analytics / dashboard 口径一致（用户在中国）
   const now = new Date();
-  const todayKey = now.toISOString().slice(0, 10);
-  const startOfToday = new Date(todayKey + 'T00:00:00.000Z');
+  const startOfToday = startOfAppDay(appDateKey(now));
 
   const [todayAgg, last7Agg] = await Promise.all([
     prisma.studyTimeLog.aggregate({

@@ -37,6 +37,11 @@ export async function saveChatMessage(
   content: string,
   prisma: PrismaClient,
 ) {
+  // 防御性校验：归属编码以 '::' 分隔，sessionId 含 ':' 会破坏编码结构
+  // （正常调用方已在路由层拦截，这里是兜底）
+  if (sessionId.includes(':')) {
+    throw new Error('Invalid sessionId: must not contain ":"');
+  }
   const timestamp = new Date().toISOString();
   await prisma.aiGenerationLog.create({
     data: {

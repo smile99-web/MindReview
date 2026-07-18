@@ -114,14 +114,24 @@ export default function DashboardPage() {
     loadSteps();
   }, [userId]);
 
+  // 用户关闭/跳过/完成诊断后持久化标记，防止 effect 重跑或下次访问时面板重新弹出
+  const dismissDiagnostic = () => {
+    if (!userId) return;
+    try {
+      localStorage.setItem(`diagnostic_dismissed_${userId}`, '1');
+    } catch { /* ignore */ }
+  };
+
   // Auto-show diagnostic for new users with zero review history
   useEffect(() => {
-    if (profileLoaded && stats.totalReviewCount === 0 && !diagnosticResult && !showDiagnostic) {
+    if (!userId) return;
+    const dismissed = localStorage.getItem(`diagnostic_dismissed_${userId}`) === '1';
+    if (profileLoaded && stats.totalReviewCount === 0 && !diagnosticResult && !showDiagnostic && !dismissed) {
       queueMicrotask(() => {
         setShowDiagnostic(true);
       });
     }
-  }, [profileLoaded, stats.totalReviewCount, diagnosticResult, showDiagnostic]);
+  }, [profileLoaded, stats.totalReviewCount, diagnosticResult, showDiagnostic, userId]);
 
   const handleRunDiagnostic = async () => {
     if (!userId || diagnosticRunning) return;
@@ -152,6 +162,7 @@ export default function DashboardPage() {
           gaps: diag.gaps || [],
           recommendedStartingPoint: diag.recommendedStartingPoint || '',
         });
+        dismissDiagnostic();
       }
     } catch (err) {
       console.error('Onboarding diagnostic failed:', err);
@@ -276,7 +287,10 @@ export default function DashboardPage() {
                   )}
                 </button>
                 <button
-                  onClick={() => setShowDiagnostic(false)}
+                  onClick={() => {
+                    dismissDiagnostic();
+                    setShowDiagnostic(false);
+                  }}
                   className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-white/80 transition-colors duration-200"
                 >
                   跳过
@@ -372,6 +386,7 @@ export default function DashboardPage() {
                 )}
                 <button
                   onClick={() => {
+                    dismissDiagnostic();
                     setShowDiagnostic(false);
                     setDiagnosticResult(null);
                   }}

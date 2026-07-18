@@ -114,6 +114,21 @@ interface PracticeRequestBody {
   selfQuality?: unknown;
 }
 
+/**
+ * 提取选择题答案的选项字母（label）。
+ * 命中形态：整个答案就是单个字母（"C"/"c"），或以字母+分隔符开头（"C. xxx"、"C、xxx"、"C xxx"）。
+ * 返回小写字母；不是 label 形态返回 null。
+ */
+function extractChoiceLabel(raw: string): string | null {
+  const trimmed = raw.trim();
+  const m = trimmed.match(/^([A-Za-z])(?:[.、．:：]|\s|$)/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// 判断题同义词映射：答 "对"/"正确"/"T" 与库存 "正确" 应判等
+const TRUE_WORDS = new Set(['正确', '对', 'true', 't', 'yes', 'y', '√']);
+const FALSE_WORDS = new Set(['错误', '错', 'false', 'f', 'no', 'n', '×', 'x']);
+
 function compareAnswer(
   userAnswer: string,
   correctAnswer: string,
@@ -127,16 +142,31 @@ function compareAnswer(
   }
 
   if (questionType === 'multiple_choice' || questionType === 'true_false') {
-    // Exact match after normalization (handles "A", "a", "a.", "A.", etc.)
-    return { isCorrect: ua === ca, normalizedUser: ua, normalizedCorrect: ca };
+    // 1) 全等（normalize 后）直接判对
+    if (ua === ca) {
+      return { isCorrect: true, normalizedUser: ua, normalizedCorrect: ca };
+    }
+    // 2) 选择题：按选项字母比对——库存 "C. 土地公有制" 答 "C" 也算对
+    const userLabel = extractChoiceLabel(userAnswer);
+    const correctLabel = extractChoiceLabel(correctAnswer);
+    if (userLabel && correctLabel) {
+      return { isCorrect: userLabel === correctLabel, normalizedUser: ua, normalizedCorrect: ca };
+    }
+    // 3) 判断题：同义词映射（对/正确/true/T ↔ 错/错误/false/F）
+    const boolOf = (s: string): boolean | null =>
+      TRUE_WORDS.has(s) ? true : FALSE_WORDS.has(s) ? false : null;
+    const ub = boolOf(ua);
+    const cb = boolOf(ca);
+    if (ub !== null && cb !== null) {
+      return { isCorrect: ub === cb, normalizedUser: ua, normalizedCorrect: ca };
+    }
+    return { isCorrect: false, normalizedUser: ua, normalizedCorrect: ca };
   }
 
   if (questionType === 'fill_blank') {
-    // Substring match in either direction
-    const correct =
-      ua === ca ||
-      ua.includes(ca) ||
-      ca.includes(ua);
+    // 全等，或学生答案包含完整正确答案（答得更完整可接受）。
+    // 注意：不允许 ca.includes(ua)——否则只答"加"（正确答案"加速度"）也会判对。
+    const correct = ua === ca || ua.includes(ca);
     return { isCorrect: correct, normalizedUser: ua, normalizedCorrect: ca };
   }
 
@@ -641,9 +671,7 @@ async function handleSubmitAnswer(body: PracticeRequestBody, uid: string) {
     return NextResponse.json({ error: 'Associated KnowledgeNode not found' }, { status: 500 });
   }
 
-  const progress = await getOrCreateUserKnowledgeProgress(uid, node.id, prisma);
-
-  // --- compare answer ---
+  // --- compare answer（LLM 判分保持在事务外，避免长事务） ---
   const grade = await gradePracticeAnswer({
     question,
     userAnswer: answerStr,
@@ -651,39 +679,63 @@ async function handleSubmitAnswer(body: PracticeRequestBody, uid: string) {
   });
   const { isCorrect, quality } = grade;
 
-  // --- SM-2 scheduling ---
-  const sm2Result = sm2(quality, {
-    repetitions: progress.repetitions,
-    easeFactor: progress.easeFactor,
-    intervalDays: progress.intervalDays,
-    lastReviewAt: progress.lastReviewAt,
-  });
-
-  // --- atomic transaction: SM-2 progress + ReviewLog must advance together ---
-  // If the request fails mid-way, the user shouldn't end up with
-  // an advanced mastery but no audit row (or vice versa) — the
-  // analytics dashboard reads ReviewLog to compute averages, so
-  // partial writes corrupt the 30-day stats.
-  await prisma.$transaction(async (tx) => {
-    await updateUserKnowledgeProgress(uid, node.id, sm2Result.state, tx as unknown as typeof prisma);
-    await tx.reviewLog.create({
-      data: {
-        userId: uid,
-        knowledgeNodeId: node.id,
-        action: isCorrect ? 'solved' : 'mistake',
-        quality,
-        masteryBefore: progress.masteryLevel,
-        masteryAfter: sm2Result.state.masteryLevel,
-        easeFactorBefore: sm2Result.log.easeFactorBefore,
-        easeFactorAfter: sm2Result.log.easeFactorAfter,
-        intervalBefore: sm2Result.log.intervalBefore,
-        intervalAfter: sm2Result.log.intervalAfter,
-        repetitions: sm2Result.log.repetitionsAfter,
-        forgetRisk: sm2Result.log.forgetRisk,
-        durationSeconds: durationSeconds || null,
+  // --- atomic transaction: read progress → SM-2 → write must be one unit ---
+  // Serializable 防并发提交互相覆盖：两次并发若读到同一 progress 快照，
+  // 后写会覆盖先写导致 repetitions 只 +1（丢失更新）。
+  // 事务冲突（P2034/40001）时整个事务重试一次，重新读最新状态。
+  type Sm2Outcome = {
+    progress: Awaited<ReturnType<typeof getOrCreateUserKnowledgeProgress>>;
+    sm2Result: ReturnType<typeof sm2>;
+  };
+  const runSm2Transaction = (): Promise<Sm2Outcome> =>
+    prisma.$transaction(
+      async (tx) => {
+        const progress = await getOrCreateUserKnowledgeProgress(
+          uid,
+          node.id,
+          tx as unknown as typeof prisma,
+        );
+        const sm2Result = sm2(quality, {
+          repetitions: progress.repetitions,
+          easeFactor: progress.easeFactor,
+          intervalDays: progress.intervalDays,
+          lastReviewAt: progress.lastReviewAt,
+        });
+        await updateUserKnowledgeProgress(uid, node.id, sm2Result.state, tx as unknown as typeof prisma);
+        await tx.reviewLog.create({
+          data: {
+            userId: uid,
+            knowledgeNodeId: node.id,
+            action: isCorrect ? 'solved' : 'mistake',
+            quality,
+            masteryBefore: progress.masteryLevel,
+            masteryAfter: sm2Result.state.masteryLevel,
+            easeFactorBefore: sm2Result.log.easeFactorBefore,
+            easeFactorAfter: sm2Result.log.easeFactorAfter,
+            intervalBefore: sm2Result.log.intervalBefore,
+            intervalAfter: sm2Result.log.intervalAfter,
+            repetitions: sm2Result.log.repetitionsAfter,
+            forgetRisk: sm2Result.log.forgetRisk,
+            durationSeconds: durationSeconds || null,
+          },
+        });
+        return { progress, sm2Result };
       },
-    });
-  });
+      { isolationLevel: 'Serializable' },
+    );
+
+  let progress: Sm2Outcome['progress'];
+  let sm2Result: Sm2Outcome['sm2Result'];
+  try {
+    ({ progress, sm2Result } = await runSm2Transaction());
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code;
+    if (code === 'P2034' || code === '40001') {
+      ({ progress, sm2Result } = await runSm2Transaction());
+    } else {
+      throw err;
+    }
+  }
 
   // --- if wrong, also record in Mistake (错题本) so the user can review it later ---
   if (!isCorrect) {

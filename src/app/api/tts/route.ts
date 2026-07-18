@@ -11,22 +11,27 @@ const DEFAULT_VOICE_TYPE = process.env.DOUBAO_TTS_VOICE_TYPE || "zh_female_vv_ur
 
 export async function POST(req: NextRequest) {
   try {
-    const uid = await resolveUserIdFromRequest(req);
+    // 鉴权：TTS 是付费调用；缓存改为全库共享后不再按用户过滤
+    await resolveUserIdFromRequest(req);
     const body = await req.json();
     const { text, contentType, contentRefId, voiceType } = body;
 
     if (!text) {
       return NextResponse.json({ error: "Missing text content" }, { status: 400 });
     }
+    // 单次付费调用要有长度上限，避免不受限的 TTS 费用
+    if (text.length > 2000) {
+      return NextResponse.json({ error: "文本过长" }, { status: 400 });
+    }
 
     const saved = await prisma.apiKey.findUnique({ where: { service: "tts" } });
     const voice = voiceType || saved?.model || DEFAULT_VOICE_TYPE;
     const resourceId = saved?.baseUrl || DEFAULT_RESOURCE_ID;
 
+    // 缓存全库共享：相同文本 + 音色只生成一次，不按 userId 隔离
     const existingWhere: Prisma.AudioAssetWhereInput = {
       text,
       voiceType: voice,
-      OR: [{ userId: uid }, { userId: null }],
     };
     if (contentType) existingWhere.contentType = contentType;
     if (contentRefId) existingWhere.contentRefId = contentRefId;
@@ -59,7 +64,7 @@ export async function POST(req: NextRequest) {
 
     const asset = await prisma.audioAsset.create({
       data: {
-        userId: uid,
+        userId: null, // 共享缓存资产，不归属单个用户
         contentType: contentType || "card",
         contentRefId,
         text,
@@ -110,7 +115,9 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const contentType = searchParams.get("contentType");
     const contentRefId = searchParams.get("contentRefId");
-    const limit = Math.min(20, Math.max(1, Number(searchParams.get("limit") || 10)));
+    // parseInt 对非数字输入得 NaN，NaN 的 take 会让 Prisma 忽略分页
+    const rawLimit = parseInt(searchParams.get("limit") || "10", 10);
+    const limit = Math.min(20, Math.max(1, Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 10));
 
     const where: Prisma.AudioAssetWhereInput = {
       OR: [{ userId: uid }, { userId: null }],

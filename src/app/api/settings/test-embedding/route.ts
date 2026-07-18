@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secrets";
-import { resolveUserIdFromRequest } from "@/lib/user-context";
+import { assertSafeExternalBaseUrl } from "@/lib/url-security";
+import { requireAdmin } from "@/lib/require-admin";
 
 /**
  * Test Doubao Embedding Vision API connectivity.
@@ -10,29 +11,37 @@ import { resolveUserIdFromRequest } from "@/lib/user-context";
  */
 export async function POST(req: NextRequest) {
   try {
-    // Defense in depth: this route triggers a live embedding API call ($$$).
-    await resolveUserIdFromRequest(req);
+    // 该路由会真实调用 Embedding API（消耗费用）并读取全局配置，仅管理员可用
+    const denied = await requireAdmin(req);
+    if (denied) return denied;
 
     const body = await req.json();
     const key = typeof body.key === "string" ? body.key.trim() : "";
-    const baseUrl =
-      typeof body.baseUrl === "string" ? body.baseUrl.trim() : "https://ark.cn-beijing.volces.com/api/v3";
     const model =
       typeof body.model === "string" ? body.model.trim() : "doubao-embedding-vision-250615";
 
     // Resolve key: use provided key, or fall back to DB-stored key
+    // 只有用户显式提供自己的 key 时才允许自定义 baseUrl；
+    // 使用服务端保存的 key 时强制走服务端保存的配置/默认地址，防止 key 被发送到攻击者指定的 URL
     let apiKey = key;
+    let baseUrl = "";
     if (!apiKey) {
       const stored = await prisma.apiKey.findUnique({ where: { service: "embedding" } });
       if (!stored) {
         return NextResponse.json({ ok: false, error: "未配置 Embedding API Key" }, { status: 400 });
       }
       apiKey = decryptSecret(stored.key);
+      baseUrl = stored.baseUrl || "https://ark.cn-beijing.volces.com/api/v3";
+    } else {
+      baseUrl =
+        (typeof body.baseUrl === "string" && body.baseUrl.trim()) ||
+        "https://ark.cn-beijing.volces.com/api/v3";
     }
+    const safeBaseUrl = assertSafeExternalBaseUrl(baseUrl);
 
     const start = Date.now();
 
-    const res = await fetch(`${baseUrl}/embeddings/multimodal`, {
+    const res = await fetch(`${safeBaseUrl}/embeddings/multimodal`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

@@ -113,7 +113,8 @@ export default function SettingsPage() {
     setKeys((prev) => {
       const next = { ...prev };
       for (const saved of data) {
-        if (saved.service !== "llm" && saved.service !== "tts" && saved.service !== "image" && saved.service !== "embedding") continue;
+        // 过滤条件必须覆盖全部服务卡片（含 vision），否则保存后刷新不回填
+        if (saved.service !== "llm" && saved.service !== "tts" && saved.service !== "image" && saved.service !== "embedding" && saved.service !== "vision") continue;
         const svc = saved.service;
         next[svc] = {
           ...next[svc],

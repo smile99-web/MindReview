@@ -50,10 +50,11 @@ export async function GET(
     const enriched = mistakes.map((m) => ({
       ...m,
       // Surface the "due now" hint at the API layer so the UI
-      // doesn't have to re-implement the date math.
-      isDue:
-        !m.resolved &&
-        (m.nextReviewAt === null || m.nextReviewAt.getTime() <= now),
+      // doesn't have to re-implement the date math. resolved 的
+      // 错题到期后同样视为到期（否则 FSRS 闭环断裂）。
+      isDue: !m.resolved
+        ? m.nextReviewAt === null || m.nextReviewAt.getTime() <= now
+        : m.nextReviewAt !== null && m.nextReviewAt.getTime() <= now,
       daysUntilDue: m.nextReviewAt
         ? Math.max(0, Math.ceil((m.nextReviewAt.getTime() - now) / (24 * 60 * 60 * 1000)))
         : 0,

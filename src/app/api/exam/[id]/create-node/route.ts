@@ -53,12 +53,13 @@ export async function POST(
     // was previously created from this exam, return its id.
     // The marker is stored in the node's keywords[] field, prefixed
     // with 'exam:' so we can find it without a separate column.
+    // No subject filter here: creation below falls back to "通用"
+    // when the exam's subject is unknown, so filtering by
+    // subjectName would never match and would duplicate nodes
+    // (same shape as doc/create-node).
     const marker = `exam:${examId}`;
     const existing = await prisma.knowledgeNode.findFirst({
-      where: {
-        keywords: { has: marker },
-        subject: { name: exam.subjectName || '通用' },
-      },
+      where: { keywords: { has: marker } },
       select: { id: true },
     });
     if (existing) {

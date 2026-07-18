@@ -144,16 +144,24 @@ export async function searchSimilarNodes(
   const where: Record<string, unknown> = {};
   if (subjectId) where.subjectId = subjectId;
 
-  // Fetch nodes without embedding (unsupported type) and use text-based scoring
+  // 两阶段：先 ILIKE 预过滤候选（与下方打分子串逻辑同口径），再内存打分。
+  // 之前是 take:100 任意 100 行后打分——节点超过 100 后，之外的节点永远搜不到。
+  // take:500 只是兜底安全上限，正常匹配集远小于它。
   const nodes = await prisma.knowledgeNode.findMany({
-    where,
+    where: {
+      ...where,
+      OR: [
+        { title: { contains: query, mode: 'insensitive' } },
+        { summary: { contains: query, mode: 'insensitive' } },
+      ],
+    },
     select: {
       id: true,
       title: true,
       summary: true,
       subject: { select: { name: true } },
     },
-    take: 100,
+    take: 500,
   });
 
   const scored = nodes

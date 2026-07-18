@@ -41,7 +41,13 @@ export async function POST(req: NextRequest) {
 
     const tb = await prisma.textbookUpload.findUnique({
       where: { id: textbookId },
-      select: { userId: true, content: true, fileName: true, subjectId: true },
+      select: {
+        userId: true,
+        content: true,
+        fileName: true,
+        subjectId: true,
+        chapterImports: true,
+      },
     });
     if (!tb) {
       return NextResponse.json({ error: '教材不存在' }, { status: 404 });
@@ -145,16 +151,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Persist the chapter list along with import status (all
-    // 'pending' on initial decompose).
+    // Persist the chapter list along with import status. Chapters
+    // already imported keep their 'imported' status / chapterId /
+    // nodeIds (matched by title) — a repeat decompose must not wipe
+    // them; unmatched old entries are dropped.
+    const prevImports = ((tb.chapterImports as unknown) as Array<{
+      chapterTitle: string;
+      status: string;
+      chapterId?: string;
+      nodeIds?: string[];
+    }>) || [];
+    const importedByTitle = new Map(
+      prevImports
+        .filter((c) => c.status === 'imported')
+        .map((c) => [c.chapterTitle, c]),
+    );
     await prisma.textbookUpload.update({
       where: { id: textbookId },
       data: {
         decomposedChapters: chapters as unknown as object,
-        chapterImports: chapters.map((c) => ({
-          chapterTitle: c.title,
-          status: 'pending',
-        })) as unknown as object,
+        chapterImports: chapters.map(
+          (c) =>
+            importedByTitle.get(c.title) ?? {
+              chapterTitle: c.title,
+              status: 'pending',
+            },
+        ) as unknown as object,
       },
     });
 

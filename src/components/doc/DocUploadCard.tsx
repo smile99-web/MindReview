@@ -208,9 +208,12 @@ export function DocUploadCard() {
   // ── derived ────────────────────────────────────────────────────────────
   const knowledgePoints = (doc?.knowledgePoints?.nodes || []) as KnowledgePointItem[];
   const allQuestions = (doc?.practiceQuestions || []) as PracticeQuestionItem[];
+  // 过滤时携带原始下标：practiceAnswers 始终以题目在 allQuestions 中的下标为 key，
+  // 避免切换题型筛选后答案归属错乱、提交时错题记录下标错位
+  const indexedQuestions = allQuestions.map((q, originalIdx) => ({ q, originalIdx }));
   const filteredQuestions = typeFilter
-    ? allQuestions.filter((q) => q.questionType === typeFilter)
-    : allQuestions;
+    ? indexedQuestions.filter((item) => item.q.questionType === typeFilter)
+    : indexedQuestions;
   const typeCounts: Record<string, number> = {};
   allQuestions.forEach((q) => {
     const t = q.questionType || 'unknown';
@@ -514,7 +517,7 @@ function PracticeSession({
   typeCounts,
   typeLabels,
 }: {
-  questions: PracticeQuestionItem[];
+  questions: Array<{ q: PracticeQuestionItem; originalIdx: number }>;
   allQuestions: PracticeQuestionItem[];
   answers: Record<number, string>;
   submitted: boolean;
@@ -526,9 +529,10 @@ function PracticeSession({
   typeCounts: Record<string, number>;
   typeLabels: Record<string, string>;
 }) {
-  const allAnswered = questions.length > 0 && questions.every((_, i) => !!answers[i]);
+  // 是否全部答完基于全部题目（而非当前过滤视图）；answers 以原始下标为 key
+  const allAnswered = allQuestions.length > 0 && allQuestions.every((_, i) => !!answers[i]);
   const correctCount = questions.filter(
-    (q, i) => answers[i] && q.answer && answers[i] === q.answer,
+    ({ q, originalIdx }) => answers[originalIdx] && q.answer && answers[originalIdx] === q.answer,
   ).length;
 
   return (
@@ -583,7 +587,7 @@ function PracticeSession({
       )}
 
       <div className="space-y-3">
-        {questions.map((q, qi) => {
+        {questions.map(({ q, originalIdx: qi }) => {
           const userAns = answers[qi];
           const correct = submitted && userAns && userAns === q.answer;
           const wrong = submitted && userAns && userAns !== q.answer;

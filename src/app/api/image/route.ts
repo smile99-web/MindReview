@@ -88,7 +88,9 @@ export async function GET(req: NextRequest) {
     const imageType = searchParams.get('imageType');
     const status = searchParams.get('status');
     const contentRefId = searchParams.get('contentRefId');
-    const limit = Math.min(50, Math.max(1, Number(searchParams.get('limit') || 50)));
+    // parseInt 对非数字输入得 NaN，NaN 的 take 会让 Prisma 忽略分页
+    const rawLimit = parseInt(searchParams.get('limit') || '50', 10);
+    const limit = Math.min(50, Math.max(1, Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 50));
 
     const where: Prisma.ImageAssetWhereInput = {};
     if (imageType) where.imageType = imageType;

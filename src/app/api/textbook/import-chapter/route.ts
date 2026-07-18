@@ -78,6 +78,23 @@ export async function POST(req: NextRequest) {
     }
     const chapter = chapters[chapterIdx];
 
+    // 防重复导入：该章节已成功导入过时直接复用已有 chapterId，
+    // 不建数据、不调 LLM（双击 / 重试 / 并发安全）。
+    const prevImports = ((tb.chapterImports as unknown) as Array<{
+      chapterTitle: string;
+      status: string;
+      chapterId?: string;
+      nodeIds?: string[];
+    }>) || [];
+    const prevImport = prevImports[chapterIdx];
+    if (prevImport?.status === 'imported' && prevImport.chapterId) {
+      return NextResponse.json({
+        success: true,
+        chapterId: prevImport.chapterId,
+        alreadyImported: true,
+      });
+    }
+
     // Resolve or create a Subject. The textbook's bound subjectId
     // takes priority; otherwise fall back to "通用".
     let subjectId = tb.subjectId;
@@ -91,24 +108,11 @@ export async function POST(req: NextRequest) {
       subjectId = fallback.id;
     }
 
-    // Create the Chapter row.
-    const maxSort = await prisma.chapter.aggregate({
-      where: { subjectId },
-      _max: { sortOrder: true },
-    });
-    const newChapter = await prisma.chapter.create({
-      data: {
-        subjectId,
-        title: chapter.title,
-        sortOrder: (maxSort._max.sortOrder ?? -1) + 1,
-      },
-      select: { id: true, title: true, subjectId: true },
-    });
-
-    // Run the per-chapter LLM decomposition. We feed the full
-    // textbook content but ask the LLM to focus on this specific
-    // chapter — the prompt names the chapter title so the LLM
-    // filters to the right slice of content.
+    // Run the per-chapter LLM decomposition BEFORE creating any DB
+    // rows — an LLM failure must not leave an orphan Chapter behind.
+    // We feed the full textbook content but ask the LLM to focus on
+    // this specific chapter — the prompt names the chapter title so
+    // the LLM filters to the right slice of content.
     const result = (await decomposeKnowledge(
       // Subject name (best-effort) — used in the system prompt.
       // If we only have the id, fall back to '通用' (the
@@ -137,53 +141,56 @@ export async function POST(req: NextRequest) {
       gradeLevel: n.gradeLevel || null,
     }));
 
-    // Bulk-create KnowledgeNode rows in a callback-style transaction.
-    // The previous $transaction([...]) array form is "interactive"
-    // — Prisma creates the rows as the array is evaluated, so a
-    // mid-stream failure leaves partial nodes + the chapter
-    // stamped 'imported' with inconsistent nodeIds. The callback
-    // form runs all creates inside one DB transaction that
-    // either commits or rolls back atomically.
-    const createdNodes: { id: string; title: string }[] = knowledgeNodes.length > 0
-      ? await prisma.$transaction(
-          async (tx) => {
-            const rows: { id: string; title: string }[] = [];
-            for (const n of knowledgeNodes) {
-              const row = await tx.knowledgeNode.create({
-                data: {
-                  subjectId,
-                  chapterId: newChapter.id,
-                  title: n.title,
-                  summary: n.summary,
-                  keywords: n.keywords,
-                  prerequisites: n.prerequisites,
-                  commonMistakes: n.commonMistakes,
-                  typicalQuestions: n.typicalQuestions,
-                  difficulty: n.difficulty,
-                  cognitiveLoad: n.cognitiveLoad,
-                  icapLevel: n.icapLevel,
-                  // LLM-supplied grade tag — drives subject/[id] chapter
-                  // grouping. May be missing for legacy data; UI
-                  // gracefully falls back to sortOrder-based grouping.
-                  gradeLevel: n.gradeLevel || null,
-                },
-                select: { id: true, title: true },
-              });
-              rows.push(row);
-            }
-            return rows;
+    // Create the Chapter row + bulk-create KnowledgeNode rows in ONE
+    // callback-style transaction: either everything commits or
+    // everything rolls back — a mid-stream failure never leaves an
+    // empty Chapter or partial nodes behind.
+    const { newChapter, createdNodes } = await prisma.$transaction(
+      async (tx) => {
+        const maxSort = await tx.chapter.aggregate({
+          where: { subjectId },
+          _max: { sortOrder: true },
+        });
+        const chapterRow = await tx.chapter.create({
+          data: {
+            subjectId,
+            title: chapter.title,
+            sortOrder: (maxSort._max.sortOrder ?? -1) + 1,
           },
-          { timeout: 60000 },
-        )
-      : [];
+          select: { id: true, title: true, subjectId: true },
+        });
+        const rows: { id: string; title: string }[] = [];
+        for (const n of knowledgeNodes) {
+          const row = await tx.knowledgeNode.create({
+            data: {
+              subjectId,
+              chapterId: chapterRow.id,
+              title: n.title,
+              summary: n.summary,
+              keywords: n.keywords,
+              prerequisites: n.prerequisites,
+              commonMistakes: n.commonMistakes,
+              typicalQuestions: n.typicalQuestions,
+              difficulty: n.difficulty,
+              cognitiveLoad: n.cognitiveLoad,
+              icapLevel: n.icapLevel,
+              // LLM-supplied grade tag — drives subject/[id] chapter
+              // grouping. May be missing for legacy data; UI
+              // gracefully falls back to sortOrder-based grouping.
+              gradeLevel: n.gradeLevel || null,
+            },
+            select: { id: true, title: true },
+          });
+          rows.push(row);
+        }
+        return { newChapter: chapterRow, createdNodes: rows };
+      },
+      { timeout: 60000 },
+    );
 
     // Mark the chapter as imported in the textbook's tracking
     // array. If this was the first import, also stamp subjectId
     // (so the list view shows it).
-    const prevImports = ((tb.chapterImports as unknown) as Array<{
-      chapterTitle: string;
-      status: string;
-    }>) || [];
     const nextImports = prevImports.map((c, i) =>
       i === chapterIdx
         ? { ...c, status: 'imported', chapterId: newChapter.id, nodeIds: createdNodes.map((n) => n.id) }

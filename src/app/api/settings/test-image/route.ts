@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/secrets";
 import { assertSafeExternalBaseUrl } from "@/lib/url-security";
-import { resolveUserIdFromRequest } from "@/lib/user-context";
+import { requireAdmin } from "@/lib/require-admin";
 
 function describeError(err: unknown): string {
   if (!(err instanceof Error)) return "Image test failed";
@@ -15,18 +15,22 @@ function describeError(err: unknown): string {
 
 export async function POST(req: NextRequest) {
   try {
-    // Defense in depth: this route triggers a live image-gen API call ($$$).
-    await resolveUserIdFromRequest(req);
+    // 该路由会真实调用图像生成 API（消耗费用）并读取全局配置，仅管理员可用
+    const denied = await requireAdmin(req);
+    if (denied) return denied;
 
     const { key, baseUrl, model } = await req.json();
     const saved = await prisma.apiKey.findUnique({ where: { service: "image" } });
-    const apiKey = key || process.env.SEEDREAM_API_KEY || (saved?.key ? decryptSecret(saved.key) : "");
+    // 只有用户显式提供自己的 key 时才允许自定义 baseUrl；
+    // 使用服务端保存/env 的 key 时强制走服务端配置，防止 key 被发送到攻击者指定的 URL
+    const hasOwnKey = typeof key === "string" && key.trim().length > 0;
+    const apiKey = hasOwnKey ? key : process.env.SEEDREAM_API_KEY || (saved?.key ? decryptSecret(saved.key) : "");
 
     if (!apiKey) {
       return NextResponse.json({ ok: false, error: "Please save an API key first" }, { status: 400 });
     }
 
-    const base = baseUrl
+    const base = hasOwnKey && baseUrl
       ? assertSafeExternalBaseUrl(baseUrl)
       : saved?.baseUrl || process.env.SEEDREAM_ENDPOINT || "https://ark.cn-beijing.volces.com/api/v3";
     const safeBase = assertSafeExternalBaseUrl(base);

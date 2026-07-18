@@ -120,7 +120,8 @@ export async function getValidToken(): Promise<string | null> {
     setUser(data.user);
     return data.access_token;
   } catch {
-    clearTokens();
+    // 网络层失败（断网/DNS/CORS 等 fetch 抛异常）：服务端并未拒绝刷新，
+    // 保留 token 不清除，返回 null 让调用方稍后重试（同 ensureFreshToken）
     return null;
   }
 }
