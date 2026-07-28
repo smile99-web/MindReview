@@ -88,10 +88,14 @@ export default function NewTextbookPage() {
             accept=".pdf,.docx,.txt"
             className="hidden"
             onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleFile(f);
-              // 清空 value：否则再次选择同一个文件不会触发 change
-              e.target.value = '';
+              const input = e.target;
+              const f = input.files?.[0];
+              if (!f) return;
+              // 处理完再清空 value：iOS 上 input 持有的临时文件在
+              // 清空后可能被 WebKit 回收，导致读取失败；清空是为了同文件可重选
+              void handleFile(f).finally(() => {
+                input.value = '';
+              });
             }}
           />
           <div

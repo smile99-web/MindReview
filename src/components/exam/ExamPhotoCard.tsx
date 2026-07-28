@@ -106,7 +106,13 @@ export function ExamPhotoCard() {
       if (normalized) {
         fd.append('image', normalized.blob, normalized.fileName);
       } else {
-        fd.append('image', file);
+        // 兜底：原字节重打包成干净文件名的新 File，绝不直接传相机原始 File
+        const buf = await file.arrayBuffer();
+        const isHeic = /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+        const safe = new File([buf], isHeic ? 'photo.heic' : 'photo.jpg', {
+          type: file.type || 'image/jpeg',
+        });
+        fd.append('image', safe, safe.name);
       }
       const res = await authFetch('/api/exam/upload', {
         method: 'POST',
@@ -286,7 +292,6 @@ export function ExamPhotoCard() {
             ref={fileInputRef}
             type="file"
             accept="image/*"
-            capture="environment"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
