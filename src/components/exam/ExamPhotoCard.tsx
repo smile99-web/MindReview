@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/errors';
+import { normalizeImageForUpload } from '@/lib/image-normalize';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { LatexText } from '@/components/ui/LatexText';
@@ -97,8 +98,16 @@ export function ExamPhotoCard() {
     setPreviewUrl(url);
     setPhase('uploading');
     try {
+      // 同 exam/new：先客户端重编码为干净 JPEG，绕开 WebKit 对
+      // HEIC 相机文件的 multipart 序列化 bug（"The string did not
+      // match the expected pattern"，请求根本没发出）
+      const normalized = await normalizeImageForUpload(file);
       const fd = new FormData();
-      fd.append('image', file);
+      if (normalized) {
+        fd.append('image', normalized.blob, normalized.fileName);
+      } else {
+        fd.append('image', file);
+      }
       const res = await authFetch('/api/exam/upload', {
         method: 'POST',
         body: fd,

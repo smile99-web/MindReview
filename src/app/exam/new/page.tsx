@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/errors';
+import { normalizeImageForUpload } from '@/lib/image-normalize';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 
@@ -34,8 +35,16 @@ export default function NewExamPage() {
     setError('');
     setUploading(true);
     try {
+      // iPad/iPhone 直拍 HEIC + WebKit multipart 序列化 bug 会导致
+      // "The string did not match the expected pattern"（请求根本发不出去）。
+      // 先客户端重编码为干净 JPEG；解码失败则回退原文件（服务端 sharp 兜底）。
+      const normalized = await normalizeImageForUpload(file);
       const fd = new FormData();
-      fd.append('image', file);
+      if (normalized) {
+        fd.append('image', normalized.blob, normalized.fileName);
+      } else {
+        fd.append('image', file);
+      }
       const res = await authFetch('/api/exam/upload', { method: 'POST', body: fd });
       const data = (await res.json()) as { id?: string; error?: string };
       if (!res.ok) throw new Error(data.error || `上传失败 (${res.status})`);
@@ -101,7 +110,7 @@ export default function NewExamPage() {
               点击或拖拽上传题目照片
             </p>
             <p className="text-xs text-slate-400 mt-2">
-              支持 JPG/PNG/WebP，最大 5MB · 可在手机端用相机直接拍
+              支持 iPhone/iPad 直接拍照（HEIC 自动转 JPEG）· JPG/PNG/WebP
             </p>
           </div>
           {uploading && (
