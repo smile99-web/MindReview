@@ -44,6 +44,25 @@ interface ExamData {
 
 type Phase = 'idle' | 'analyzing' | 'practicing' | 'reviewing' | 'icap-creating';
 
+/** nginx 超时/限体时返回 HTML 错误页，res.json() 抛的是浏览器原始解析错误
+ * （用户看不懂）——换成带状态码的可操作提示。 */
+async function readApiJson<T>(res: Response): Promise<T> {
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new Error(`服务器响应异常 (${res.status})，请稍后重试`);
+  }
+}
+
+/** iOS WebKit 中断长请求/响应解析失败时的原始英文报错，统一翻译成可操作提示。 */
+function friendlyError(err: unknown, fallback: string): string {
+  const msg = getErrorMessage(err, fallback);
+  if (/did not match the expected pattern|load failed|network connection was lost/i.test(msg)) {
+    return '网络请求被浏览器中断（可能是等待时间过长），请重试';
+  }
+  return msg;
+}
+
 export default function ExamDetailPage({
   params,
 }: {
@@ -92,11 +111,11 @@ export default function ExamDetailPage({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ examId: exam.id }),
       });
-      const data = (await res.json()) as { knowledgePoints?: ExamData['knowledgePoints']; error?: string };
+      const data = await readApiJson<{ knowledgePoints?: ExamData['knowledgePoints']; error?: string }>(res);
       if (!res.ok) throw new Error(data.error || `分析失败 (${res.status})`);
       setExam((prev) => (prev ? { ...prev, knowledgePoints: data.knowledgePoints } : prev));
     } catch (err: unknown) {
-      setError(getErrorMessage(err, '分析失败'));
+      setError(friendlyError(err, '分析失败'));
     } finally {
       setPhase('idle');
     }
@@ -112,14 +131,14 @@ export default function ExamDetailPage({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ examId: exam.id, count: 5 }),
       });
-      const data = (await res.json()) as { questions?: PracticeQuestion[]; error?: string };
+      const data = await readApiJson<{ questions?: PracticeQuestion[]; error?: string }>(res);
       if (!res.ok) throw new Error(data.error || `出题失败 (${res.status})`);
       setExam((prev) => (prev ? { ...prev, practiceQuestions: data.questions } : prev));
       setPhase('reviewing');
       setPracticeAnswers({});
       setPracticeSubmitted(false);
     } catch (err: unknown) {
-      setError(getErrorMessage(err, '出题失败'));
+      setError(friendlyError(err, '出题失败'));
       setPhase('idle');
     }
   };
@@ -130,11 +149,11 @@ export default function ExamDetailPage({
     setPhase('icap-creating');
     try {
       const res = await authFetch(`/api/exam/${exam.id}/create-node`, { method: 'POST' });
-      const data = (await res.json()) as { nodeId?: string; error?: string };
+      const data = await readApiJson<{ nodeId?: string; error?: string }>(res);
       if (!res.ok || !data.nodeId) throw new Error(data.error || '启动失败');
       router.push(`/cards/${data.nodeId}`);
     } catch (err: unknown) {
-      setError(getErrorMessage(err, '启动 ICAP 训练失败'));
+      setError(friendlyError(err, '启动 ICAP 训练失败'));
       setPhase('idle');
     }
   };
@@ -144,11 +163,11 @@ export default function ExamDetailPage({
     setLearningIdx(idx);
     try {
       const res = await authFetch(`/api/exam/${exam!.id}/learn/${idx}`, { method: 'POST' });
-      const data = (await res.json()) as { nodeId?: string; error?: string };
+      const data = await readApiJson<{ nodeId?: string; error?: string }>(res);
       if (!res.ok || !data.nodeId) throw new Error(data.error || '创建失败');
       router.push(`/cards/${data.nodeId}`);
     } catch (err: unknown) {
-      setError(getErrorMessage(err, '创建知识点失败'));
+      setError(friendlyError(err, '创建知识点失败'));
       setLearningIdx(null);
     }
   };

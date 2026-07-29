@@ -87,6 +87,8 @@ ${kpSummary ? `拆解出的关键知识点：\n${kpSummary}\n` : ''}
       'multiple_choice',
       'Active',
       count,
+      // 交互式出题（用户在等）：推理模型会先思考 60s+ 必撞超时
+      { preferNonReasoning: true },
     );
 
     const questions = (result.questions || []).map((q) => ({

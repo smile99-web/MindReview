@@ -56,11 +56,15 @@ export async function POST(req: NextRequest) {
     // since the user uploaded a single question, not a full
     // chapter.
     const subject = exam.subjectName || '通用';
+    // 交互式拆解：用户举着 iPad 在屏幕前等。preferNonReasoning 避免推理模型
+    // 先思考 60s+（deepseek-v4-flash 实测 24.5s 起步，长文本必超 60s 超时），
+    // maxTokens 4096 对单题拆解（~5-10 个知识点）足够，进一步压缩出字时间。
     const result = await decomposeKnowledge(
       subject,
       '通用',
       'OCR 上传',
       exam.ocrText,
+      { maxTokens: 4096, preferNonReasoning: true },
     );
 
     // Persist the parsed knowledge points. The result.nodes field is

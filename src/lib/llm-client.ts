@@ -39,6 +39,14 @@ export interface LlmCallOptions {
    * default 60s is too tight. The shared `runAiTask` retry/backoff still applies.
    */
   timeoutMs?: number;
+  /**
+   * 交互式调用（用户在屏幕前等结果）时设为 true：
+   * DeepSeek 官方端点上若配置的是推理模型（如 deepseek-v4-flash——会先输出
+   * 数千 reasoning token 再给答案），自动改用非推理 deepseek-chat。
+   * 实测同一拆解请求 24.5s → 6.6s；长 OCR 文本推理版必然超 60s → 重试翻倍
+   * → nginx 504 / iOS 客户端中断请求。
+   */
+  preferNonReasoning?: boolean;
 }
 
 interface DecomposedKnowledgeNode {
@@ -424,6 +432,12 @@ export async function llmCall(options: LlmCallOptions): Promise<string> {
 
   try {
     const settings = await getLlmSettings();
+    // preferNonReasoning：交互场景在 DeepSeek 官方端点上强制非推理模型。
+    // 仅匹配 deepseek.com 域名——其他 OpenAI 兼容端点没有 deepseek-chat 这个模型，
+    // 盲目替换会直接 400。
+    const model = options.preferNonReasoning && /deepseek\.com/i.test(settings.baseURL)
+      ? 'deepseek-chat'
+      : settings.model;
     const client = new OpenAI({
       apiKey: settings.apiKey,
       baseURL: settings.baseURL,
@@ -437,7 +451,7 @@ export async function llmCall(options: LlmCallOptions): Promise<string> {
         retries: LLM_RETRIES,
       },
       () => client.chat.completions.create({
-        model: settings.model,
+        model,
         // Cast to the OpenAI SDK's message-param union. Our LlmMessage
         // uses a permissive `string | ContentPart[]` for content so we
         // can build multimodal messages, which the OpenAI runtime
@@ -511,6 +525,7 @@ export async function decomposeKnowledge(
   grade: string,
   chapter: string,
   content: string,
+  opts?: { maxTokens?: number; preferNonReasoning?: boolean },
 ): Promise<DecomposeKnowledgeResult> {
   const systemPrompt = `你是一位资深中学${subject}教师，擅长将教材内容拆解为最小可复习知识点。
 
@@ -568,9 +583,10 @@ export async function decomposeKnowledge(
       },
     ],
     temperature: 0.3,
-    maxTokens: 16384,
+    maxTokens: opts?.maxTokens ?? 16384,
     jsonMode: true,
     timeoutMs,
+    preferNonReasoning: opts?.preferNonReasoning,
   });
 
   return normalizeDecomposeKnowledgeResult(parseAiJson<unknown>(result, 'decomposeKnowledge'));
@@ -643,6 +659,7 @@ export async function generateQuestions(
   questionType: string,
   icapLevel: string,
   count: number = 3,
+  opts?: { preferNonReasoning?: boolean },
 ): Promise<GenerateQuestionsResult> {
   const systemPrompt = buildQuestionPrompt(subject, questionType, count);
 
@@ -654,6 +671,7 @@ export async function generateQuestions(
     temperature: 0.7,
     maxTokens: 4096,
     jsonMode: true,
+    preferNonReasoning: opts?.preferNonReasoning,
   });
 
   const raw = result;
