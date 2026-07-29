@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/errors';
-import { normalizeImageForUpload } from '@/lib/image-normalize';
+import { appendImageToFormData, normalizeImageForUpload } from '@/lib/image-normalize';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 
@@ -35,35 +35,29 @@ export default function NewExamPage() {
   const handleFile = async (file: File) => {
     setError('');
     setUploading(true);
-    // 分阶段标记：WebKit 兼容问题定位用（错误信息里会带上失败阶段）
-    let stage = '重编码';
+    let stage = 'normalize';
     try {
-      // iPad/iPhone 直拍 HEIC + WebKit multipart 序列化 bug 会导致
-      // "The string did not match the expected pattern"（请求根本发不出去）。
-      // 先客户端重编码为干净 JPEG；解码失败则把原字节重打包成干净文件名
-      // 的新 File（绝不把相机原始 File 直接塞 FormData）。
       const normalized = await normalizeImageForUpload(file);
-      stage = '打包';
-      const fd = new FormData();
-      if (normalized) {
-        fd.append('image', normalized.blob, normalized.fileName);
-      } else {
-        const buf = await file.arrayBuffer();
-        const isHeic = /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
-        const safe = new File([buf], isHeic ? 'photo.heic' : 'photo.jpg', {
-          type: file.type || 'image/jpeg',
-        });
-        fd.append('image', safe, safe.name);
+      if (!normalized) {
+        throw new Error('浏览器无法解码这张照片（可能是 HEIC 编码不受支持）。请先在 iPad 设置 → 相机 → 格式 中改为"兼容性最好"，或换成截图后上传。');
       }
-      stage = '上传';
+      stage = 'formdata';
+      const fd = new FormData();
+      try {
+        appendImageToFormData(fd, 'image', normalized);
+      } catch (appendErr: unknown) {
+        console.error('[exam/new] FormData append failed:', appendErr, { name: file.name, type: file.type, size: file.size });
+        throw new Error('iOS WebKit 拒绝打包图片（formdata 阶段）。请换张图或重启 Safari 试一次。');
+      }
+      stage = 'upload';
       const res = await authFetch('/api/exam/upload', { method: 'POST', body: fd });
-      stage = '解析响应';
+      stage = 'parse';
       const data = (await res.json()) as { id?: string; error?: string };
       if (!res.ok) throw new Error(data.error || `上传失败 (${res.status})`);
       router.push(`/exam/${data.id}`);
     } catch (err: unknown) {
-      console.error('[exam/new upload] 失败阶段:', stage, { name: file.name, type: file.type, size: file.size }, err);
-      setError(`${getErrorMessage(err, '上传失败')}（失败阶段：${stage}）`);
+      console.error('[exam/new upload] stage=', stage, { name: file.name, type: file.type, size: file.size }, err);
+      setError(`${getErrorMessage(err, '上传失败')}（阶段：${stage}）`);
     } finally {
       setUploading(false);
     }

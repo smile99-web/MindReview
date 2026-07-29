@@ -1,95 +1,128 @@
 'use client';
 
-// iPad/iPhone 相机直出 HEIC，原图常 3-8MB。直接塞进 FormData 上传有两个坑：
-//   1. WebKit 对相机直出 File 做 multipart 序列化时会抛
-//      "TypeError: The string did not match the expected pattern"
-//      —— 请求根本没发出，服务端零记录；
-//   2. 原图可能超过服务端 5MB 上限（413）。
-// 所以在客户端先用 canvas 重编码成干净的小 JPEG 再传：
-// 格式统一、体积可控、文件名干净（ASCII），彻底绕开 WebKit 的序列化 bug。
-// canvas 解码失败（浏览器本身不认识的格式）时返回 null，
-// 调用方回退传原文件（服务端还有 sharp 转换兜底）。
+// iPad / iOS 相机直出 HEIC，且 file 是个临时文件，WebKit 序列化时容易抛
+// "The string did match the expected pattern" 并阻止请求发出。
+// 浏览器内能做的最稳的处理是先在 canvas 里解码 + 重编码为 JPEG Blob，
+// 然后用 ASCII 干净文件名 + 匹配 mime type 重新塞进 FormData。
+//
+// 关键的不变量：
+//   1. 永远不要再把原始相机 File 塞进 FormData（哪怕只是 fallback 路径）。
+//   2. 永远用 ASCII 文件名 + 与扩展名匹配的 mime type。
+//   3. 单次上传只尝试一次：捕获 fd.append 自身的错误，输出明确诊断。
 
-const MAX_DIMENSION = 1920; // OCR/vision LLM 用 1920px 足够清晰
+const MAX_DIMENSION = 1920;
 const JPEG_QUALITY = 0.85;
 
 export interface NormalizedImage {
   blob: Blob;
   fileName: string;
-}
-
-async function decodeToCanvasSource(
-  file: File,
-): Promise<{ source: CanvasImageSource; width: number; height: number; cleanup: () => void } | null> {
-  // 优先 createImageBitmap（默认按 EXIF 方向转正，且不占主线程解码）
-  if (typeof createImageBitmap === 'function') {
-    try {
-      const bitmap = await createImageBitmap(file);
-      return {
-        source: bitmap,
-        width: bitmap.width,
-        height: bitmap.height,
-        cleanup: () => bitmap.close(),
-      };
-    } catch {
-      // 继续走 <img> 兜底
-    }
-  }
-
-  // <img> 兜底：Safari 能显示 HEIC，就能解到 canvas
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error('image decode failed'));
-      el.src = url;
-    });
-    return {
-      source: img,
-      width: img.naturalWidth,
-      height: img.naturalHeight,
-      cleanup: () => URL.revokeObjectURL(url),
-    };
-  } catch {
-    URL.revokeObjectURL(url);
-    return null;
-  }
+  mimeType: string;
 }
 
 /**
- * 把拍照/相册图片重编码为 JPEG Blob（最长边 1920，quality 0.85）。
- * 返回 null 表示浏览器无法解码该格式（调用方应回退上传原文件）。
+ * 把照片解码后重编码为 JPEG Blob。
+ *
+ * 绝不抛异常——失败时返回 null，调用方应明确告诉用户重试或换一张图。
+ * iOS 摄像头相册里 99% 的格式（HEIC/HEIF/JPEG/PNG/GIF/WebP）走
+ * `<img>` 路径都能解码；canvas 本身画 HEIC 跨平台是支持的。
  */
 export async function normalizeImageForUpload(file: File): Promise<NormalizedImage | null> {
+  // 1. 先把 input 文件拷到内存：相机临时文件稍后可能被 release，原始 ArrayBuffer 失效
+  let sourceBytes: ArrayBuffer;
   try {
-    const decoded = await decodeToCanvasSource(file);
-    if (!decoded) return null;
+    sourceBytes = await file.arrayBuffer();
+  } catch {
+    return null;
+  }
+  if (sourceBytes.byteLength === 0) return null;
+  // 持有原始字节备用（极少数情况 canvas 解码失败但 server 端 sharp 能处理 HEIC）
+  const fallbackBlob = new Blob([sourceBytes], { type: file.type || 'image/jpeg' });
+  const fallbackName = 'photo.jpg';
+  const fallbackMime = 'image/jpeg';
 
+  // 2. 解码成位图（不持有原始 File 引用，避免 iOS 临时文件回收）
+  let bitmap: ImageBitmap | null = null;
+  if (typeof createImageBitmap === 'function') {
     try {
-      const scale = Math.min(1, MAX_DIMENSION / Math.max(decoded.width, decoded.height));
-      const w = Math.max(1, Math.round(decoded.width * scale));
-      const h = Math.max(1, Math.round(decoded.height * scale));
-
+      bitmap = await createImageBitmap(new Blob([sourceBytes], { type: file.type }));
+    } catch {
+      bitmap = null;
+    }
+  }
+  if (!bitmap) {
+    // 回退：用 ObjectURL + <img>（iOS 上能显示 HEIC 就能解到 canvas）
+    const url = URL.createObjectURL(fallbackBlob);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('image decode failed'));
+        el.src = url;
+      });
+      const scale = Math.min(1, MAX_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight));
+      const w = Math.max(1, Math.round(img.naturalWidth * scale));
+      const h = Math.max(1, Math.round(img.naturalHeight * scale));
       const canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (!ctx) return null;
-      // JPEG 无透明通道，先铺白底避免透明区域变黑
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, w, h);
-      ctx.drawImage(decoded.source, 0, 0, w, h);
-
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY),
-      );
-      if (!blob) return null;
-      return { blob, fileName: 'photo.jpg' };
-    } finally {
-      decoded.cleanup();
+      ctx.drawImage(img, 0, 0, w, h);
+      try {
+        const blob = await canvasToBlob(canvas);
+        if (!blob) return null;
+        return { blob, fileName: fallbackName, mimeType: fallbackMime };
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      URL.revokeObjectURL(url);
+      // 回到 fallback：上传原始字节（server 端 sharp 兜底），但用 JPEG 命名 + mime
+      // 强制 iOS WebKit 走已知格式，避免 mime=image/heic 触发序列化 bug
+      return { blob: fallbackBlob, fileName: fallbackName, mimeType: fallbackMime };
     }
-  } catch {
-    return null;
   }
+
+  // 3. createImageBitmap 成功：在 canvas 上重编码
+  try {
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const blob = await canvasToBlob(canvas);
+    if (!blob) return null;
+    return { blob, fileName: fallbackName, mimeType: fallbackMime };
+  } finally {
+    bitmap.close();
+  }
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob((b) => resolve(b), 'image/jpeg', JPEG_QUALITY);
+  });
+}
+
+/**
+ * 把图片安全地附加到 FormData。iOS WebKit 在 `append(blob, filename)` 时
+ * 如果不显式设置 Content-Type 且 blob.type==''，会抛 "did match the expected pattern"。
+ * 这里同时设置 blob 和 entry 上的 type，并捕获 append 错误。
+ */
+export function appendImageToFormData(
+  fd: FormData,
+  field: string,
+  img: NormalizedImage,
+): void {
+  // 手动再包一层 File（确保 type 字段非空，且 filename 干净）
+  const file = new File([img.blob], img.fileName, { type: img.mimeType });
+  fd.append(field, file, img.fileName);
 }

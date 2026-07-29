@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/errors';
-import { normalizeImageForUpload } from '@/lib/image-normalize';
+import { appendImageToFormData, normalizeImageForUpload } from '@/lib/image-normalize';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { LatexText } from '@/components/ui/LatexText';
@@ -98,21 +98,16 @@ export function ExamPhotoCard() {
     setPreviewUrl(url);
     setPhase('uploading');
     try {
-      // 同 exam/new：先客户端重编码为干净 JPEG，绕开 WebKit 对
-      // HEIC 相机文件的 multipart 序列化 bug（"The string did not
-      // match the expected pattern"，请求根本没发出）
       const normalized = await normalizeImageForUpload(file);
+      if (!normalized) {
+        throw new Error('浏览器无法解码这张照片（可能是 HEIC 编码不受支持）。请先在 iPad 设置 → 相机 → 格式 中改为"兼容性最好"，或换成截图后上传。');
+      }
       const fd = new FormData();
-      if (normalized) {
-        fd.append('image', normalized.blob, normalized.fileName);
-      } else {
-        // 兜底：原字节重打包成干净文件名的新 File，绝不直接传相机原始 File
-        const buf = await file.arrayBuffer();
-        const isHeic = /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
-        const safe = new File([buf], isHeic ? 'photo.heic' : 'photo.jpg', {
-          type: file.type || 'image/jpeg',
-        });
-        fd.append('image', safe, safe.name);
+      try {
+        appendImageToFormData(fd, 'image', normalized);
+      } catch (appendErr: unknown) {
+        console.error('[ExamPhotoCard] FormData append failed:', appendErr, { name: file.name, type: file.type, size: file.size });
+        throw new Error('iOS WebKit 拒绝打包图片（formdata 阶段）。请换张图或重启 Safari 试一次。');
       }
       const res = await authFetch('/api/exam/upload', {
         method: 'POST',
