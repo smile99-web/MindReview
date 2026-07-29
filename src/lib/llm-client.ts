@@ -33,6 +33,12 @@ export interface LlmCallOptions {
   temperature?: number;
   maxTokens?: number;
   jsonMode?: boolean;
+  /**
+   * Override the per-call network timeout for this LLM call.
+   * Use when the prompt is long (e.g. OCR text → decomposeKnowledge) and the
+   * default 60s is too tight. The shared `runAiTask` retry/backoff still applies.
+   */
+  timeoutMs?: number;
 }
 
 interface DecomposedKnowledgeNode {
@@ -414,7 +420,7 @@ export async function llmVisionCall(options: {
 }
 
 export async function llmCall(options: LlmCallOptions): Promise<string> {
-  const { messages, temperature = 0.7, maxTokens = 4096, jsonMode = false } = options;
+  const { messages, temperature = 0.7, maxTokens = 4096, jsonMode = false, timeoutMs } = options;
 
   try {
     const settings = await getLlmSettings();
@@ -427,7 +433,7 @@ export async function llmCall(options: LlmCallOptions): Promise<string> {
       {
         service: 'llm',
         operation: 'chat.completions.create',
-        timeoutMs: LLM_TIMEOUT_MS,
+        timeoutMs: timeoutMs ?? LLM_TIMEOUT_MS,
         retries: LLM_RETRIES,
       },
       () => client.chat.completions.create({
@@ -536,14 +542,35 @@ export async function decomposeKnowledge(
 章节：${chapter}
 内容：${content}`;
 
+  // 长文本拆解（OCR 整页题）DeepSeek 处理 60s 内跑不完 → 504 给前端无信息提示。
+  // 按内容长度阶梯放宽：< 1500 字 60s；1500-4000 120s；再长 180s 并截断到 6000 字
+  // （继续加长对拆解质量增益极小，反而显著放大延迟/费用）。
+  const len = content.length;
+  let timeoutMs = 60_000;
+  let trimmedContent = content;
+  if (len > 1500) {
+    timeoutMs = 120_000;
+  }
+  if (len > 4000) {
+    timeoutMs = 180_000;
+    trimmedContent = `${content.slice(0, 6000)}\n\n…（后续内容已截断）`;
+  }
+
   const result = await llmCall({
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
+      {
+        role: 'user',
+        content: `学科：${subject}
+年级：${grade}
+章节：${chapter}
+内容：${trimmedContent}`,
+      },
     ],
     temperature: 0.3,
     maxTokens: 16384,
     jsonMode: true,
+    timeoutMs,
   });
 
   return normalizeDecomposeKnowledgeResult(parseAiJson<unknown>(result, 'decomposeKnowledge'));
