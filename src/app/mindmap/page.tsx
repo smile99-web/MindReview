@@ -3,11 +3,24 @@
 import { authFetch } from '@/lib/auth';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { MindMap } from '@/components/mindmap/MindMap';
+import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { RELATION_LABELS, RELATION_COLORS } from '@/types';
 import type { RelationType } from '@/types';
+
+// three.js 约 600KB，必须懒加载（Next 16：ssr:false 只能用于 Client Component）
+const MindMap3D = dynamic(
+  () => import('@/components/mindmap3d/MindMap3D').then((m) => m.MindMap3D),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-[640px] rounded-2xl bg-[#0b1023] flex items-center justify-center text-slate-500 text-sm">
+        🌌 正在加载 3D 引擎…
+      </div>
+    ),
+  },
+);
 
 interface MindMapSubject {
   id: string;
@@ -22,8 +35,13 @@ interface MindMapSubject {
 interface MindMapNode {
   id: string;
   title?: string;
+  summary?: string | null;
+  difficulty?: number | null;
+  masteryLevel?: number | null;
+  representationType?: string | null;
+  chapterId?: string | null;
   subject?: { name?: string | null } | null;
-  chapter?: { title?: string | null } | null;
+  chapter?: { id?: string | null; title?: string | null } | null;
 }
 
 interface MindMapEdge {
@@ -154,7 +172,7 @@ function MindMapContent() {
         <div>
           <h1 className="text-[28px] font-bold text-slate-800 tracking-tight">{title}</h1>
           <p className="text-slate-500 mt-1.5 text-[15px]">
-            {data.nodes.length} 个知识点 · {data.edges.length} 条关系 · 点击节点查看详情
+            {data.nodes.length} 个知识点 · {data.edges.length} 条关系 · 点击星球聚焦，沿知识连接探索整个体系
           </p>
         </div>
         <div className="flex gap-2 items-center">
@@ -295,14 +313,14 @@ function MindMapContent() {
           </div>
         </div>
       ) : (
-        <MindMap
+        <MindMap3D
           nodes={data.nodes}
           edges={data.edges}
           onNodeClick={handleNodeClick}
           crossChapterEnabled={crossChapterEnabled}
           relationTypeFilter={relationTypeFilter}
           onRelationTypeFilterChange={setRelationTypeFilter}
-          className="w-full h-[600px] bg-white rounded-2xl border border-slate-200/60 shadow-[0_1px_3px_rgba(0,0,0,0.03),0_4px_12px_rgba(0,0,0,0.02)]"
+          className="w-full h-[640px] rounded-2xl border border-slate-200/60 shadow-[0_1px_3px_rgba(0,0,0,0.03),0_4px_12px_rgba(0,0,0,0.02)]"
         />
       )}
     </div>

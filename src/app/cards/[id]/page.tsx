@@ -7,7 +7,6 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { KnowledgeCardView } from '@/components/knowledge/KnowledgeCardView';
 import { LearningChecklist } from '@/components/knowledge/LearningChecklist';
-import { MindMap } from '@/components/mindmap/MindMap';
 import { IcapPipeline } from '@/components/practice/IcapPipeline';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -21,10 +20,19 @@ const Knowledge3DSection = dynamic(() => import('@/components/knowledge3d/Knowle
   ssr: false,
 });
 
+// 3D 关联图（知识星空，同样懒加载 three.js）
+const MindMap3D = dynamic(
+  () => import('@/components/mindmap3d/MindMap3D').then((m) => m.MindMap3D),
+  { ssr: false },
+);
+
 interface RelatedKnowledgeNode {
   id: string;
   title: string;
   summary?: string | null;
+  difficulty?: number | null;
+  masteryLevel?: number | null;
+  representationType?: string | null;
   subject?: { name: string };
   chapter?: { id?: string; title: string };
   chapterId?: string | null;
@@ -768,10 +776,11 @@ export default function KnowledgeCardPage() {
 
       {activeTab === 'mindmap' && (
         <div>
-          <MindMap
+          <MindMap3D
             nodes={[node, ...(node.outgoingEdges?.map((e) => e.to) || []), ...(node.incomingEdges?.map((e) => e.from) || [])]}
             edges={[...(node.outgoingEdges || []), ...(node.incomingEdges || [])]}
             onNodeClick={(nid) => router.push(`/cards/${nid}`)}
+            className="w-full h-[460px] rounded-xl border border-slate-200/60"
           />
         </div>
       )}

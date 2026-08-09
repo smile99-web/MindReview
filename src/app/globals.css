@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "@xyflow/react/dist/style.css";
 @import "katex/dist/katex.min.css";
 
 /* KaTeX overrides for MindReview design */

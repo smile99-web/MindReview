@@ -26,7 +26,6 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
-    "@xyflow/react": "^12.10.2",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "jwt-decode": "^4.0.0",
