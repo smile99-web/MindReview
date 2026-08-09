@@ -131,19 +131,28 @@ export async function proxy(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // basePath('/rm')：nextUrl.pathname 已被 Next 剥掉前缀，上面的匹配逻辑
+  // 不用改；但 new URL(path, request.url) 不会带前缀，必须用 nextUrl.clone()
+  // （clone 保留 basePath，序列化时自动拼回）做重定向。
   if (pathname === "/" && authCookie?.value === "1") {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
   }
 
   if (AUTH_PAGES.some((p) => matchesPrefix(pathname, p)) && authCookie?.value === "1") {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
   }
 
   if (
     PROTECTED_PREFIXES.some((p) => matchesPrefix(pathname, p)) &&
     authCookie?.value !== "1"
   ) {
-    return NextResponse.redirect(new URL("/", request.url));
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    return NextResponse.redirect(url);
   }
 
   return NextResponse.next();

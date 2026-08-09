@@ -1,6 +1,9 @@
 import { jwtDecode } from "jwt-decode";
 
-const AUTH_API = process.env.NEXT_PUBLIC_AUTH_API || "";
+// 应用挂在 /rm 子路径（next.config.ts basePath）。AUTH_API 作为
+// `${AUTH_API}/api/auth/*` 的前缀，默认带 basePath；跨域部署时才用
+// NEXT_PUBLIC_AUTH_API 覆盖。
+const AUTH_API = process.env.NEXT_PUBLIC_AUTH_API || "/rm";
 
 interface User {
   id: string;
@@ -64,9 +67,10 @@ function clearTokens() {
 function redirectToLogin() {
   if (typeof window === "undefined") return;
   const next = `${window.location.pathname}${window.location.search}`;
+  // basePath('/rm')：window.location 不带 next/link 的自动前缀，要显式补上
   const target = next && next !== "/"
-    ? `/auth/login?next=${encodeURIComponent(next)}`
-    : "/auth/login";
+    ? `/rm/auth/login?next=${encodeURIComponent(next)}`
+    : "/rm/auth/login";
   window.location.assign(target);
 }
 
@@ -165,7 +169,10 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
   }
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(input, { ...init, headers });
+  // basePath('/rm')：应用挂在子路径下，fetch 不会自动加前缀，
+  // 调用方保持 '/api/...' 写法不变，统一在这里补（全项目 100+ 调用点）。
+  const url = typeof input === "string" && input.startsWith("/api") ? `/rm${input}` : input;
+  const res = await fetch(url, { ...init, headers });
   if (res.status === 401) {
     clearTokens();
     redirectToLogin();

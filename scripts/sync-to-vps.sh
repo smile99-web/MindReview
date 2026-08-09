@@ -56,4 +56,4 @@ echo "🔄 重启 PM2 进程..."
 ssh $SSH_OPTS "$VPS_USER@$VPS_HOST" "pm2 reload mindreview"
 
 echo ""
-echo "✅ 部署完成 — http://$VPS_HOST"
+echo "✅ 部署完成 — http://$VPS_HOST/rm"

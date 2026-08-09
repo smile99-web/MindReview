@@ -51,8 +51,9 @@ if %ERRORLEVEL% neq 0 (
 echo       Build OK
 
 echo [5/5] Activating + restarting PM2 + health check...
-:: VPS 构建产出根布局 .next/standalone/server.js（已实测确认）
-ssh %SERVER% "cd %REMOTE_DIR% && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/ && pm2 restart mindreview && sleep 5 && curl -sf -o /dev/null http://127.0.0.1:3000/ && echo HEALTH OK || (echo HEALTH CHECK FAILED - see pm2 logs & exit 1)"
+:: VPS 构建产出根布局 .next/standalone/server.js（已实测确认）；
+:: 应用挂在 /rm 子路径（basePath），健康检查打 /rm/api/health
+ssh %SERVER% "cd %REMOTE_DIR% && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/ && pm2 restart mindreview && sleep 5 && curl -sf -o /dev/null http://127.0.0.1:3000/rm/api/health && echo HEALTH OK || (echo HEALTH CHECK FAILED - see pm2 logs & exit 1)"
 if %ERRORLEVEL% neq 0 (
     echo ERROR: Health check failed!
     exit /b 1
@@ -60,5 +61,5 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo ============================================
-echo   Deploy OK - http://14.103.219.117
+echo   Deploy OK - http://14.103.219.117/rm
 echo ============================================
