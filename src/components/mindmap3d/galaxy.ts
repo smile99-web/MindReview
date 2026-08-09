@@ -312,7 +312,8 @@ export class GalaxyEngine {
     );
     this.sceneRadius = layout.sceneRadius;
 
-    // 推荐点亮：前置(prerequisite 边的来源)全部掌握、自身未掌握
+    // 推荐点亮：自身未掌握，且没有前置负担（无 prerequisite 边的入门节点）
+    // 或前置已全部掌握 —— 优先推荐连接多的枢纽，引导孩子顺藤摸瓜
     const masteryById = new Map(uniqueNodes.map((n) => [n.id, Math.max(0, Math.min(100, n.masteryLevel ?? 0))]));
     const prereqSources = new Map<string, string[]>();
     for (const e of cleanEdges) {
@@ -326,7 +327,7 @@ export class GalaxyEngine {
         const m = masteryById.get(n.id)!;
         if (m >= MASTERED_THRESHOLD) return false;
         const pres = prereqSources.get(n.id);
-        if (!pres || pres.length === 0) return false;
+        if (!pres || pres.length === 0) return (degreeById.get(n.id) || 0) > 0;
         return pres.every((pid) => (masteryById.get(pid) || 0) >= MASTERED_THRESHOLD);
       })
       .sort((a, b) => (degreeById.get(b.id) || 0) - (degreeById.get(a.id) || 0))
