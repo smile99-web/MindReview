@@ -1,7 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/auth';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { LatexText } from '@/components/ui/LatexText';
@@ -28,10 +28,13 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 搜索请求序号：连续两次搜索时，慢的旧响应不得覆盖新查询的结果
+  const searchSeqRef = useRef(0);
 
   const handleSearch = useCallback(async (q: string) => {
     if (!q.trim()) return;
 
+    const seq = ++searchSeqRef.current;
     setLoading(true);
     setError(null);
     setSearched(true);
@@ -45,12 +48,14 @@ export default function SearchPage() {
         throw new Error(data.error || '搜索失败');
       }
       const data = await res.json() as SearchResponse;
+      if (seq !== searchSeqRef.current) return; // 已有更新的查询，丢弃过期响应
       setResults(data.results || []);
     } catch (err: unknown) {
+      if (seq !== searchSeqRef.current) return;
       setError(getErrorMessage(err, '搜索出错'));
       setResults([]);
     } finally {
-      setLoading(false);
+      if (seq === searchSeqRef.current) setLoading(false);
     }
   }, []);
 

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/errors';
+import { readApiJson } from '@/lib/read-api-json';
 import { appendImageToFormData, normalizeImageForUpload } from '@/lib/image-normalize';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -52,7 +53,7 @@ export default function NewExamPage() {
       stage = 'upload';
       const res = await authFetch('/api/exam/upload', { method: 'POST', body: fd });
       stage = 'parse';
-      const data = (await res.json()) as { id?: string; error?: string };
+      const data = await readApiJson<{ id?: string; error?: string }>(res);
       if (!res.ok) throw new Error(data.error || `上传失败 (${res.status})`);
       router.push(`/exam/${data.id}`);
     } catch (err: unknown) {

@@ -7,6 +7,7 @@
 
 import type { PrismaClient } from '@prisma/client';
 import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
+import { appDateKey, startOfAppDay } from '@/lib/date-utils';
 
 type ReviewDelta = { masteryBefore: number | null; masteryAfter: number | null };
 type SessionDuration = { durationSeconds: number | null };
@@ -154,8 +155,9 @@ export async function buildLearnerProfile(
       where: {
         userId,
         action: { in: ['reviewed', 'solved', 'mastered'] },
+        // 统一 UTC+8 应用日界（服务器本地时区零点在非 CST 环境会归错日期）
         createdAt: {
-          gte: new Date(new Date().setHours(0, 0, 0, 0)),
+          gte: startOfAppDay(appDateKey(new Date())),
         },
       },
     }),

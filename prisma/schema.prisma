@@ -33,7 +33,7 @@ model User {
   studyTimeLogs     StudyTimeLog[]
   examUploads       ExamUpload[]
   docUploads        DocUpload[]
-  textbookUploads  TextbookUpload[]
+  textbookUploads   TextbookUpload[]
 }
 
 model RefreshToken {
@@ -44,6 +44,8 @@ model RefreshToken {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Subject {
@@ -72,6 +74,8 @@ model Chapter {
   parent         Chapter?        @relation("ChapterHierarchy", fields: [parentId], references: [id])
   children       Chapter[]       @relation("ChapterHierarchy")
   knowledgeNodes KnowledgeNode[]
+
+  @@index([subjectId])
 }
 
 model KnowledgeNode {
@@ -86,7 +90,7 @@ model KnowledgeNode {
   // 不准）。LLM 在 generateChapterKnowledge 时会填入"七年级上"、
   // "八年级下"等。旧数据为 null，会在 subjects/[id] 退回到按
   // sortOrder 排序（不再被错切）。
-  gradeLevel         String?  // "七年级上" | "七年级下" | "八年级上" | "八年级下" | "九年级上" | "九年级下" | "高一" | "高二" | "高三"
+  gradeLevel         String? // "七年级上" | "七年级下" | "八年级上" | "八年级下" | "九年级上" | "九年级下" | "高一" | "高二" | "高三"
   keywords           String[]                     @default([])
   prerequisites      String[]                     @default([])
   commonMistakes     String[]                     @default([])
@@ -121,6 +125,10 @@ model KnowledgeNode {
   reviewLogs     ReviewLog[]
   reviewTasks    ReviewTask[]
   userProgress   UserKnowledgeProgress[]
+
+  // 学科页/思维导图/章节分组都按 subjectId / chapterId 过滤
+  @@index([subjectId])
+  @@index([chapterId])
 }
 
 model KnowledgeEdge {
@@ -133,6 +141,9 @@ model KnowledgeEdge {
 
   from KnowledgeNode @relation("EdgeFrom", fields: [fromId], references: [id], onDelete: Cascade)
   to   KnowledgeNode @relation("EdgeTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@index([fromId])
+  @@index([toId])
 }
 
 model KnowledgeCard {
@@ -147,6 +158,8 @@ model KnowledgeCard {
   createdAt       DateTime @default(now())
 
   knowledgeNode KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+
+  @@index([knowledgeNodeId])
 }
 
 model Question {
@@ -164,10 +177,12 @@ model Question {
   createdAt       DateTime @default(now())
 
   knowledgeNode KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+
+  @@index([knowledgeNodeId])
 }
 
 model Mistake {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   userId          String
   knowledgeNodeId String?
   subjectId       String?
@@ -176,7 +191,7 @@ model Mistake {
   correctAnswer   String // 正确答案
   mistakeType     String? // conceptual/calculation/careless/application
   analysis        String? // AI错因分析
-  resolved        Boolean  @default(false)
+  resolved        Boolean   @default(false)
   // FSRS-style scheduling state. We model stability + difficulty +
   // repetition/lapse counters in the same shape FSRS uses so we can
   // re-schedule the mistake review at the right Ebbinghaus-style
@@ -192,22 +207,25 @@ model Mistake {
   //   lastReviewAt: when the student last attempted this mistake.
   //   nextReviewAt: when FSRS says to re-show this mistake.
   //   history: per-attempt log (rating + time) for analytics.
-  state          String   @default("new")
-  stability      Float    @default(1)
-  difficulty     Float    @default(5)
-  reps           Int      @default(0)
-  lapses         Int      @default(0)
-  lastReviewAt   DateTime?
-  nextReviewAt   DateTime?
+  state           String    @default("new")
+  stability       Float     @default(1)
+  difficulty      Float     @default(5)
+  reps            Int       @default(0)
+  lapses          Int       @default(0)
+  lastReviewAt    DateTime?
+  nextReviewAt    DateTime?
   // JSON array of {at, rating, durationMs?} entries — one per
   // review attempt. Bounded to the last 20 entries in the API.
-  history        Json     @default("[]")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  history         Json      @default("[]")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   knowledgeNode KnowledgeNode? @relation(fields: [knowledgeNodeId], references: [id])
   subject       Subject?       @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+
+  // 错题本/到期复习按 userId(+nextReviewAt) 过滤，学科网格按 userId groupBy
+  @@index([userId, nextReviewAt])
 }
 
 model ReviewTask {
@@ -224,6 +242,11 @@ model ReviewTask {
 
   user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   knowledgeNode KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+
+  // 高频过滤：复习页/看板按 userId+dueDate+completed 查到期任务；
+  // practice/session 按 userId+knowledgeNodeId 查未完成会话
+  @@index([userId, dueDate])
+  @@index([userId, knowledgeNodeId])
 }
 
 model ReviewLog {
@@ -247,6 +270,8 @@ model ReviewLog {
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   knowledgeNode KnowledgeNode? @relation(fields: [knowledgeNodeId], references: [id])
   mistakeLogs   MistakeLog[]
+
+  @@index([userId, createdAt])
 }
 
 model MistakeLog {
@@ -264,6 +289,8 @@ model MistakeLog {
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   knowledgeNode KnowledgeNode? @relation(fields: [knowledgeNodeId], references: [id])
   reviewLog     ReviewLog?     @relation(fields: [reviewLogId], references: [id])
+
+  @@index([userId])
 }
 
 model UserKnowledgeProgress {
@@ -449,19 +476,19 @@ model DocUpload {
 // 复用 Subject→Chapter→KnowledgeNode 的层级结构：用户上传一个
 // 教材 PDF 后，pipeline 拆出 chapters，导入到对应 Subject 下。
 model TextbookUpload {
-  id                String   @id @default(cuid())
-  userId            String
-  subjectId         String?
-  fileName          String
-  fileType          String // pdf / docx / txt
-  content           String
+  id                 String   @id @default(cuid())
+  userId             String
+  subjectId          String?
+  fileName           String
+  fileType           String // pdf / docx / txt
+  content            String
   // 是否已触发 chapters 拆解（teachflow 拆解出 N 个 chapter 标题）
-  decomposedChapters Json   @default("[]")
+  decomposedChapters Json     @default("[]")
   // 是否已触发某个 chapter 的 knowledge points 拆解（cascaded）
   // Each entry: { chapterTitle, status: 'pending' | 'imported' | 'failed' }
-  chapterImports     Json   @default("[]")
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  chapterImports     Json     @default("[]")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)

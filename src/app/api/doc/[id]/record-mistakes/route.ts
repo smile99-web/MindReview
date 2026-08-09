@@ -108,26 +108,48 @@ export async function POST(
         // FSRS initial state — same as practice/route.ts
         const nextReviewAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-        await prisma.mistake.create({
-          data: {
-            userId,
-            knowledgeNodeId: null,
-            subjectId,
-            questionText: item.questionText.slice(0, 2000),
-            wrongAnswer: (item.wrongAnswer || '').slice(0, 500),
-            correctAnswer: item.correctAnswer.slice(0, 500),
-            mistakeType,
-            analysis,
-            state: 'new',
-            stability: 1,
-            difficulty: 5,
-            reps: 0,
-            lapses: 0,
-            lastReviewAt: null,
-            nextReviewAt,
-            history: [],
-          },
-        });
+        // 查重 + 创建包进 Serializable 事务：上面的 findMany 查重与创建
+        // 之间隔着秒级 LLM 分析，并发请求（双标签页/重试）会双双通过查重，
+        // 对同一题干各建一条错题（各带一条 FSRS 调度）——正是上方注释要避免的。
+        // 事务内复查兜底，Serializable 冲突（P2034/40001）整体重试一次。
+        const createIfAbsent = () =>
+          prisma.$transaction(
+            async (tx) => {
+              const dup = await tx.mistake.findFirst({
+                where: { userId, questionText: item.questionText.slice(0, 2000) },
+                select: { id: true },
+              });
+              if (dup) return null;
+              return tx.mistake.create({
+                data: {
+                  userId,
+                  knowledgeNodeId: null,
+                  subjectId,
+                  questionText: item.questionText.slice(0, 2000),
+                  wrongAnswer: (item.wrongAnswer || '').slice(0, 500),
+                  correctAnswer: item.correctAnswer.slice(0, 500),
+                  mistakeType,
+                  analysis,
+                  state: 'new',
+                  stability: 1,
+                  difficulty: 5,
+                  reps: 0,
+                  lapses: 0,
+                  lastReviewAt: null,
+                  nextReviewAt,
+                  history: [],
+                },
+              });
+            },
+            { isolationLevel: 'Serializable' },
+          );
+        try {
+          await createIfAbsent();
+        } catch (error: unknown) {
+          const code = (error as { code?: string })?.code;
+          if (code === 'P2034' || code === '40001') await createIfAbsent();
+          else throw error;
+        }
       }),
     );
     const recorded = results.filter((r) => r.status === 'fulfilled').length;

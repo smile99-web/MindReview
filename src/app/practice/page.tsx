@@ -185,6 +185,9 @@ function PracticeContent() {
   const [submittingAnswers, setSubmittingAnswers] = useState<Record<string, boolean>>({});
   const [submitResults, setSubmitResults] = useState<Record<string, PracticeSubmitResponse>>({});
   const deepLinkAppliedRef = useRef(false);
+  // 出题请求序号：快速切换节点时，慢的旧响应不得覆盖新节点的题目，
+  // 旧请求的 finally 也不得提前复位 generating
+  const generateSeqRef = useRef(0);
 
   // In sparse mode, show questions one at a time (paginated).
   const [questionPage, setQuestionPage] = useState(0);
@@ -285,6 +288,7 @@ function PracticeContent() {
     icapLevel: string,
     forceGenerate = false,
   ) => {
+    const seq = ++generateSeqRef.current;
     setSelectedNode(nodeId);
     setActiveIcap(icapLevel);
     setGenerating(true);
@@ -301,6 +305,7 @@ function PracticeContent() {
       }
       const res = await authFetch(`/api/practice?${params.toString()}`);
       const data = await res.json().catch(() => ({})) as QuestionResponse;
+      if (seq !== generateSeqRef.current) return; // 已有更新的请求，丢弃过期响应
       if (!res.ok) {
         setGenerationError(classifyGenerationError(res.status, data.error, data.detail));
         setQuestions([]);
@@ -316,11 +321,12 @@ function PracticeContent() {
         setGenerationError('暂时没有生成可用题目，请换一个 ICAP 层级或重新生成。');
       }
     } catch (err) {
+      if (seq !== generateSeqRef.current) return;
       console.error(err);
       setQuestions([]);
       setGenerationError(classifyGenerationError(0, err instanceof Error ? err.message : String(err)));
     } finally {
-      setGenerating(false);
+      if (seq === generateSeqRef.current) setGenerating(false);
     }
   }, []);
 

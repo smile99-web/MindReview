@@ -83,7 +83,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'title is required and must be a non-empty string' }, { status: 400 });
     }
 
-    const node = await prisma.knowledgeNode.create({ data: body });
+    // 字段白名单：body 原样传给 create 可注入嵌套关系写——children.connect
+    // 会改写共享知识图谱中任意节点的 parentId，outgoingEdges.create 可注入
+    // 边（PATCH 路由已有白名单，POST 漏修）。只允许内容型标量列。
+    const data: Record<string, unknown> = {
+      subjectId: body.subjectId.trim(),
+      title: body.title.trim(),
+    };
+    const optionalStrings = ['summary', 'chapterId', 'parentId', 'gradeLevel', 'icapLevel', 'representationType'];
+    for (const key of optionalStrings) {
+      if (typeof body[key] === 'string') data[key] = body[key];
+    }
+    const arrayFields = ['keywords', 'prerequisites', 'commonMistakes', 'typicalQuestions'];
+    for (const key of arrayFields) {
+      if (Array.isArray(body[key])) {
+        data[key] = body[key].filter((v: unknown) => typeof v === 'string');
+      }
+    }
+    const numberFields = ['difficulty', 'cognitiveLoad'];
+    for (const key of numberFields) {
+      if (typeof body[key] === 'number' && Number.isFinite(body[key])) data[key] = body[key];
+    }
+    if (
+      body.representationData &&
+      typeof body.representationData === 'object' &&
+      !Array.isArray(body.representationData)
+    ) {
+      data.representationData = body.representationData;
+    }
+
+    // key 均在上方白名单内，断言为 Unchecked 标量输入是安全的
+    const node = await prisma.knowledgeNode.create({
+      data: data as Prisma.KnowledgeNodeUncheckedCreateInput,
+    });
     return NextResponse.json(node);
   } catch (error: unknown) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });

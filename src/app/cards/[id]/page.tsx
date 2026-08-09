@@ -190,6 +190,10 @@ export default function KnowledgeCardPage() {
 
   useEffect(() => {
     let cancelled = false;
+    // 切换卡片时先清空上一张的媒体：加载 effect 只在找到资源时 set，
+    // 没有 else 清空分支，不重置会把卡 A 的配图/音频带进卡 B
+    setImageUrl(null);
+    setAudioUrl(null);
     async function loadImage() {
       try {
         const res = await authFetch(`/api/image?contentRefId=${id}&status=success&limit=1`);

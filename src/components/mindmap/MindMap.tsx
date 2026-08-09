@@ -406,7 +406,15 @@ export function MindMap({
   const [edges, setEdges, onEdgesChange] = useEdgesState(flowEdges);
 
   useEffect(() => {
-    setNodes(initialNodes);
+    // 重建节点（悬停高亮、筛选变化都会触发）时按 id 保留用户手动
+    // 拖拽的位置，只更新数据——否则鼠标划过 schema 节点就重置整个布局
+    setNodes((current) => {
+      const posById = new Map(current.map((n) => [n.id, n.position]));
+      return initialNodes.map((n) => {
+        const pos = posById.get(n.id);
+        return pos ? { ...n, position: pos } : n;
+      });
+    });
     setEdges(flowEdges);
   }, [initialNodes, flowEdges, setNodes, setEdges]);
 

@@ -13,8 +13,15 @@ import { resolveUserIdFromRequest } from "@/lib/user-context";
  * 返回 null 表示校验通过；返回 NextResponse(403) 表示拒绝。
  */
 export async function requireAdmin(req: NextRequest): Promise<NextResponse | null> {
-  // 先做登录校验（防御纵深），再检查管理员名单
-  const userId = await resolveUserIdFromRequest(req);
+  // 先做登录校验（防御纵深），再检查管理员名单。
+  // 未认证时返回 401 而不是让异常冒泡：调用方都是通用 try/catch，
+  // 抛出去会变成 500（前端只对 401 触发重新登录流程）
+  let userId: string;
+  try {
+    userId = await resolveUserIdFromRequest(req);
+  } catch {
+    return NextResponse.json({ error: "未登录或登录已过期" }, { status: 401 });
+  }
 
   const adminUsernames = (process.env.ADMIN_USERNAMES || "")
     .split(",")

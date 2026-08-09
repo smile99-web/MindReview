@@ -14,23 +14,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '缺少必填字段' }, { status: 400 });
     }
 
-    // 1. 查找或创建学科
-    let subjectRecord = await prisma.subject.findUnique({ where: { name: subject } });
-    if (!subjectRecord) {
-      subjectRecord = await prisma.subject.create({ data: { name: subject } });
-    }
-
-    // 2. 查找或创建章节
-    let chapter = await prisma.chapter.findFirst({
-      where: { subjectId: subjectRecord.id, title: chapterTitle || '未分类', parentId: null },
+    // 1. 查找或创建学科（upsert：并发拆解同名新学科时 findUnique→create
+    // 会撞 unique 约束，后者直接 500）
+    const subjectRecord = await prisma.subject.upsert({
+      where: { name: subject },
+      update: {},
+      create: { name: subject },
     });
-    if (!chapter) {
-      chapter = await prisma.chapter.create({
-        data: {
-          subjectId: subjectRecord.id,
-          title: chapterTitle || '未分类',
+
+    // 2. 查找或创建章节（Serializable + 冲突重试：并发时双方 findFirst
+    // 均为空会各建一个重复章节）
+    const resolveChapter = () =>
+      prisma.$transaction(
+        async (tx) => {
+          const found = await tx.chapter.findFirst({
+            where: { subjectId: subjectRecord.id, title: chapterTitle || '未分类', parentId: null },
+          });
+          if (found) return found;
+          return tx.chapter.create({
+            data: {
+              subjectId: subjectRecord.id,
+              title: chapterTitle || '未分类',
+            },
+          });
         },
-      });
+        { isolationLevel: 'Serializable' },
+      );
+    let chapter;
+    try {
+      chapter = await resolveChapter();
+    } catch (error: unknown) {
+      const code = (error as { code?: string })?.code;
+      if (code !== 'P2034' && code !== '40001') throw error;
+      chapter = await resolveChapter();
     }
 
     // 3. AI拆解知识点

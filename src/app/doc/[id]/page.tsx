@@ -147,6 +147,9 @@ export default function DocDetailPage({
       setPracticeAnswers({});
     } catch (err: unknown) {
       setError(getErrorMessage(err, '出题失败'));
+    } finally {
+      // 成功/失败都要复位：只挂在 catch 上会让 phase 永远卡在
+      // 'practicing'，"再来一组"按钮永久禁用（同 handleAnalyze 的写法）
       setPhase('idle');
     }
   };

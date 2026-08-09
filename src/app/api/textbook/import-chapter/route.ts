@@ -143,69 +143,109 @@ export async function POST(req: NextRequest) {
       gradeLevel: n.gradeLevel || null,
     }));
 
-    // Create the Chapter row + bulk-create KnowledgeNode rows in ONE
-    // callback-style transaction: either everything commits or
-    // everything rolls back — a mid-stream failure never leaves an
-    // empty Chapter or partial nodes behind.
-    const { newChapter, createdNodes } = await prisma.$transaction(
-      async (tx) => {
-        const maxSort = await tx.chapter.aggregate({
-          where: { subjectId },
-          _max: { sortOrder: true },
-        });
-        const chapterRow = await tx.chapter.create({
-          data: {
-            subjectId,
-            title: chapter.title,
-            sortOrder: (maxSort._max.sortOrder ?? -1) + 1,
-          },
-          select: { id: true, title: true, subjectId: true },
-        });
-        const rows: { id: string; title: string }[] = [];
-        for (const n of knowledgeNodes) {
-          const row = await tx.knowledgeNode.create({
+    // Create the Chapter row + bulk-create KnowledgeNode rows + mark the
+    // chapter as imported in ONE Serializable transaction. The prevImport
+    // check above is outside any transaction, so concurrent double-clicks
+    // can both pass it; the in-transaction re-check is the real gate —
+    // the loser's re-read sees status 'imported' and returns without
+    // creating duplicates. Serializable conflicts (P2034) retry the whole
+    // transaction, which then hits the already-imported branch.
+    const importTx = () =>
+      prisma.$transaction(
+        async (tx) => {
+          const current = await tx.textbookUpload.findUnique({
+            where: { id: textbookId },
+            select: { chapterImports: true },
+          });
+          const imports = ((current?.chapterImports as unknown) as Array<{
+            chapterTitle: string;
+            status: string;
+            chapterId?: string;
+            nodeIds?: string[];
+          }>) || [];
+          const prev = imports[chapterIdx];
+          if (prev?.status === 'imported' && prev.chapterId) {
+            return { alreadyImported: true as const, chapterId: prev.chapterId };
+          }
+
+          const maxSort = await tx.chapter.aggregate({
+            where: { subjectId },
+            _max: { sortOrder: true },
+          });
+          const chapterRow = await tx.chapter.create({
             data: {
               subjectId,
-              chapterId: chapterRow.id,
-              title: n.title,
-              summary: n.summary,
-              keywords: n.keywords,
-              prerequisites: n.prerequisites,
-              commonMistakes: n.commonMistakes,
-              typicalQuestions: n.typicalQuestions,
-              difficulty: n.difficulty,
-              cognitiveLoad: n.cognitiveLoad,
-              icapLevel: n.icapLevel,
-              // LLM-supplied grade tag — drives subject/[id] chapter
-              // grouping. May be missing for legacy data; UI
-              // gracefully falls back to sortOrder-based grouping.
-              gradeLevel: n.gradeLevel || null,
+              title: chapter.title,
+              sortOrder: (maxSort._max.sortOrder ?? -1) + 1,
             },
-            select: { id: true, title: true },
+            select: { id: true, title: true, subjectId: true },
           });
-          rows.push(row);
-        }
-        return { newChapter: chapterRow, createdNodes: rows };
-      },
-      { timeout: 60000 },
-    );
+          const rows: { id: string; title: string }[] = [];
+          for (const n of knowledgeNodes) {
+            const row = await tx.knowledgeNode.create({
+              data: {
+                subjectId,
+                chapterId: chapterRow.id,
+                title: n.title,
+                summary: n.summary,
+                keywords: n.keywords,
+                prerequisites: n.prerequisites,
+                commonMistakes: n.commonMistakes,
+                typicalQuestions: n.typicalQuestions,
+                difficulty: n.difficulty,
+                cognitiveLoad: n.cognitiveLoad,
+                icapLevel: n.icapLevel,
+                // LLM-supplied grade tag — drives subject/[id] chapter
+                // grouping. May be missing for legacy data; UI
+                // gracefully falls back to sortOrder-based grouping.
+                gradeLevel: n.gradeLevel || null,
+              },
+              select: { id: true, title: true },
+            });
+            rows.push(row);
+          }
 
-    // Mark the chapter as imported in the textbook's tracking
-    // array. If this was the first import, also stamp subjectId
-    // (so the list view shows it).
-    const nextImports = prevImports.map((c, i) =>
-      i === chapterIdx
-        ? { ...c, status: 'imported', chapterId: newChapter.id, nodeIds: createdNodes.map((n) => n.id) }
-        : c,
-    );
-    await prisma.textbookUpload.update({
-      where: { id: textbookId },
-      data: {
-        subjectId,
-        chapterImports: nextImports as unknown as object,
-      },
-    });
+          // Mark the chapter as imported in the textbook's tracking
+          // array. If this was the first import, also stamp subjectId
+          // (so the list view shows it). Based on the in-transaction
+          // re-read of chapterImports, not the stale pre-LLM snapshot.
+          const nextImports = imports.map((c, i) =>
+            i === chapterIdx
+              ? { ...c, status: 'imported', chapterId: chapterRow.id, nodeIds: rows.map((n) => n.id) }
+              : c,
+          );
+          await tx.textbookUpload.update({
+            where: { id: textbookId },
+            data: {
+              subjectId,
+              chapterImports: nextImports as unknown as object,
+            },
+          });
 
+          return { alreadyImported: false as const, newChapter: chapterRow, createdNodes: rows };
+        },
+        { isolationLevel: 'Serializable', timeout: 60000 },
+      );
+
+    let outcome;
+    try {
+      outcome = await importTx();
+    } catch (error: unknown) {
+      const code = (error as { code?: string })?.code;
+      if (code !== 'P2034' && code !== '40001') throw error;
+      // Serializable 冲突：重试时事务内复查会命中"已导入"分支
+      outcome = await importTx();
+    }
+
+    if (outcome.alreadyImported) {
+      return NextResponse.json({
+        success: true,
+        chapterId: outcome.chapterId,
+        alreadyImported: true,
+      });
+    }
+
+    const { newChapter, createdNodes } = outcome;
     return NextResponse.json({
       chapterId: newChapter.id,
       chapterTitle: newChapter.title,

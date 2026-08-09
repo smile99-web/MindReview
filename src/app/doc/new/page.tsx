@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/errors';
+import { readApiJson } from '@/lib/read-api-json';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 
@@ -37,7 +38,7 @@ export default function NewDocPage() {
       const fd = new FormData();
       fd.append('file', file);
       const res = await authFetch('/api/doc/upload', { method: 'POST', body: fd });
-      const data = (await res.json()) as { id?: string; error?: string };
+      const data = await readApiJson<{ id?: string; error?: string }>(res);
       if (!res.ok) throw new Error(data.error || `上传失败 (${res.status})`);
       router.push(`/doc/${data.id}`);
     } catch (err: unknown) {

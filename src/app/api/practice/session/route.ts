@@ -82,82 +82,98 @@ export async function POST(req: NextRequest) {
 
     const progressAwareNode = applyProgressToNode(knowledgeNode, knowledgeNode.userProgress[0]);
 
-    // --- check for existing active session ---
-    const existingIncomplete = await prisma.reviewTask.findMany({
-      where: {
-        userId: uid,
-        knowledgeNodeId,
-        completed: false,
-      },
-      select: { taskType: true, id: true },
-    });
-
-    if (!forceNew && existingIncomplete.length > 0) {
-      // Reuse the incomplete tasks and only back-fill the taskTypes that
-      // are missing. Previously a partially-completed session (any one of
-      // the 4 tasks done) fell through to the create path below, stacking
-      // 4 fresh tasks on top of the stale ones on every refresh.
-      const existingLevels = new Set(
-        existingIncomplete.map((t: { taskType: string }) => t.taskType),
-      );
-      const missingLevels = ICAP_TASK_TYPES.filter((level) => !existingLevels.has(level));
-
-      if (missingLevels.length > 0) {
-        const now = new Date();
-        await Promise.all(
-          missingLevels.map((taskType) =>
-            prisma.reviewTask.create({
-              data: {
-                userId: uid,
-                knowledgeNodeId,
-                taskType,
-                dueDate: now,
-              },
-            }),
-          ),
-        );
-      }
-
-      // Return the merged session (existing + just back-filled tasks)
-      const tasks = await prisma.reviewTask.findMany({
-        where: {
-          userId: uid,
-          knowledgeNodeId,
-          completed: false,
-        },
-        orderBy: { createdAt: 'asc' },
-      });
-
-      return NextResponse.json(buildSessionResponse(progressAwareNode, tasks, 'active'));
-    }
-
-    // --- fresh session (or forceNew): delete stale tasks + create 4 new
-    // ones atomically, so a mid-way failure can't leave a half session ---
-    const now = new Date();
-    const tasks = await prisma.$transaction(async (tx) => {
-      if (forceNew) {
-        await tx.reviewTask.deleteMany({
-          where: {
-            userId: uid,
-            knowledgeNodeId,
-            completed: false,
-          },
-        });
-      }
-
-      return Promise.all(
-        ICAP_TASK_TYPES.map((taskType) =>
-          tx.reviewTask.create({
-            data: {
+    // --- 检查 → 复用/补建/新建整体放进 Serializable 事务：并发首建
+    // （双击/多标签）会双双看到"无未完成会话"各建 4 个任务 = 8 个；
+    // 冲突（P2034/40001）重试时重读命中已有会话，走复用分支 ---
+    const runSession = () =>
+      prisma.$transaction(
+        async (tx) => {
+          // --- check for existing active session ---
+          const existingIncomplete = await tx.reviewTask.findMany({
+            where: {
               userId: uid,
               knowledgeNodeId,
-              taskType,
-              dueDate: now,
+              completed: false,
             },
-          }),
-        ),
+            select: { taskType: true, id: true },
+          });
+
+          if (!forceNew && existingIncomplete.length > 0) {
+            // Reuse the incomplete tasks and only back-fill the taskTypes that
+            // are missing. Previously a partially-completed session (any one of
+            // the 4 tasks done) fell through to the create path below, stacking
+            // 4 fresh tasks on top of the stale ones on every refresh.
+            const existingLevels = new Set(
+              existingIncomplete.map((t: { taskType: string }) => t.taskType),
+            );
+            const missingLevels = ICAP_TASK_TYPES.filter((level) => !existingLevels.has(level));
+
+            if (missingLevels.length > 0) {
+              const now = new Date();
+              await Promise.all(
+                missingLevels.map((taskType) =>
+                  tx.reviewTask.create({
+                    data: {
+                      userId: uid,
+                      knowledgeNodeId,
+                      taskType,
+                      dueDate: now,
+                    },
+                  }),
+                ),
+              );
+            }
+
+            // Return the merged session (existing + just back-filled tasks)
+            return tx.reviewTask.findMany({
+              where: {
+                userId: uid,
+                knowledgeNodeId,
+                completed: false,
+              },
+              orderBy: { createdAt: 'asc' },
+            });
+          }
+
+          // --- fresh session (or forceNew): delete stale tasks + create 4
+          // new ones atomically, so a mid-way failure can't leave a half
+          // session ---
+          const now = new Date();
+          if (forceNew) {
+            await tx.reviewTask.deleteMany({
+              where: {
+                userId: uid,
+                knowledgeNodeId,
+                completed: false,
+              },
+            });
+          }
+
+          return Promise.all(
+            ICAP_TASK_TYPES.map((taskType) =>
+              tx.reviewTask.create({
+                data: {
+                  userId: uid,
+                  knowledgeNodeId,
+                  taskType,
+                  dueDate: now,
+                },
+              }),
+            ),
+          );
+        },
+        { isolationLevel: 'Serializable' },
       );
-    });
+
+    let tasks;
+    try {
+      tasks = await runSession();
+    } catch (error: unknown) {
+      const code = (error as { code?: string })?.code;
+      if (code !== 'P2034' && code !== '40001') throw error;
+      // Serializable 冲突：并发请求已建好会话，重试会走复用分支返回它
+      tasks = await runSession();
+    }
 
     return NextResponse.json(buildSessionResponse(progressAwareNode, tasks, 'active'));
   } catch (error: unknown) {

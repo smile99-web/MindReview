@@ -62,20 +62,43 @@ export async function POST(
       ? Math.round(points.reduce((s, p) => s + (p.difficulty || 3), 0) / points.length)
       : 3;
 
-    const created = await prisma.knowledgeNode.create({
-      data: {
-        title: nodeTitle,
-        summary: nodeSummary,
-        keywords: uniqueKeywords,
-        subjectId: subject.id,
-        difficulty: avgDifficulty,
-        cognitiveLoad: 3,
-        icapLevel: 'Active',
-      },
-      select: { id: true, title: true },
-    });
+    // 并发双击/多标签：两个请求可同时通过上面的 findFirst 幂等检查。
+    // 事务内复查 marker + Serializable：后进入者命中已有节点直接复用；
+    // 冲突（P2034/40001）整体重试一次，重试时复查生效。
+    const createNode = () =>
+      prisma.$transaction(
+        async (tx) => {
+          const dup = await tx.knowledgeNode.findFirst({
+            where: { keywords: { has: marker } },
+            select: { id: true, title: true },
+          });
+          if (dup) return { node: dup, reused: true as const };
+          const node = await tx.knowledgeNode.create({
+            data: {
+              title: nodeTitle,
+              summary: nodeSummary,
+              keywords: uniqueKeywords,
+              subjectId: subject.id,
+              difficulty: avgDifficulty,
+              cognitiveLoad: 3,
+              icapLevel: 'Active',
+            },
+            select: { id: true, title: true },
+          });
+          return { node, reused: false as const };
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    let outcome;
+    try {
+      outcome = await createNode();
+    } catch (error: unknown) {
+      const code = (error as { code?: string })?.code;
+      if (code !== 'P2034' && code !== '40001') throw error;
+      outcome = await createNode();
+    }
 
-    return NextResponse.json({ nodeId: created.id, title: created.title, reused: false });
+    return NextResponse.json({ nodeId: outcome.node.id, title: outcome.node.title, reused: outcome.reused });
   } catch (error: unknown) {
     console.error('[doc/create-node] Error:', error);
     return NextResponse.json(

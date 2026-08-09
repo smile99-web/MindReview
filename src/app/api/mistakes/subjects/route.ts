@@ -40,13 +40,20 @@ export async function GET(req: NextRequest) {
       where: { userId, subjectId: { not: null }, resolved: false },
       _count: { id: true },
     });
+    // due 口径必须与 /api/mistakes/due 一致：未解决且到期，或
+    // 已解决但 nextReviewAt 到期重新浮现（否则两 widget 数字互相矛盾）
     const due = await prisma.mistake.groupBy({
       by: ['subjectId'],
       where: {
         userId,
         subjectId: { not: null },
-        resolved: false,
-        OR: [{ nextReviewAt: null }, { nextReviewAt: { lte: now } }],
+        OR: [
+          {
+            resolved: false,
+            OR: [{ nextReviewAt: null }, { nextReviewAt: { lte: now } }],
+          },
+          { resolved: true, nextReviewAt: { lte: now } },
+        ],
       },
       _count: { id: true },
     });

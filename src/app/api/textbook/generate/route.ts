@@ -331,7 +331,9 @@ export async function POST(req: NextRequest) {
     let generated: Awaited<ReturnType<typeof generateChapterOutlines>>;
     const userChapters = Array.isArray(body.chapters) ? body.chapters : null;
     if (userChapters && userChapters.length > 0) {
-      // 客户端传了 {title, overview}[] — 直接用，不调 LLM 出大纲
+      // 客户端传了 {title, overview}[] — 直接用，不调 LLM 出大纲。
+      // 必须套与 LLM 自动大纲路径相同的上限（generateChapterOutlines 里
+      // 是 slice(0, 全册?12:8)）：否则几百个章节名会并发调几百次 LLM 烧光配额。
       const cleaned = userChapters
         .map((c: unknown, i: number) => {
           if (!c || typeof c !== 'object') return null;
@@ -344,7 +346,8 @@ export async function POST(req: NextRequest) {
             sortOrder: i + 1,
           };
         })
-        .filter((c: ChapterOutline | null): c is ChapterOutline => Boolean(c));
+        .filter((c: ChapterOutline | null): c is ChapterOutline => Boolean(c))
+        .slice(0, volume === '全册' ? 12 : 8);
       if (cleaned.length === 0) {
         return NextResponse.json(
           { error: 'chapters 列表中至少需要一个有效的 title' },

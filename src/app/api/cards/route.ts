@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getErrorMessage } from '@/lib/errors';
 
 const VALID_CARD_TYPES = ['summary', 'formula', 'diagram', 'timeline', 'template', 'mistake', 'worked_example'] as const;
 
@@ -42,8 +43,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ cards, total, page, limit });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    // getErrorMessage 脱敏：Prisma 错误原文含 schema/SQL 片段，不回给客户端
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(card, { status: 201 });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    // getErrorMessage 脱敏：Prisma 错误原文含 schema/SQL 片段，不回给客户端
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }

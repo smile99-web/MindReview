@@ -83,22 +83,43 @@ export async function POST(
     let isCorrect = false;
     let matchExplanation = '';
     if (parsed.options.length > 0) {
-      const correctOpt = parsed.options.find(
-        (o) => o.label === parsed.correctAnswer.trim(),
-      );
-      if (correctOpt) {
-        // Label match.
-        const userOpt = parsed.options.find((o) => o.label === userAnswer.trim());
-        isCorrect = !!userOpt && userOpt.label === correctOpt.label;
-        if (isCorrect) matchExplanation = `你选择了 ${userOpt!.label} (${userOpt!.text})，与正确答案 ${correctOpt.label} (${correctOpt.text}) 一致。`;
-        else matchExplanation = `你选择了 ${userOpt?.label || userAnswer} ${userOpt ? `(${userOpt.text})` : ''}；正确答案是 ${correctOpt.label} (${correctOpt.text})。`;
+      // 库存答案可能是 "C" 也可能是 "C. 土地公有制"（practice 路由
+      // extractChoiceLabel 同款容错）：双方都提得出选项字母时按字母比对。
+      // 否则前端 radio 只回传 "C"，Case2 文本比对永远判错。
+      const extractChoiceLabel = (raw: string): string | null => {
+        const m = raw.trim().match(/^([A-Za-z])(?:[.、．:：]|\s|$)/);
+        return m ? m[1].toLowerCase() : null;
+      };
+      const correctLabel = extractChoiceLabel(parsed.correctAnswer);
+      const userLabel = extractChoiceLabel(userAnswer);
+
+      if (correctLabel && userLabel) {
+        const correctOpt = parsed.options.find((o) => o.label.trim().toLowerCase() === correctLabel);
+        const userOpt = parsed.options.find((o) => o.label.trim().toLowerCase() === userLabel);
+        isCorrect = correctLabel === userLabel;
+        if (isCorrect) {
+          matchExplanation = `你选择了 ${userLabel.toUpperCase()}${userOpt ? ` (${userOpt.text})` : ''}，与正确答案一致。`;
+        } else {
+          matchExplanation = `你选择了 ${userLabel.toUpperCase()}${userOpt ? ` (${userOpt.text})` : ''}；正确答案是 ${correctLabel.toUpperCase()}${correctOpt ? ` (${correctOpt.text})` : ''}。`;
+        }
       } else {
-        // correctAnswer is the option text — match by text
-        // (case-insensitive trimmed).
-        const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
-        isCorrect = norm(parsed.correctAnswer) === norm(userAnswer);
-        if (isCorrect) matchExplanation = '你的答案与正确答案一致。';
-        else matchExplanation = `你选择了 "${userAnswer}"，正确答案是 "${parsed.correctAnswer}"。`;
+        const correctOpt = parsed.options.find(
+          (o) => o.label === parsed.correctAnswer.trim(),
+        );
+        if (correctOpt) {
+          // Label match.
+          const userOpt = parsed.options.find((o) => o.label === userAnswer.trim());
+          isCorrect = !!userOpt && userOpt.label === correctOpt.label;
+          if (isCorrect) matchExplanation = `你选择了 ${userOpt!.label} (${userOpt!.text})，与正确答案 ${correctOpt.label} (${correctOpt.text}) 一致。`;
+          else matchExplanation = `你选择了 ${userOpt?.label || userAnswer} ${userOpt ? `(${userOpt.text})` : ''}；正确答案是 ${correctOpt.label} (${correctOpt.text})。`;
+        } else {
+          // correctAnswer is the option text — match by text
+          // (case-insensitive trimmed).
+          const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+          isCorrect = norm(parsed.correctAnswer) === norm(userAnswer);
+          if (isCorrect) matchExplanation = '你的答案与正确答案一致。';
+          else matchExplanation = `你选择了 "${userAnswer}"，正确答案是 "${parsed.correctAnswer}"。`;
+        }
       }
     } else {
       // Free-form. Trim + case-insensitive match. Accept close

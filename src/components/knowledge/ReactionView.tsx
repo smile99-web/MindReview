@@ -106,10 +106,23 @@ function parseAtoms(formula: string): Record<string, number> {
       return map[c] || c;
     });
 
+  // 展开括号基团：(OH)2 → OHOH，(SO4)3 → SO4SO4SO4。
+  // 不展开的话 Cu(OH)₂/Ca(OH)₂/Al₂(SO₄)₃ 这类初中化学极常见的
+  // 形态会把 O/H 少数一半，配平正确也误判"未配平"。
+  // 循环处理以支持嵌套括号，guard 防畸形输入死循环。
+  let expanded = cleaned;
+  const groupRe = /\(([^()]*)\)(\d*)/;
+  let guard = 0;
+  while (groupRe.test(expanded) && guard++ < 20) {
+    expanded = expanded.replace(groupRe, (_, inner: string, n: string) =>
+      inner.repeat(n ? parseInt(n, 10) : 1),
+    );
+  }
+
   // Match elements: uppercase letter + optional lowercase + optional digit count
   const regex = /([A-Z][a-z]?)(\d*)/g;
   let m: RegExpExecArray | null;
-  while ((m = regex.exec(cleaned)) !== null) {
+  while ((m = regex.exec(expanded)) !== null) {
     const elem = m[1];
     const count = m[2] ? parseInt(m[2], 10) : 1;
     counts[elem] = (counts[elem] || 0) + count;

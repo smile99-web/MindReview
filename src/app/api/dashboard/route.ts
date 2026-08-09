@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
 import { appDateKey, startOfAppDay } from '@/lib/date-utils';
+import { getErrorMessage } from '@/lib/errors';
 
 export async function GET(req: NextRequest) {
   try {
@@ -128,7 +129,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
-    return NextResponse.json({ error: message }, { status: 500 });
+    // 统一走 getErrorMessage 脱敏，避免把 Prisma 内部错误（含 schema/字段名）回给客户端
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }

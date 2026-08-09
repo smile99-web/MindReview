@@ -6,6 +6,8 @@ import { getErrorMessage } from '@/lib/errors';
 // Max .txt/.docx file size we accept (10 MB — larger is almost
 // certainly a textbook, not a question).
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// 解压后文本上限：200 万字符（docx zip 高压缩比，压缩前 10MB 可能解压出数百 MB）
+const MAX_CONTENT_CHARS = 2_000_000;
 
 const ALLOWED_EXTENSIONS = new Set(['.txt', '.docx']);
 
@@ -82,6 +84,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: '文件内容为空' },
         { status: 422 },
+      );
+    }
+
+    // docx 是 zip 高压缩格式：10MB 压缩包可解压出数百 MB 文本，
+    // 压缩前的大小检查挡不住，解压后的文本长度必须再限一次
+    if (content.length > MAX_CONTENT_CHARS) {
+      return NextResponse.json(
+        { error: `文件文本过长（${(content.length / 10000).toFixed(0)} 万字），上限 ${MAX_CONTENT_CHARS / 10000} 万字` },
+        { status: 413 },
       );
     }
 

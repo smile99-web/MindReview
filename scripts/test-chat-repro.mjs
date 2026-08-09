@@ -1,6 +1,8 @@
 // scripts/test-chat-repro.mjs
 // 临时调试脚本：用与生产相同的 system prompt + "大气圈的中部有多高"，看 DeepSeek 实际返回。
-// 用法：DEEPSEEK_API_KEY=sk-xxx node scripts/test-chat-repro.mjs
+// 用法：DEEPSEEK_API_KEY=sk-xxx npx tsx scripts/test-chat-repro.mjs
+// （脚本 import 了 ../src/lib/utils.ts：Node ≥23.6 可直接 `node` 运行；
+//   Node 22.6+ 需 `node --experimental-strip-types`；更低版本必须用 tsx）
 import OpenAI from 'openai';
 
 const systemPrompt = `你是一位耐心、亲切、专业的中学辅导老师，正在和一位中学生进行多轮对话答疑。

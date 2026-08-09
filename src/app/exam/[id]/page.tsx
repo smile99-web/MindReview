@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authFetch } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/errors';
+import { readApiJson } from '@/lib/read-api-json';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { LatexText } from '@/components/ui/LatexText';
@@ -43,16 +44,6 @@ interface ExamData {
 }
 
 type Phase = 'idle' | 'analyzing' | 'practicing' | 'reviewing' | 'icap-creating';
-
-/** nginx 超时/限体时返回 HTML 错误页，res.json() 抛的是浏览器原始解析错误
- * （用户看不懂）——换成带状态码的可操作提示。 */
-async function readApiJson<T>(res: Response): Promise<T> {
-  try {
-    return (await res.json()) as T;
-  } catch {
-    throw new Error(`服务器响应异常 (${res.status})，请稍后重试`);
-  }
-}
 
 /** iOS WebKit 中断长请求/响应解析失败时的原始英文报错，统一翻译成可操作提示。 */
 function friendlyError(err: unknown, fallback: string): string {

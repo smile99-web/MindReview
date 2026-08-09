@@ -153,9 +153,15 @@ export async function ensureFreshToken(): Promise<boolean> {
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const token = await getValidToken();
   if (!token) {
-    clearTokens();
-    redirectToLogin();
-    throw new AuthExpiredError();
+    // 区分"确实无凭证"与"刷新接口网络失败"：getValidToken 在网络层失败时
+    // 按设计保留 refresh token 供重试，此时清 token + 跳登录会把弱网用户
+    // （iPad 常见）强制登出。只在 refresh token 都没了才真正登出。
+    if (!getRefreshToken()) {
+      clearTokens();
+      redirectToLogin();
+      throw new AuthExpiredError();
+    }
+    throw new Error('网络异常，无法刷新登录状态，请检查网络后重试');
   }
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);

@@ -320,7 +320,11 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   }, [startTime]);
 
   const goToStage = async (idx: number) => {
-    recordStageTime(STAGES[stage].key);
+    // 仅前进时把当前阶段标记为已完成：点"返回上一步"也标记的话，
+    // 会绕过互动阶段的完成门槛（allDone 直接弹完成页、误点亮学习清单）
+    if (idx > stage) {
+      recordStageTime(STAGES[stage].key);
+    }
     setStage(idx);
     setStartTime(Date.now());
 
@@ -931,7 +935,14 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
               />
               <div className="flex justify-between">
                 <Button variant="ghost" onClick={() => goToStage(1)}>返回上一步</Button>
-                <Button onClick={handleSubmitSummary} disabled={!userSummary.trim()}>提交总结</Button>
+                <div className="flex gap-2">
+                  {/* 总结标注"可选"就必须给跳过通道：此前唯一的"下一步"按钮
+                      在已提交分支里，不写总结的学生永远卡在构建阶段 */}
+                  <Button variant="ghost" onClick={handleAdvanceFromConstructive} loading={gapCheckLoading} disabled={gapCheckLoading}>
+                    跳过总结，下一步
+                  </Button>
+                  <Button onClick={handleSubmitSummary} disabled={!userSummary.trim()}>提交总结</Button>
+                </div>
               </div>
             </>
           ) : (

@@ -54,6 +54,14 @@ export async function POST(req: NextRequest) {
     }
     // --- end validation ---
 
+    // parentId 存在性校验：不存在的 parentId 会触发 FK 违例变 500，应返回 400
+    if (body.parentId) {
+      const parent = await prisma.chapter.findUnique({ where: { id: body.parentId }, select: { id: true } });
+      if (!parent) {
+        return NextResponse.json({ error: 'parentId 对应的章节不存在' }, { status: 400 });
+      }
+    }
+
     // 防止重复创建同名章节
     const existing = await prisma.chapter.findFirst({
       where: {
@@ -66,7 +74,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(existing);
     }
 
-    const chapter = await prisma.chapter.create({ data: body });
+    // 显式构造 data：不能把原始 body 传给 create（mass assignment 可注入
+    // id/knowledgeNodes 等任意字段）；入库与查重统一用 trim 后的标题
+    const chapter = await prisma.chapter.create({
+      data: {
+        title: body.title.trim(),
+        subjectId: body.subjectId,
+        parentId: body.parentId ?? null,
+        sortOrder: body.sortOrder ?? 0,
+      },
+    });
     return NextResponse.json(chapter);
   } catch (error: unknown) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
