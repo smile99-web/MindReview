@@ -55,6 +55,8 @@ export interface Scene3DDefinition {
   id: string;
   title: string;
   subject: '数学' | '物理' | '化学';
+  /** 适用年级学期，如 '7上' '8下' '9全'（合集页展示用，可空） */
+  grade?: string;
   icon: string;
   /** 一句话简介（合集页卡片用） */
   tagline: string;

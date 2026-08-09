@@ -85,6 +85,37 @@ export function std(color: string | number, extra: Partial<THREE.MeshStandardMat
   return new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.08, ...extra });
 }
 
+/** 力/速度等矢量箭头（轴 + 锥头），物理场景高频使用 */
+export interface ArrowHandle {
+  group: THREE.Group;
+  /** 让箭头从 from 指向 to（自动缩放与定向） */
+  set(from: THREE.Vector3, to: THREE.Vector3): void;
+}
+export function makeArrow(
+  color: string | number,
+  opts: { radius?: number; headRadius?: number; headLength?: number } = {},
+): ArrowHandle {
+  const { radius = 0.045, headRadius = 0.13, headLength = 0.32 } = opts;
+  const mat = std(color, { emissive: color, emissiveIntensity: 0.35 });
+  const group = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1, 8), mat);
+  const head = new THREE.Mesh(new THREE.ConeGeometry(headRadius, headLength, 12), mat);
+  group.add(shaft, head);
+  const up = new THREE.Vector3(0, 1, 0);
+  const set = (from: THREE.Vector3, to: THREE.Vector3) => {
+    const dir = new THREE.Vector3().subVectors(to, from);
+    const len = Math.max(dir.length(), 0.0001);
+    const unit = dir.normalize();
+    const shaftLen = Math.max(len - headLength, 0.01);
+    shaft.scale.y = shaftLen;
+    shaft.position.copy(from).addScaledVector(unit, shaftLen / 2);
+    shaft.quaternion.setFromUnitVectors(up, unit);
+    head.position.copy(from).addScaledVector(unit, len - headLength / 2);
+    head.quaternion.copy(shaft.quaternion);
+  };
+  return { group, set };
+}
+
 /** 地面参考网格 + 柔光，几乎所有场景都用 */
 export function addStageBasics(scene: THREE.Scene, size = 14): void {
   const grid = new THREE.GridHelper(size, size, 0xcbd5e1, 0xe2e8f0);
