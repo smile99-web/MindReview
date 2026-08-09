@@ -4,6 +4,7 @@ import { authFetch } from '@/lib/auth';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { KnowledgeCardView } from '@/components/knowledge/KnowledgeCardView';
 import { LearningChecklist } from '@/components/knowledge/LearningChecklist';
 import { MindMap } from '@/components/mindmap/MindMap';
@@ -13,6 +14,12 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { LatexText } from '@/components/ui/LatexText';
 import { useChat } from '@/components/chat/ChatProvider';
+import { matchScenes } from '@/lib/lab3d/registry';
+
+// 3D 演示（three.js 体积大，按需加载、不走 SSR）
+const Knowledge3DSection = dynamic(() => import('@/components/knowledge3d/Knowledge3DSection'), {
+  ssr: false,
+});
 
 interface RelatedKnowledgeNode {
   id: string;
@@ -107,7 +114,7 @@ export default function KnowledgeCardPage() {
 
   const [node, setNode] = useState<KnowledgeCardNode | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'card' | 'mindmap' | 'practice' | 'icap'>('card');
+  const [activeTab, setActiveTab] = useState<'card' | 'mindmap' | 'practice' | 'icap' | 'lab3d'>('card');
   const [practiceAnswers, setPracticeAnswers] = useState<Record<string, string>>({});
   const [practiceChecked, setPracticeChecked] = useState<Record<string, boolean>>({});
   const [questions, setQuestions] = useState<PracticeQuestion[]>([]);
@@ -486,11 +493,18 @@ export default function KnowledgeCardPage() {
     );
   }
 
+  const lab3dMatches = matchScenes({
+    title: node.title,
+    keywords: node.keywords,
+    subjectName: node.subject?.name,
+  });
+
   const tabs = [
     { key: 'card' as const, label: '知识卡', icon: '📖' },
     { key: 'practice' as const, label: '练习', icon: '✏️' },
     { key: 'icap' as const, label: 'ICAP训练', icon: '🧠' },
     { key: 'mindmap' as const, label: '关联图', icon: '🗺️' },
+    ...(lab3dMatches.length > 0 ? [{ key: 'lab3d' as const, label: '3D演示', icon: '🧊' }] : []),
   ];
 
   return (
@@ -731,6 +745,24 @@ export default function KnowledgeCardPage() {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'lab3d' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-500">
+              与本知识点相关的 3D 互动演示，跟着步骤讲解动手探索
+            </p>
+            <Link href="/lab3d" className="text-sm text-indigo-500 hover:underline shrink-0 ml-4">
+              全部演示 →
+            </Link>
+          </div>
+          <Knowledge3DSection
+            title={node.title}
+            keywords={node.keywords}
+            subjectName={node.subject?.name}
+          />
         </div>
       )}
 

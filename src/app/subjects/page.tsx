@@ -64,6 +64,12 @@ export default function SubjectsPage() {
         </div>
         <div className="flex gap-2">
           <Link
+            href="/lab3d"
+            className="px-4 py-2 rounded-xl bg-white border border-indigo-200 text-indigo-600 text-sm font-medium hover:bg-indigo-50 transition-colors"
+          >
+            🧊 3D实验室
+          </Link>
+          <Link
             href="/subjects/textbook/new"
             className="px-4 py-2 rounded-xl bg-indigo-500 text-white text-sm font-medium hover:bg-indigo-600 transition-colors"
           >
