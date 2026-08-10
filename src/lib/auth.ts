@@ -225,12 +225,13 @@ export async function register(
   username: string,
   password: string,
   email?: string,
-  name?: string
+  name?: string,
+  inviteCode?: string
 ) {
   const res = await fetch(`${AUTH_API}/api/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, email, name }),
+    body: JSON.stringify({ username, password, email, name, inviteCode }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);

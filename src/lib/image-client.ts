@@ -1,4 +1,5 @@
 import { getErrorMessage } from '@/lib/errors';
+import { getArkConfig } from '@/lib/ark';
 import { prisma } from '@/lib/prisma';
 import { decryptSecret } from '@/lib/secrets';
 import { assertSafeExternalBaseUrl } from '@/lib/url-security';
@@ -22,6 +23,11 @@ const ENDPOINT = process.env.SEEDREAM_ENDPOINT || 'https://ark.cn-beijing.volces
 const MODEL = process.env.SEEDREAM_MODEL || 'doubao-seedream-5-0';
 
 async function getImageSettings() {
+  // 方舟统一调用优先；未启用时回退到图片服务独立配置
+  const ark = await getArkConfig();
+  if (ark) {
+    return { apiKey: ark.apiKey, endpoint: ark.baseUrl, model: ark.models.image };
+  }
   const saved = await prisma.apiKey.findUnique({ where: { service: 'image' } }).catch(() => null);
   const savedKey = saved?.isActive && saved.key ? decryptSecret(saved.key) : '';
 

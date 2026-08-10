@@ -17,6 +17,7 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -24,13 +25,15 @@ export default function RegisterPage() {
     username: false,
     password: false,
     confirmPassword: false,
+    inviteCode: false,
   });
 
   const usernameValid = username.trim().length >= 3;
   const passwordValid = password.length >= 6;
   const passwordsMatch = password === confirmPassword;
   const emailValid = email === "" || /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email);
-  const formValid = usernameValid && passwordValid && passwordsMatch && emailValid;
+  const inviteCodeValid = inviteCode.trim().length > 0;
+  const formValid = usernameValid && passwordValid && passwordsMatch && emailValid && inviteCodeValid;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +47,8 @@ export default function RegisterPage() {
         username.trim(),
         password,
         email.trim() || undefined,
-        name.trim() || undefined
+        name.trim() || undefined,
+        inviteCode.trim()
       );
       router.push("/dashboard");
     } catch (err: unknown) {
@@ -158,6 +162,23 @@ export default function RegisterPage() {
               />
               {touched.confirmPassword && !passwordsMatch && (
                 <p className="text-xs text-red-500 mt-1">两次密码不一致</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                推荐码 <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                onBlur={() => setTouched((t) => ({ ...t, inviteCode: true }))}
+                placeholder="请输入推荐码"
+                className="w-full rounded-xl border border-slate-200/80 px-3.5 py-2.5 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors placeholder:text-slate-300"
+              />
+              {touched.inviteCode && !inviteCodeValid && (
+                <p className="text-xs text-red-500 mt-1">注册需要推荐码</p>
               )}
             </div>
 

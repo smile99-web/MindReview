@@ -116,9 +116,13 @@ export default function SchemaApplyPage({ params }: PageProps) {
           }}
           memberCount={schema.members?.length}
           onComplete={(score) => {
-            // Could persist score to schema/knowledge node progress here.
-            // For now, just log and let the user navigate back.
-            console.log('[SchemaApply] completed with score', score);
+            // 成绩落库（此前只 console.log，练习数据全部丢失）。
+            // fire-and-forget：记录失败不打断学生流程。
+            void authFetch('/api/schema/apply-result', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ schemaId: schema.id, score }),
+            }).catch(() => {});
           }}
           onClose={() => router.push('/schemas')}
         />

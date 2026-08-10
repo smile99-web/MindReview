@@ -1,7 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/auth';
-import { useEffect, useState, Suspense, useCallback } from 'react';
+import { useEffect, useMemo, useState, Suspense, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/Button';
@@ -64,6 +64,9 @@ function MindMapContent() {
   const chapterId = searchParams.get('chapterId');
 
   const [data, setData] = useState<{ nodes: MindMapNode[]; edges: MindMapEdge[] }>({ nodes: [], edges: [] });
+  // 星空=进度仪表盘（看掌握度、导航）；命题视图=2D 关系列表（读命题）。
+  // 学习科学研究：花哨 3D 无学习增益，命题（节点-连接词-节点）才是意义单元。
+  const [viewMode, setViewMode] = useState<'galaxy' | 'propositions'>('galaxy');
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('思维导图');
   const [showSchemas, setShowSchemas] = useState(false);
@@ -172,7 +175,7 @@ function MindMapContent() {
         <div>
           <h1 className="text-[28px] font-bold text-slate-800 tracking-tight">{title}</h1>
           <p className="text-slate-500 mt-1.5 text-[15px]">
-            {data.nodes.length} 个知识点 · {data.edges.length} 条关系 · 点击星球聚焦，沿知识连接探索整个体系
+            掌握度仪表盘 · {data.nodes.length} 个知识点 · {data.edges.length} 条关系 · 星球越亮掌握越好 · 学会靠练不靠看：找茬 / 挖空 / 默画
           </p>
         </div>
         <div className="flex gap-2 items-center">
@@ -194,6 +197,43 @@ function MindMapContent() {
             />
             <span className="text-sm text-slate-600 font-medium">显示图式</span>
           </label>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => router.push('/mindmap/find-bugs')}
+          >
+            🐛 找茬
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => router.push('/mindmap/cloze')}
+          >
+            🕳️ 挖空
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => router.push('/mindmap/rebuild')}
+          >
+            🧩 默画
+          </Button>
+          {/* 视图切换：星空（仪表盘）/ 命题（2D 关系列表） */}
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+            {([['galaxy', '🌌 星空'], ['propositions', '📜 命题']] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`text-xs px-3 py-1.5 transition ${
+                  viewMode === mode
+                    ? 'bg-indigo-500 text-white font-medium'
+                    : 'bg-white text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {subjectId && (
             <Button
               variant="secondary"
@@ -312,6 +352,8 @@ function MindMapContent() {
             )}
           </div>
         </div>
+      ) : viewMode === 'propositions' ? (
+        <PropositionList nodes={data.nodes} edges={data.edges} />
       ) : (
         <MindMap3D
           nodes={data.nodes}
@@ -322,6 +364,98 @@ function MindMapContent() {
           onRelationTypeFilterChange={setRelationTypeFilter}
           className="w-full h-[640px] rounded-2xl border border-slate-200/60 shadow-[0_1px_3px_rgba(0,0,0,0.03),0_4px_12px_rgba(0,0,0,0.02)]"
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 2D 命题视图：把关系网展开成"命题列表"（《A》—关系→《B》+ 具体描述）。
+ * 学习科学依据：命题才是概念图的意义单元（Novak）；空间/视觉特效不承载意义，
+ * 花哨 3D 属于 seductive details。这里按章节分组、可搜索，掌握度用颜色表达。
+ */
+function PropositionList({ nodes, edges }: { nodes: MindMapNode[]; edges: MindMapEdge[] }) {
+  const [query, setQuery] = useState('');
+
+  const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+
+  // 掌握度文字色：与星空的亮度四档对应
+  const masteryClass = (m?: number | null) => {
+    const v = m ?? 0;
+    if (v >= 80) return 'text-emerald-600 font-medium';
+    if (v >= 60) return 'text-amber-600';
+    if (v > 0) return 'text-slate-600';
+    return 'text-slate-400';
+  };
+
+  type PropItem = { edge: MindMapEdge; from: MindMapNode; to: MindMapNode };
+
+  const groups = useMemo((): Array<[string, PropItem[]]> => {
+    const byChapter = new Map<string, PropItem[]>();
+    for (const e of edges) {
+      if (e.relationType === 'schema_member') continue;
+      const from = e.fromId ? nodeById.get(e.fromId) : undefined;
+      const to = e.toId ? nodeById.get(e.toId) : undefined;
+      if (!from || !to) continue;
+      const chapterTitle = from.chapter?.title || '未分章';
+      const list = byChapter.get(chapterTitle) ?? [];
+      list.push({ edge: e, from, to });
+      byChapter.set(chapterTitle, list);
+    }
+    return [...byChapter.entries()];
+  }, [nodes, edges, nodeById]);
+
+  const q = query.trim().toLowerCase();
+  const filtered: Array<[string, PropItem[]]> = q
+    ? groups
+        .map(([chapter, items]): [string, PropItem[]] => [
+          chapter,
+          items.filter(({ from, to, edge }) =>
+            `${from.title}${to.title}${edge.label ?? ''}`.toLowerCase().includes(q),
+          ),
+        ])
+        .filter(([, items]) => items.length > 0)
+    : groups;
+
+  return (
+    <div className="rounded-2xl border border-slate-200/60 bg-white p-5 max-h-[720px] overflow-y-auto">
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="搜索知识点或关系描述…"
+        className="w-full max-w-md mb-4 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+      />
+      {filtered.map(([chapter, items]) => (
+        <details key={chapter} open={groups.length <= 3 || Boolean(q)} className="mb-3">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-700 py-1.5 select-none">
+            {chapter} <span className="text-slate-400 font-normal">（{items.length} 条命题）</span>
+          </summary>
+          <div className="mt-1 space-y-1 pl-2">
+            {items.map(({ edge, from, to }) => {
+              const color = RELATION_COLORS[(edge.relationType as RelationType) ?? 'prerequisite'] ?? '#64748b';
+              const mechanical = edge.label === `${from.title} → ${to.title}`;
+              return (
+                <div key={edge.id} className="flex flex-wrap items-baseline gap-x-2 py-1 text-sm border-b border-slate-50">
+                  <span className={masteryClass(from.masteryLevel)}>{from.title}</span>
+                  <span
+                    className="text-[11px] px-1.5 py-0.5 rounded-full text-white shrink-0"
+                    style={{ backgroundColor: color }}
+                  >
+                    {RELATION_LABELS[(edge.relationType as RelationType) ?? 'prerequisite'] ?? edge.relationType}
+                  </span>
+                  <span className={masteryClass(to.masteryLevel)}>{to.title}</span>
+                  {edge.label && !mechanical && (
+                    <span className="text-xs text-slate-400 w-full pl-1">└ {edge.label}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      ))}
+      {filtered.length === 0 && (
+        <p className="text-sm text-slate-400 py-8 text-center">没有匹配的命题</p>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import { getErrorMessage } from '@/lib/errors';
 import { parseAiJson, runAiTask } from '@/lib/ai-service';
+import { getArkConfig } from '@/lib/ark';
 import OpenAI from 'openai';
 import { prisma } from '@/lib/prisma';
 import { decryptSecret } from '@/lib/secrets';
@@ -39,6 +40,16 @@ export interface LlmCallOptions {
    * default 60s is too tight. The shared `runAiTask` retry/backoff still applies.
    */
   timeoutMs?: number;
+  /**
+   * 方舟 Agent Plan 的 doubao-seed 系列是推理模型：复杂任务会陷入超长思考
+   * （实测图谱标注 >200s 直接挂起）。仅当端点是 volces.com 时生效：
+   * 请求体加 thinking:{type:'disabled'}，同一任务 20s 内返回。
+   *
+   * 默认为 true——方舟模式下所有任务都可能因此超时，逐调用点加开关遗漏太多；
+   * 个别确实需要深度推理的调用可显式传 false 保留思考。
+   * 其他厂商不认识 thinking 参数（可能 400），所以仅匹配 volces 域名时生效。
+   */
+  disableThinking?: boolean;
   /**
    * 交互式调用（用户在屏幕前等结果）时设为 true：
    * DeepSeek 官方端点上若配置的是推理模型（如 deepseek-v4-flash——会先输出
@@ -283,6 +294,12 @@ function normalizeWorkedExample(value: unknown): WorkedExample {
 }
 
 async function getLlmSettings() {
+  // 方舟统一调用优先（设置页"火山方舟 Agent Plan"开关开启且已存 key）；
+  // 未启用时回退到 LLM 独立配置（DeepSeek 等备选方案）
+  const ark = await getArkConfig();
+  if (ark) {
+    return { apiKey: ark.apiKey, baseURL: ark.baseUrl, model: ark.models.llm };
+  }
   const saved = await prisma.apiKey.findUnique({ where: { service: 'llm' } }).catch(() => null);
   const savedKey = saved?.isActive && saved.key ? decryptSecret(saved.key) : '';
   const apiKey = savedKey || process.env.DEEPSEEK_API_KEY || '';
@@ -314,6 +331,11 @@ export async function getVisionSettings(): Promise<{
   baseURL: string;
   model: string;
 }> {
+  // 方舟统一调用优先（同一 key 调多模态模型做拍照讲题 OCR）
+  const ark = await getArkConfig();
+  if (ark) {
+    return { apiKey: ark.apiKey, baseURL: ark.baseUrl, model: ark.models.vision };
+  }
   const saved = await prisma.apiKey
     .findUnique({ where: { service: 'vision' } })
     .catch(() => null);
@@ -416,7 +438,10 @@ export async function llmVisionCall(options: {
       temperature,
       max_tokens: maxTokens,
       response_format: jsonMode ? { type: 'json_object' } : undefined,
-    }),
+      // 视觉走方舟时同样是 doubao-seed 推理模型：OCR/看图任务会长时间思考，
+      // 与 llmCall 一样默认关思考（仅 volces 域名生效，避免其他厂商 400）
+      ...(/volces\.com/i.test(settings.baseURL) ? { thinking: { type: 'disabled' } } : {}),
+    } as Parameters<typeof client.chat.completions.create>[0]),
   ).then((res) => {
     // res is a ChatCompletion (not a Stream) because we don't pass stream:true
     const content = (res as { choices: Array<{ message: { content?: string | null } }> }).choices?.[0]?.message?.content;
@@ -443,6 +468,27 @@ export async function llmCall(options: LlmCallOptions): Promise<string> {
       baseURL: settings.baseURL,
     });
 
+    // thinking 不在 OpenAI SDK 的参数类型里（火山引擎扩展字段），
+    // 用 Record 组装再整体断言，避免 excess property 报错。
+    const params: Record<string, unknown> = {
+      model,
+      // Cast to the OpenAI SDK's message-param union. Our LlmMessage
+      // uses a permissive `string | ContentPart[]` for content so we
+      // can build multimodal messages, which the OpenAI runtime
+      // handles correctly even though the .d.ts narrows content by
+      // role.
+      messages: messages as unknown as Parameters<typeof client.chat.completions.create>[0]['messages'],
+      temperature,
+      max_tokens: maxTokens,
+      response_format: jsonMode ? { type: 'json_object' } : undefined,
+    };
+    // 方舟推理模型默认关思考（见 LlmCallOptions.disableThinking 注释）；
+    // 仅 volces 域名生效，其他厂商不认识 thinking 参数绝不能传。
+    const disableThinking = options.disableThinking ?? true;
+    if (disableThinking && /volces\.com/i.test(settings.baseURL)) {
+      params.thinking = { type: 'disabled' };
+    }
+
     const response = await runAiTask(
       {
         service: 'llm',
@@ -450,18 +496,9 @@ export async function llmCall(options: LlmCallOptions): Promise<string> {
         timeoutMs: timeoutMs ?? LLM_TIMEOUT_MS,
         retries: LLM_RETRIES,
       },
-      () => client.chat.completions.create({
-        model,
-        // Cast to the OpenAI SDK's message-param union. Our LlmMessage
-        // uses a permissive `string | ContentPart[]` for content so we
-        // can build multimodal messages, which the OpenAI runtime
-        // handles correctly even though the .d.ts narrows content by
-        // role.
-        messages: messages as unknown as Parameters<typeof client.chat.completions.create>[0]['messages'],
-        temperature,
-        max_tokens: maxTokens,
-        response_format: jsonMode ? { type: 'json_object' } : undefined,
-      }),
+      () => client.chat.completions.create(
+        params as unknown as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+      ),
     );
 
     const content = response.choices[0]?.message?.content || '';

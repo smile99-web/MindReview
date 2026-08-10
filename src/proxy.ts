@@ -18,6 +18,7 @@ const PROTECTED_PREFIXES = [
   "/exam",
   "/doc",
   "/lab3d",
+  "/invite",
 ];
 
 const AUTH_PAGES = ["/auth/login", "/auth/register"];
@@ -179,6 +180,7 @@ export const config = {
     "/exam/:path*",
     "/doc/:path*",
     "/lab3d/:path*",
+    "/invite/:path*",
     "/auth/:path*",
   ],
 };

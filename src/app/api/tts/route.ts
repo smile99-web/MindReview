@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getErrorMessage } from "@/lib/errors";
-import { decryptSecret } from "@/lib/secrets";
-import { synthesizeSpeech } from "@/lib/tts-client";
+import { resolveTtsConfig, synthesizeSpeechAuto } from "@/lib/tts-client";
 import { resolveUserIdFromRequest } from "@/lib/user-context";
 import type { Prisma } from "@prisma/client";
-
-const DEFAULT_RESOURCE_ID = process.env.DOUBAO_TTS_RESOURCE_ID || "seed-tts-2.0";
-const DEFAULT_VOICE_TYPE = process.env.DOUBAO_TTS_VOICE_TYPE || "zh_female_vv_uranus_bigtts";
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,9 +20,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "文本过长" }, { status: 400 });
     }
 
-    const saved = await prisma.apiKey.findUnique({ where: { service: "tts" } });
-    const voice = voiceType || saved?.model || DEFAULT_VOICE_TYPE;
-    const resourceId = saved?.baseUrl || DEFAULT_RESOURCE_ID;
+    // 方舟统一调用开启时走方舟 /audio/speech，否则走 OpenSpeech 备选；
+    // 音色优先级：请求参数 > 当前通道的配置
+    const ttsConfig = await resolveTtsConfig(voiceType);
+    const voice = ttsConfig.voice;
+    const engine = ttsConfig.mode === 'ark' ? `ark:${ttsConfig.resourceId}` : ttsConfig.resourceId;
 
     // 缓存全库共享：相同文本 + 音色只生成一次，不按 userId 隔离
     const existingWhere: Prisma.AudioAssetWhereInput = {
@@ -49,14 +47,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const apiKey = saved?.key ? decryptSecret(saved.key) : undefined;
-    const { audioUrl, durationMs } = await synthesizeSpeech({
-      text,
-      voiceType: voice,
-      apiKey,
-      resourceId,
-      throwOnError: true,
-    });
+    const { audioUrl, durationMs } = await synthesizeSpeechAuto({ text, voiceType });
 
     if (!audioUrl) {
       return NextResponse.json({ error: "TTS generation failed" }, { status: 500 });
@@ -77,7 +68,7 @@ export async function POST(req: NextRequest) {
     await prisma.aiGenerationLog.create({
       data: {
         generatorType: "tts",
-        model: `${resourceId}:${voice}`,
+        model: `${engine}:${voice}`,
         prompt: text.slice(0, 500),
         status: "success",
         resultUrl: audioUrl,
@@ -94,7 +85,7 @@ export async function POST(req: NextRequest) {
       await prisma.aiGenerationLog.create({
         data: {
           generatorType: "tts",
-          model: DEFAULT_RESOURCE_ID,
+          model: "tts",
           prompt: "TTS generation failed",
           status: "failed",
           errorMessage: message,

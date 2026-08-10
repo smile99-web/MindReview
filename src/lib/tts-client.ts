@@ -1,14 +1,33 @@
+import { ARK_TTS_ENDPOINT, getArkConfig } from '@/lib/ark';
+import { prisma } from '@/lib/prisma';
+import { decryptSecret } from '@/lib/secrets';
+
 interface TTSOptions {
   text: string;
   voiceType?: string;
   apiKey?: string;
   resourceId?: string;
+  /** Agent Plan 时传 /plan 路径端点；默认 OpenSpeech 后付费端点 */
+  endpoint?: string;
   throwOnError?: boolean;
 }
 
 interface TTSResponse {
   audioUrl: string;
   durationMs?: number;
+}
+
+/**
+ * TTS 运行时配置：方舟 Agent Plan（同一 openspeech V3 协议，/plan 路径 +
+ * Plan Key）或独立豆包 OpenSpeech（备选）。由 resolveTtsConfig() 按设置页
+ * "火山方舟 Agent Plan"开关决定。
+ */
+export interface ResolvedTtsConfig {
+  mode: 'ark' | 'openspeech';
+  apiKey: string | undefined;
+  endpoint: string;
+  resourceId: string;
+  voice: string;
 }
 
 interface DoubaoStreamFrame {
@@ -100,6 +119,7 @@ export async function synthesizeSpeech(options: TTSOptions): Promise<TTSResponse
     voiceType = DEFAULT_VOICE,
     apiKey = API_KEY,
     resourceId = RESOURCE_ID,
+    endpoint = TTS_ENDPOINT,
     throwOnError = false,
   } = options;
 
@@ -111,7 +131,7 @@ export async function synthesizeSpeech(options: TTSOptions): Promise<TTSResponse
   }
 
   try {
-    const response = await fetch(TTS_ENDPOINT, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -170,4 +190,52 @@ export async function batchSynthesize(
   }
 
   return results;
+}
+
+/**
+ * 决定当前 TTS 走哪条通道：方舟 Agent Plan 开启且有 key → ark
+ * （同一 V3 协议，/plan 路径 + Plan Key）；否则读 ApiKey 表 'tts' 行 +
+ * 环境变量（原有 OpenSpeech 备选方案）。voiceOverride 优先于一切已存配置。
+ */
+export async function resolveTtsConfig(voiceOverride?: string): Promise<ResolvedTtsConfig> {
+  const ark = await getArkConfig();
+  if (ark) {
+    return {
+      mode: 'ark',
+      apiKey: ark.apiKey,
+      endpoint: ARK_TTS_ENDPOINT,
+      resourceId: ark.models.tts,
+      voice: voiceOverride || ark.models.voice,
+    };
+  }
+
+  const saved = await prisma.apiKey.findUnique({ where: { service: 'tts' } }).catch(() => null);
+  return {
+    mode: 'openspeech',
+    apiKey: saved?.key ? decryptSecret(saved.key) : undefined,
+    endpoint: TTS_ENDPOINT,
+    resourceId: saved?.baseUrl || RESOURCE_ID,
+    voice: voiceOverride || saved?.model || DEFAULT_VOICE,
+  };
+}
+
+/**
+ * 按 resolveTtsConfig 的结果自动选择通道合成语音。
+ * 新调用点统一用这个，不要在路由里手写配置读取。
+ */
+export async function synthesizeSpeechAuto(options: {
+  text: string;
+  voiceType?: string;
+}): Promise<TTSResponse & { engine: string }> {
+  const config = await resolveTtsConfig(options.voiceType);
+  const result = await synthesizeSpeech({
+    text: options.text,
+    voiceType: config.voice,
+    apiKey: config.apiKey,
+    resourceId: config.resourceId,
+    endpoint: config.endpoint,
+    throwOnError: true,
+  });
+  const engine = `${config.mode === 'ark' ? 'ark:' : ''}${config.resourceId}:${config.voice}`;
+  return { ...result, engine };
 }

@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getErrorMessage } from "@/lib/errors";
-import { decryptSecret } from "@/lib/secrets";
-import { synthesizeSpeech } from "@/lib/tts-client";
+import { resolveTtsConfig, synthesizeSpeechAuto } from "@/lib/tts-client";
 import { requireAdmin } from "@/lib/require-admin";
 import { SCENES, loadScene } from "@/lib/lab3d/registry";
-
-const DEFAULT_RESOURCE_ID = process.env.DOUBAO_TTS_RESOURCE_ID || "seed-tts-2.0";
-const DEFAULT_VOICE_TYPE = process.env.DOUBAO_TTS_VOICE_TYPE || "zh_female_vv_uranus_bigtts";
 
 /**
  * POST /api/lab3d/prewarm[?only=<sceneId>]
@@ -15,6 +11,7 @@ const DEFAULT_VOICE_TYPE = process.env.DOUBAO_TTS_VOICE_TYPE || "zh_female_vv_ur
  * 写入 AudioAsset 共享缓存（与 /api/tts 的缓存键完全一致：
  * text + voiceType + contentType='lab3d' + contentRefId='<sceneId>#<step>'）。
  * 可重复调用：已缓存的步骤直接跳过，幂等。
+ * TTS 通道与 /api/tts 一致：方舟统一调用开启时走方舟，否则 OpenSpeech。
  */
 export async function POST(req: NextRequest) {
   const denied = await requireAdmin(req);
@@ -22,10 +19,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const only = req.nextUrl.searchParams.get("only");
-    const saved = await prisma.apiKey.findUnique({ where: { service: "tts" } });
-    const voice = saved?.model || DEFAULT_VOICE_TYPE;
-    const resourceId = saved?.baseUrl || DEFAULT_RESOURCE_ID;
-    const apiKey = saved?.key ? decryptSecret(saved.key) : undefined;
+    const ttsConfig = await resolveTtsConfig();
+    const voice = ttsConfig.voice;
 
     const metas = only ? SCENES.filter((s) => s.id === only) : SCENES;
     let generated = 0;
@@ -50,13 +45,7 @@ export async function POST(req: NextRequest) {
             cached += 1;
             continue;
           }
-          const { audioUrl, durationMs } = await synthesizeSpeech({
-            text,
-            voiceType: voice,
-            apiKey,
-            resourceId,
-            throwOnError: true,
-          });
+          const { audioUrl, durationMs } = await synthesizeSpeechAuto({ text });
           if (!audioUrl) throw new Error("empty audioUrl");
           await prisma.audioAsset.create({
             data: {

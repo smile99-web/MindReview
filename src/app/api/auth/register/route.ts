@@ -4,10 +4,23 @@ import { createAccessToken, createRefreshTokenValue, hashPassword } from '@/lib/
 
 export async function POST(request: Request) {
   try {
-    const { username, password, email, name } = await request.json();
+    const { username, password, email, name, inviteCode } = await request.json();
     const normalizedUsername = typeof username === 'string' ? username.trim() : '';
     const normalizedEmail = typeof email === 'string' ? email.trim() : '';
     const normalizedName = typeof name === 'string' ? name.trim() : '';
+    const normalizedInviteCode = typeof inviteCode === 'string' ? inviteCode.trim() : '';
+
+    // 推荐码必填，先校验再查库，避免无码请求打到数据库
+    if (!normalizedInviteCode) {
+      return NextResponse.json({ detail: '请填写推荐码' }, { status: 400 });
+    }
+    const invite = await prisma.inviteCode.findUnique({ where: { code: normalizedInviteCode } });
+    if (!invite) {
+      return NextResponse.json({ detail: '推荐码无效' }, { status: 403 });
+    }
+    if (invite.maxUses > 0 && invite.usedCount >= invite.maxUses) {
+      return NextResponse.json({ detail: '推荐码使用次数已用完' }, { status: 403 });
+    }
 
     if (normalizedUsername.length < 3 || normalizedUsername.length > 30) {
       return NextResponse.json({ detail: '用户名长度必须为 3-30 个字符' }, { status: 400 });
@@ -36,21 +49,38 @@ export async function POST(request: Request) {
 
     // 上面的 findUnique 预检存在 TOCTOU 竞态：两个并发请求可同时通过检查，
     // 其中一个在 create 时撞唯一约束（P2002）→ 返回 409 而非 500
+    // 推荐码核销与用户创建放同一事务：updateMany 带条件兜底并发抢码，
+    // 用户创建失败（如 P2002）时整个事务回滚，不会白扣使用次数
     let user;
     try {
-      user = await prisma.user.create({
-        data: {
-          id: crypto.randomUUID(),
-          username: normalizedUsername,
-          email: normalizedEmail || null,
-          passwordHash: hashed,
-          name: normalizedName || null,
-          grade: null,
-          updatedAt: now,
-        },
-        select: { id: true, username: true, email: true, name: true, grade: true, avatarUrl: true },
+      user = await prisma.$transaction(async (tx) => {
+        const consumed = await tx.inviteCode.updateMany({
+          where: {
+            code: normalizedInviteCode,
+            OR: [{ maxUses: 0 }, { usedCount: { lt: invite.maxUses } }],
+          },
+          data: { usedCount: { increment: 1 } },
+        });
+        if (consumed.count === 0) {
+          throw new Error('INVITE_CODE_EXHAUSTED');
+        }
+        return tx.user.create({
+          data: {
+            id: crypto.randomUUID(),
+            username: normalizedUsername,
+            email: normalizedEmail || null,
+            passwordHash: hashed,
+            name: normalizedName || null,
+            grade: null,
+            updatedAt: now,
+          },
+          select: { id: true, username: true, email: true, name: true, grade: true, avatarUrl: true },
+        });
       });
     } catch (err: unknown) {
+      if (err instanceof Error && err.message === 'INVITE_CODE_EXHAUSTED') {
+        return NextResponse.json({ detail: '推荐码使用次数已用完' }, { status: 403 });
+      }
       if ((err as { code?: string })?.code === 'P2002') {
         return NextResponse.json({ detail: '用户名或邮箱已存在' }, { status: 409 });
       }

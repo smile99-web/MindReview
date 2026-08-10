@@ -25,6 +25,7 @@ interface SavedKey {
   key: string; // masked
   baseUrl: string | null;
   model: string | null;
+  isActive: boolean;
   testOk: boolean;
   lastTest: string | null;
 }
@@ -102,14 +103,126 @@ const SERVICE_INFO: Record<ServiceName, { title: string; icon: string; desc: str
   },
 };
 
+// ===== 火山方舟 Agent Plan（统一调用）=====
+// 默认值与 src/lib/ark.ts 的 ARK_DEFAULT_MODELS 同步维护
+// （该模块 import 了 prisma，客户端不能直接引用，故此处复制常量）
+const ARK_DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/plan/v3";
+// Agent Plan 套餐内用模型别名（非带日期的 Model ID）；tts 字段是 Resource ID
+const ARK_DEFAULT_MODELS = {
+  llm: "doubao-seed-2.1-turbo",
+  vision: "doubao-seed-2.1-turbo",
+  image: "doubao-seedream-5.0-lite",
+  embedding: "doubao-embedding-vision",
+  tts: "seed-tts-2.0",
+  voice: "zh_female_vv_uranus_bigtts",
+};
+
+interface ArkState {
+  enabled: boolean;
+  key: string;
+  saved: boolean;
+  maskedKey: string;
+  baseUrl: string;
+  models: typeof ARK_DEFAULT_MODELS;
+  testing: boolean;
+  saving: boolean;
+  result: { ok: boolean; error?: string; message?: string; latencyMs?: number } | null;
+  showAdvanced: boolean;
+}
+
+const ARK_MODEL_FIELDS: { field: keyof typeof ARK_DEFAULT_MODELS; label: string }[] = [
+  { field: "llm", label: "LLM 文本模型" },
+  { field: "vision", label: "视觉模型（拍照讲题）" },
+  { field: "image", label: "图片生成模型" },
+  { field: "embedding", label: "Embedding 向量模型" },
+  { field: "tts", label: "TTS Resource ID" },
+];
+
+// 音色选项与下方 TTS 卡片共用（方舟 TTS 用同一套音色 ID）
+const VOICE_GROUPS: { label: string; options: { value: string; label: string }[] }[] = [
+  {
+    label: "精品音色 (2.0)",
+    options: [
+      { value: "zh_female_vv_uranus_bigtts", label: "豆包通用女声" },
+      { value: "BV701_streaming", label: "擎苍 (男声·推荐)" },
+      { value: "BV700_streaming", label: "灿灿 (男声)" },
+      { value: "BV001_streaming", label: "通用女声" },
+      { value: "BV002_streaming", label: "通用男声" },
+      { value: "BV400_streaming", label: "小悦 (女声)" },
+      { value: "BV401_streaming", label: "小悦 2.0 (女声)" },
+      { value: "BV003_streaming", label: "小辉 (男声)" },
+      { value: "BV104_streaming", label: "温柔淑女" },
+      { value: "BV102_streaming", label: "儒雅青年" },
+      { value: "BV100_streaming", label: "质朴青年" },
+      { value: "BV004_streaming", label: "开朗青年" },
+      { value: "BV123_streaming", label: "阳光青年" },
+      { value: "BV107_streaming", label: "霸气青叔" },
+      { value: "BV115_streaming", label: "古风少御" },
+      { value: "BV113_streaming", label: "甜宠少御" },
+      { value: "BV120_streaming", label: "反卷青年" },
+      { value: "BV119_streaming", label: "通用赘婿" },
+    ],
+  },
+  {
+    label: "经典音色 (1.0)",
+    options: [
+      { value: "zh_female_qingxin", label: "清新女声" },
+      { value: "zh_male_qingxin", label: "清新男声" },
+      { value: "zh_female_tianmei", label: "甜美女生" },
+    ],
+  },
+];
+
+function VoiceGroupOptions() {
+  return (
+    <>
+      {VOICE_GROUPS.map((g) => (
+        <optgroup key={g.label} label={g.label}>
+          {g.options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </optgroup>
+      ))}
+    </>
+  );
+}
+
 export default function SettingsPage() {
   const [keys, setKeys] = useState<Record<ServiceName, KeyState>>(DEFAULT_KEYS);
   const [savedKeys, setSavedKeys] = useState<SavedKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [ark, setArk] = useState<ArkState>({
+    enabled: false,
+    key: "",
+    saved: false,
+    maskedKey: "",
+    baseUrl: ARK_DEFAULT_BASE_URL,
+    models: { ...ARK_DEFAULT_MODELS },
+    testing: false,
+    saving: false,
+    result: null,
+    showAdvanced: false,
+  });
 
   const applySavedKeys = useCallback((data: SavedKey[]) => {
-    setSavedKeys(data);
+    // 方舟统一调用行：model 列是 JSON 字符串，解析失败回退默认模型
+    const arkRow = data.find((s) => s.service === "ark");
+    if (arkRow) {
+      let models = { ...ARK_DEFAULT_MODELS };
+      try {
+        if (arkRow.model) models = { ...models, ...JSON.parse(arkRow.model) };
+      } catch { /* 容忍非 JSON 旧数据 */ }
+      setArk((prev) => ({
+        ...prev,
+        enabled: arkRow.isActive,
+        saved: true,
+        maskedKey: arkRow.key || "",
+        baseUrl: arkRow.baseUrl || ARK_DEFAULT_BASE_URL,
+        models,
+      }));
+    }
+    setSavedKeys(data.filter((s) => s.service !== "ark"));
     setKeys((prev) => {
       const next = { ...prev };
       for (const saved of data) {
@@ -257,6 +370,82 @@ export default function SettingsPage() {
     }
   };
 
+  // ===== 方舟统一调用：保存 / 开关 / 测试 =====
+  const saveArk = async (enabledOverride?: boolean) => {
+    setArk((prev) => ({ ...prev, saving: true, result: null }));
+    try {
+      const res = await authFetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          service: "ark",
+          key: ark.key, // 留空时服务端保留已保存的 key
+          baseUrl: ark.baseUrl || undefined,
+          model: JSON.stringify(ark.models),
+          isActive: enabledOverride ?? ark.enabled,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(res.status === 401 ? "登录已过期，请重新登录后再保存" : data?.error || "保存失败");
+      }
+      setArk((prev) => ({
+        ...prev,
+        key: "",
+        saved: true,
+        enabled: enabledOverride ?? prev.enabled,
+        maskedKey: typeof data?.masked === "string" ? data.masked : prev.maskedKey,
+        result: { ok: true, message: "保存成功" },
+      }));
+      const refreshRes = await authFetch("/api/settings");
+      const saved = await refreshRes.json().catch(() => null);
+      if (Array.isArray(saved)) applySavedKeys(saved);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "保存失败";
+      setArk((prev) => ({ ...prev, result: { ok: false, error: message } }));
+    } finally {
+      setArk((prev) => ({ ...prev, saving: false }));
+    }
+  };
+
+  const toggleArk = async () => {
+    const next = !ark.enabled;
+    // 开启前必须有已保存的 key，否则开了也调不通
+    if (next && !ark.saved) {
+      setArk((prev) => ({ ...prev, result: { ok: false, error: "请先填写并保存方舟 API Key，再开启统一调用" } }));
+      return;
+    }
+    setArk((prev) => ({ ...prev, enabled: next }));
+    if (ark.saved) {
+      await saveArk(next);
+    }
+  };
+
+  const testArk = async () => {
+    setArk((prev) => ({ ...prev, testing: true, result: null }));
+    try {
+      const res = await authFetch("/api/settings/test-ark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: ark.key,
+          baseUrl: ark.baseUrl || undefined,
+          model: ark.models.llm,
+        }),
+      });
+      const data = await res.json();
+      setArk((prev) => ({
+        ...prev,
+        testing: false,
+        result: data,
+        saved: data?.ok === true ? true : prev.saved,
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Connection test failed";
+      setArk((prev) => ({ ...prev, testing: false, result: { ok: false, error: message } }));
+    }
+  };
+
   return (
     <div className="max-w-3xl mx-auto px-6 py-8">
       <h1 className="text-[28px] font-bold text-slate-800 tracking-tight mb-2">设置</h1>
@@ -273,6 +462,171 @@ export default function SettingsPage() {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* 火山方舟 Agent Plan：统一调用（一个 Key 调全部模型） */}
+          <Card>
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">🌋</span>
+                <div>
+                  <h3 className="font-semibold text-slate-800 text-[15px]">火山方舟 Agent Plan（统一调用）</h3>
+                  <p className="text-xs text-slate-400">一个 Key 调用 LLM / 视觉 / 图片 / 向量 / 语音全部模型</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {ark.enabled && <Badge variant="success">已开启</Badge>}
+                <a
+                  href="https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-indigo-500 hover:text-indigo-600 font-medium transition-colors"
+                >
+                  领取 Agent Plan Key ↗
+                </a>
+              </div>
+            </div>
+
+            <div className="mb-4 rounded-xl border border-amber-200/70 bg-amber-50/80 px-3.5 py-2.5 text-xs text-amber-700">
+              API Key 需在方舟控制台「Agent Plan 开通管理」页领取（与普通方舟 Key 不通用）。
+              注意：官方将 Agent Plan 的文本/向量模型定位为 AI 编程工具使用，直接 API 调用存在套餐停用风险；图片/语音模型官方支持直接 API 调用。
+            </div>
+
+            {/* 总开关 */}
+            <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50/80 mb-4">
+              <div className="text-sm">
+                <div className="font-medium text-slate-700">启用方舟统一调用</div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  开启后所有 AI 功能走方舟；下方各服务独立配置保留为备选（关闭后自动回退）
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={toggleArk}
+                className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 ${
+                  ark.enabled ? "bg-indigo-500" : "bg-slate-300"
+                }`}
+                aria-pressed={ark.enabled}
+              >
+                <span
+                  className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-200 ${
+                    ark.enabled ? "left-[22px]" : "left-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="space-y-3 mb-4">
+              {/* API Key */}
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  方舟 API Key {!ark.saved && <span className="text-red-400">*</span>}
+                  {ark.saved && <span className="text-emerald-500 ml-1">已保存 ✓</span>}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={ark.key}
+                    onChange={(e) => setArk((prev) => ({ ...prev, key: e.target.value, result: null }))}
+                    placeholder={ark.saved ? "已保存，可直接测试 · 输入新 Key 可更新" : "输入方舟 API Key..."}
+                    className="flex-1 rounded-xl border border-slate-200/80 px-3.5 py-2.5 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors placeholder:text-slate-400 font-mono"
+                  />
+                  <Button size="sm" variant="secondary" onClick={() => saveArk()} loading={ark.saving} disabled={!ark.key && !ark.saved}>
+                    保存
+                  </Button>
+                </div>
+                {ark.saved && ark.maskedKey && (
+                  <p className="mt-1 text-xs text-slate-400 font-mono">当前已保存：{ark.maskedKey}</p>
+                )}
+              </div>
+
+              {/* Base URL */}
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Base URL</label>
+                <input
+                  type="text"
+                  value={ark.baseUrl}
+                  onChange={(e) => setArk((prev) => ({ ...prev, baseUrl: e.target.value, result: null }))}
+                  placeholder={ARK_DEFAULT_BASE_URL}
+                  className="w-full rounded-xl border border-slate-200/80 px-3 py-2 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors font-mono placeholder:text-slate-300"
+                />
+              </div>
+
+              {/* 高级：各任务模型 ID 覆盖 */}
+              <button
+                type="button"
+                onClick={() => setArk((prev) => ({ ...prev, showAdvanced: !prev.showAdvanced }))}
+                className="text-xs text-slate-400 hover:text-indigo-500 transition-colors"
+              >
+                {ark.showAdvanced ? "▾ 收起模型配置" : "▸ 模型 ID 高级配置（默认值已适配 Agent Plan）"}
+              </button>
+
+              {ark.showAdvanced && (
+                <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl border border-slate-200/60">
+                  {ARK_MODEL_FIELDS.map(({ field, label }) => (
+                    <div key={field}>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+                      <input
+                        type="text"
+                        value={ark.models[field]}
+                        onChange={(e) =>
+                          setArk((prev) => ({
+                            ...prev,
+                            models: { ...prev.models, [field]: e.target.value },
+                            result: null,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-200/80 px-3 py-2 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors font-mono placeholder:text-slate-300"
+                      />
+                    </div>
+                  ))}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">TTS 音色</label>
+                    <select
+                      value={ark.models.voice}
+                      onChange={(e) =>
+                        setArk((prev) => ({
+                          ...prev,
+                          models: { ...prev.models, voice: e.target.value },
+                          result: null,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-200/80 px-3 py-2 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors"
+                    >
+                      <VoiceGroupOptions />
+                    </select>
+                  </div>
+                  <p className="col-span-2 text-[11px] text-slate-400">
+                    修改模型后点「保存」生效；模型 ID 以方舟控制台「模型广场/开通管理」中你的订阅可用 ID 为准
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* 测试按钮 + 结果 */}
+            <div className="flex items-center gap-3">
+              <Button size="sm" onClick={testArk} loading={ark.testing} disabled={!ark.key && !ark.saved}>
+                测试连接
+              </Button>
+              {ark.result && (
+                <div
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm ${
+                    ark.result.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                  }`}
+                >
+                  <span>{ark.result.ok ? "✓" : "✗"}</span>
+                  <span>
+                    {ark.result.ok
+                      ? ark.result.message || `连接成功${ark.result.latencyMs ? ` (${ark.result.latencyMs}ms)` : ""}`
+                      : ark.result.error || "连接失败"}
+                  </span>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* 备选方案说明 */}
+          <p className="text-xs text-slate-400 px-1">
+            以下为各服务独立配置（备选方案）：未开启方舟统一调用时生效
+          </p>
           {(Object.entries(SERVICE_INFO) as [ServiceName, typeof SERVICE_INFO["llm"]][]).map(([svc, info]) => {
             const k = keys[svc];
             const saved = savedKeys.find((s) => s.service === svc);
@@ -352,31 +706,7 @@ export default function SettingsPage() {
                           onChange={(e) => updateField(svc, "voiceType", e.target.value)}
                           className="w-full rounded-xl border border-slate-200/80 px-3 py-2 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-colors"
                         >
-                          <optgroup label="精品音色 (2.0)">
-                            <option value="zh_female_vv_uranus_bigtts">豆包通用女声</option>
-                            <option value="BV701_streaming">擎苍 (男声·推荐)</option>
-                            <option value="BV700_streaming">灿灿 (男声)</option>
-                            <option value="BV001_streaming">通用女声</option>
-                            <option value="BV002_streaming">通用男声</option>
-                            <option value="BV400_streaming">小悦 (女声)</option>
-                            <option value="BV401_streaming">小悦 2.0 (女声)</option>
-                            <option value="BV003_streaming">小辉 (男声)</option>
-                            <option value="BV104_streaming">温柔淑女</option>
-                            <option value="BV102_streaming">儒雅青年</option>
-                            <option value="BV100_streaming">质朴青年</option>
-                            <option value="BV004_streaming">开朗青年</option>
-                            <option value="BV123_streaming">阳光青年</option>
-                            <option value="BV107_streaming">霸气青叔</option>
-                            <option value="BV115_streaming">古风少御</option>
-                            <option value="BV113_streaming">甜宠少御</option>
-                            <option value="BV120_streaming">反卷青年</option>
-                            <option value="BV119_streaming">通用赘婿</option>
-                          </optgroup>
-                          <optgroup label="经典音色 (1.0)">
-                            <option value="zh_female_qingxin">清新女声</option>
-                            <option value="zh_male_qingxin">清新男声</option>
-                            <option value="zh_female_tianmei">甜美女生</option>
-                          </optgroup>
+                          <VoiceGroupOptions />
                         </select>
                       </div>
                     </div>

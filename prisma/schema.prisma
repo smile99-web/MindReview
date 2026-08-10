@@ -22,6 +22,7 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  inviteCodes       InviteCode[]
   reviewTasks       ReviewTask[]
   reviewLogs        ReviewLog[]
   mistakes          Mistake[]
@@ -34,6 +35,21 @@ model User {
   examUploads       ExamUpload[]
   docUploads        DocUpload[]
   textbookUploads   TextbookUpload[]
+  schemaApplyAttempts SchemaApplyAttempt[]
+}
+
+// 图式迁移应用练习成绩：/schemas/[id]/apply 完成后由 /api/schema/apply-result 落库
+model SchemaApplyAttempt {
+  id        String   @id @default(cuid())
+  userId    String
+  schemaId  String
+  score     Int
+  stepCount Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, schemaId])
 }
 
 model RefreshToken {
@@ -494,4 +510,20 @@ model TextbookUpload {
   subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
+}
+
+// 推荐码：注册时必须提供有效推荐码
+// maxUses = 0 表示不限次数；usedCount 在注册成功的事务里 +1
+model InviteCode {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  maxUses     Int      @default(0)
+  usedCount   Int      @default(0)
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([createdById])
 }

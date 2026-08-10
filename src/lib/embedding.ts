@@ -10,6 +10,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { decryptSecret } from '@/lib/secrets';
+import { getArkConfig } from '@/lib/ark';
 
 const EMBEDDING_DIM = 1536;
 
@@ -58,6 +59,11 @@ function keywordVector(text: string, dim: number = EMBEDDING_DIM): number[] {
 }
 
 async function getEmbeddingCredentials(): Promise<{ apiKey: string; baseUrl: string; model: string } | null> {
+  // 方舟统一调用优先；未启用时回退到 Embedding 独立配置 / 环境变量
+  const ark = await getArkConfig();
+  if (ark) {
+    return { apiKey: ark.apiKey, baseUrl: ark.baseUrl, model: ark.models.embedding };
+  }
   // Try DB-stored key first (Settings page), then env var
   try {
     const stored = await prisma.apiKey.findUnique({ where: { service: 'embedding' } });
@@ -88,7 +94,10 @@ async function fetchEmbedding(text: string): Promise<number[]> {
   if (!creds) return keywordVector(text);
 
   try {
-    const res = await fetch(`${creds.baseUrl}/embeddings/multimodal`, {
+    // 多模态向量模型走专用路径 /embeddings/multimodal（input 为对象数组）；
+    // Agent Plan 的 /plan/v3 下该路径未在文档中明示，404 时回退到 OpenAI 兼容
+    // 的 /embeddings（input 为字符串数组），由服务端按模型路由
+    let res = await fetch(`${creds.baseUrl}/embeddings/multimodal`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -99,6 +108,20 @@ async function fetchEmbedding(text: string): Promise<number[]> {
         input: [{ type: 'text', text }],
       }),
     });
+
+    if (res.status === 404) {
+      res = await fetch(`${creds.baseUrl}/embeddings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${creds.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: creds.model,
+          input: [text],
+        }),
+      });
+    }
 
     if (!res.ok) {
       throw new Error(`Embedding API returned ${res.status}`);

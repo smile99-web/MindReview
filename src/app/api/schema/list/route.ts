@@ -1,6 +1,8 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
 import type { Prisma } from '@prisma/client';
 
 type SchemaMember = { id: string; title: string; masteryLevel: number };
@@ -51,8 +53,26 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     });
 
+    // 成员掌握度按当前用户合并：KnowledgeNode.masteryLevel 是全局快照，
+    // 复习只写 UserKnowledgeProgress——不合并的话成员掌握度永远停留在图式创建时。
+    const allMemberIds = [
+      ...new Set(
+        (schemaNodes as SchemaNodeForList[]).flatMap((n) => n.outgoingEdges.map((e) => e.to.id)),
+      ),
+    ];
+    let progressByNodeId = new Map<string, { masteryLevel: number }>();
+    try {
+      const userId = await resolveUserIdFromRequest(req);
+      progressByNodeId = await loadProgressByNodeId(userId, allMemberIds, prisma);
+    } catch {
+      // proxy 已保证登录；兜底保持旧的未合并行为
+    }
+
     const schemas = (schemaNodes as SchemaNodeForList[]).map((node) => {
-      const members = node.outgoingEdges.map((e: { to: SchemaMember }) => e.to);
+      const members = node.outgoingEdges.map((e: { to: SchemaMember }) => {
+        const progress = progressByNodeId.get(e.to.id);
+        return progress ? { ...e.to, masteryLevel: progress.masteryLevel } : e.to;
+      });
       const memberCount = members.length;
       const avgMastery =
         memberCount > 0
@@ -71,7 +91,8 @@ export async function GET(req: NextRequest) {
         difficulty: node.difficulty,
         cognitiveLoad: node.cognitiveLoad,
         icapLevel: node.icapLevel,
-        masteryLevel: node.masteryLevel,
+        // 图式自身掌握度同样是创建时快照，展示层用成员均值的 per-user 版本代替
+        masteryLevel: avgMastery,
         memberCount,
         avgMemberMastery: avgMastery,
         members: members.map((m: SchemaMember) => ({

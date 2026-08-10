@@ -83,6 +83,14 @@ export default function SchemasPage() {
     Array<{ nodeIds: string[]; rationale: string }>
   >([]);
   const [suggesting, setSuggesting] = useState(false);
+  // 「先想再看」：构建图式前要求学生先写下自己认为的关键联系，
+  // 构建完成后与 AI 的 keyInsights 并排对照（自己先建构 > 直接看成品）。
+  const [studentInsights, setStudentInsights] = useState('');
+  const [buildCompare, setBuildCompare] = useState<{
+    mine: string;
+    aiInsights: string[];
+    schemaName: string;
+  } | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -167,6 +175,10 @@ export default function SchemasPage() {
       setBuildError('请至少选择 2 个知识点再构建图式。');
       return;
     }
+    if (studentInsights.trim().length < 5) {
+      setBuildError('先写下你认为这几个知识点的关键联系（哪怕一两句），再让 AI 构建——先想再看，才算真的建构。');
+      return;
+    }
 
     setBuilding(true);
     setBuildError(null);
@@ -183,8 +195,19 @@ export default function SchemasPage() {
       if (!res.ok) {
         throw new Error(data.error || `构建失败 (${res.status})`);
       }
+      // 对照面板：学生的想法 vs AI 的关键洞见
+      const built = (data as { schema?: { title?: string; representationData?: { keyInsights?: unknown } } }).schema;
+      const aiInsights = Array.isArray(built?.representationData?.keyInsights)
+        ? (built!.representationData!.keyInsights as unknown[]).filter((x): x is string => typeof x === 'string')
+        : [];
+      setBuildCompare({
+        mine: studentInsights.trim(),
+        aiInsights,
+        schemaName: built?.title || schemaName.trim() || '新图式',
+      });
       setSelectedNodeIds(new Set());
       setSchemaName('');
+      setStudentInsights('');
       await reloadSchemas();
     } catch (error: unknown) {
       setBuildError(error instanceof Error ? error.message : '图式构建失败，请稍后重试。');
@@ -254,6 +277,16 @@ export default function SchemasPage() {
             <p className="text-sm text-slate-500 mt-1">
               选择 2 个以上相关知识点，AI 会把它们组织成一个可迁移的知识框架。
             </p>
+            {selectedNodeIds.size >= 2 && (
+              <textarea
+                value={studentInsights}
+                onChange={(event) => setStudentInsights(event.target.value)}
+                rows={2}
+                maxLength={300}
+                placeholder="先想一想：这几个知识点之间的关键联系是什么？用自己的话写一两句，再看 AI 怎么组织。"
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
+              />
+            )}
           </div>
           <div className="flex gap-2">
             {/* AI 推荐入口：让用户从一个种子节点出发，让 suggestSchemaNodes
@@ -360,6 +393,40 @@ export default function SchemasPage() {
         {buildError && (
           <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-600">
             {buildError}
+          </div>
+        )}
+
+        {buildCompare && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-emerald-700">
+                「{buildCompare.schemaName}」构建完成 —— 对比一下你和 AI 的想法
+              </h4>
+              <button
+                onClick={() => setBuildCompare(null)}
+                className="text-xs text-slate-500 hover:text-slate-700"
+              >
+                收起
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              <div className="rounded-lg bg-white border border-emerald-100 px-3 py-2">
+                <div className="text-xs text-slate-400 mb-1">你先写的</div>
+                <p className="text-slate-700 whitespace-pre-wrap">{buildCompare.mine}</p>
+              </div>
+              <div className="rounded-lg bg-white border border-emerald-100 px-3 py-2">
+                <div className="text-xs text-slate-400 mb-1">AI 提炼的关键洞见</div>
+                {buildCompare.aiInsights.length > 0 ? (
+                  <ul className="list-disc list-inside space-y-1 text-slate-700">
+                    {buildCompare.aiInsights.map((insight, i) => (
+                      <li key={i}>{insight}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-slate-400 text-xs">（未返回洞见，可展开下方图式卡片查看）</p>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

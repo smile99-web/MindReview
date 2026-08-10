@@ -4,7 +4,7 @@ import { encryptSecret, maskSecret } from "@/lib/secrets";
 import { assertSafeExternalBaseUrl } from "@/lib/url-security";
 import { requireAdmin } from "@/lib/require-admin";
 
-const SERVICES = new Set(["llm", "tts", "image", "embedding", "vision"]);
+const SERVICES = new Set(["llm", "tts", "image", "embedding", "vision", "ark"]);
 
 export async function GET(req: NextRequest) {
   try {
@@ -49,8 +49,15 @@ export async function POST(req: NextRequest) {
     const key = typeof body.key === "string" ? body.key.trim() : "";
     const rawModel = typeof body.model === "string" ? body.model.trim() : "";
     const rawBaseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+    const isActive = typeof body.isActive === "boolean" ? body.isActive : undefined;
 
-    if (!SERVICES.has(service) || !key) {
+    if (!SERVICES.has(service)) {
+      return NextResponse.json({ error: "valid service is required" }, { status: 400 });
+    }
+
+    // key 留空 = 保留已保存的 key 只更新其他字段（开关/模型等）；没有已存行时 key 必填
+    const existing = key ? null : await prisma.apiKey.findUnique({ where: { service } });
+    if (!key && !existing?.key) {
       return NextResponse.json({ error: "service and key are required" }, { status: 400 });
     }
 
@@ -61,6 +68,25 @@ export async function POST(req: NextRequest) {
         : assertSafeExternalBaseUrl(rawBaseUrl)
       : undefined;
 
+    // 无 key 时走纯 update：upsert 的 create 分支即使不执行也会被 Prisma 校验，
+    // key: undefined 会直接抛 "Argument key is missing"
+    if (!key && existing) {
+      const result = await prisma.apiKey.update({
+        where: { service },
+        data: {
+          ...(baseUrl ? { baseUrl } : {}),
+          ...(model ? { model } : {}),
+          ...(isActive !== undefined ? { isActive } : {}),
+        },
+      });
+      return NextResponse.json({
+        success: true,
+        id: result.id,
+        service: result.service,
+        masked: maskSecret(result.key),
+      });
+    }
+
     const encryptedKey = encryptSecret(key);
     const result = await prisma.apiKey.upsert({
       where: { service },
@@ -68,8 +94,9 @@ export async function POST(req: NextRequest) {
         key: encryptedKey,
         ...(baseUrl ? { baseUrl } : {}),
         ...(model ? { model } : {}),
+        ...(isActive !== undefined ? { isActive } : {}),
       },
-      create: { service, key: encryptedKey, baseUrl, model },
+      create: { service, key: encryptedKey, baseUrl, model, isActive: isActive ?? true },
     });
 
     return NextResponse.json({

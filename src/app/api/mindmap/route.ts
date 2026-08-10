@@ -1,6 +1,12 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
+import {
+  applyProgressToNode,
+  loadProgressByNodeId,
+  type UserKnowledgeProgressState,
+} from '@/lib/user-knowledge-progress';
 import type { Prisma } from '@prisma/client';
 
 const nonSchemaNodeConditions: Prisma.KnowledgeNodeWhereInput[] = [
@@ -51,8 +57,24 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'asc' },
     });
 
-    // 获取所有边
     const nodeIds = nodes.map((n: { id: string }) => n.id);
+
+    // 掌握度按当前用户合并后再返回：KnowledgeNode.masteryLevel 是全局快照
+    // （节点创建后基本不再更新），复习流程只写 UserKnowledgeProgress。
+    // 之前直接返回全局字段，导致 3D 星空的"点亮"永远停留在初始状态——
+    // 学生复习几百次星星也不会亮。dashboard / 学习路径等路由早已做这层合并。
+    let progressByNodeId = new Map<string, UserKnowledgeProgressState>();
+    try {
+      const userId = await resolveUserIdFromRequest(req);
+      progressByNodeId = await loadProgressByNodeId(userId, nodeIds, prisma);
+    } catch {
+      // proxy 已保证登录；这里兜底保持旧的未合并行为，不让导图 500
+    }
+    const mergedNodes = nodes.map((node) =>
+      applyProgressToNode(node, progressByNodeId.get(node.id)),
+    );
+
+    // 获取所有边
     const edges = await prisma.knowledgeEdge.findMany({
       where: {
         OR: [
@@ -62,7 +84,7 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({ nodes, edges });
+    return NextResponse.json({ nodes: mergedNodes, edges });
   } catch (error: unknown) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }

@@ -1,4 +1,5 @@
 import { getErrorMessage } from '@/lib/errors';
+import { parseArkModels } from '@/lib/ark';
 import { llmCall } from '@/lib/llm-client';
 import { sanitizeJsonString } from '@/lib/utils';
 import type { Prisma, PrismaClient } from '@prisma/client';
@@ -23,7 +24,12 @@ async function llmJson(messages: LlmMessage[]): Promise<unknown> {
 }
 
 async function resolveLlmModel(prisma: PrismaClient): Promise<string> {
+  // 仅用于 AiGenerationLog 记录实际走的模型名；调用本身走 llmCall（已内部处理方舟优先）
   try {
+    const ark = await prisma.apiKey.findUnique({ where: { service: 'ark' } });
+    if (ark?.isActive && ark.key) {
+      return parseArkModels(ark.model).llm;
+    }
     const saved = await prisma.apiKey.findUnique({ where: { service: 'llm' } });
     if (saved?.model) return saved.model;
   } catch {
