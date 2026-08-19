@@ -94,6 +94,10 @@ async function postIcapAction<T>(payload: Record<string, unknown>): Promise<T> {
 
 interface IcapDraft {
   stage?: number;
+  // Active 阶段的题目必须一并持久化：草稿只恢复 stage 不恢复题目时，
+  // 刷新后页面显示"暂无练习题"，已答到一半的进度作废（恢复路径绕过
+  // goToStage，不会重新拉题；重新拉也可能是不同的题，与已答内容对不上）
+  questions?: Question[];
   userSummary?: string;
   results?: IcapResults;
   activeAnswers?: Record<string, string>;
@@ -136,6 +140,10 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   const [startTime, setStartTime] = useState(() => Date.now());
   const [activeAnswers, setActiveAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState<Record<string, boolean>>({});
+  // 提交中的题目（按钮 loading + 双击防重）：ref 做同步护栏，
+  // state 驱动渲染。无防护时双击会重复计分/重复写 SM-2。
+  const [answerSubmitting, setAnswerSubmitting] = useState<Record<string, boolean>>({});
+  const answerInflightRef = useRef<Set<string>>(new Set());
   const [node, setNode] = useState<KnowledgeNodeDetail | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [aiFeedback, setAiFeedback] = useState('');
@@ -179,6 +187,9 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   // short-circuits and the suggested-question button silently does
   // nothing.
   const tutorChatInputRef = useRef('');
+  // 发送中同步护栏：双击/Enter+点击并发时 state 尚未重渲染，
+  // 仅靠 tutorChatLoading 闭包判断会漏防，两条消息互相覆盖。
+  const tutorChatInflightRef = useRef(false);
   useEffect(() => {
     tutorChatInputRef.current = tutorChatInput;
   }, [tutorChatInput]);
@@ -196,6 +207,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
         const draft = JSON.parse(raw) as IcapDraft;
 
         if (typeof draft.stage === 'number' && draft.stage >= 0 && draft.stage < STAGES.length) setStage(draft.stage);
+        if (Array.isArray(draft.questions)) setQuestions(draft.questions);
         if (typeof draft.userSummary === 'string') setUserSummary(draft.userSummary);
         if (draft.results) setResults(draft.results);
         if (draft.activeAnswers) setActiveAnswers(draft.activeAnswers);
@@ -234,6 +246,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
 
     const draft: IcapDraft = {
       stage,
+      questions,
       userSummary,
       results,
       activeAnswers,
@@ -262,6 +275,7 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   }, [
     draftStorageKey,
     stage,
+    questions,
     userSummary,
     results,
     activeAnswers,
@@ -368,6 +382,9 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
   };
 
   const handleSubmitAnswer = async (questionId: string, userAnswer: string) => {
+    if (answerInflightRef.current.has(questionId)) return;
+    answerInflightRef.current.add(questionId);
+    setAnswerSubmitting(prev => ({ ...prev, [questionId]: true }));
     try {
       const res = await authFetch('/api/practice', {
         method: 'POST',
@@ -388,6 +405,10 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
         },
       }));
     } catch { /* ignore */ }
+    finally {
+      answerInflightRef.current.delete(questionId);
+      setAnswerSubmitting(prev => ({ ...prev, [questionId]: false }));
+    }
   };
 
   const handleSubmitConstructivePrompt = async (promptId: string) => {
@@ -442,18 +463,26 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
           userId,
         }),
       });
-      const data = await res.json();
-      setScenarioFeedbacks(prev => ({ ...prev, [scId]: data.reply || '未收到反馈' }));
+      const data = await res.json().catch(() => null);
+      // 失败响应（429/500）不能当成功反馈展示，也不能推进完成门槛
+      if (!res.ok) {
+        setScenarioFeedbacks(prev => ({ ...prev, [scId]: data?.error || '反馈请求失败，请重试' }));
+        return;
+      }
+      setScenarioFeedbacks(prev => ({ ...prev, [scId]: data?.reply || '未收到反馈' }));
     } catch {
       setScenarioFeedbacks(prev => ({ ...prev, [scId]: '反馈请求失败' }));
+      return;
     } finally {
       setScenarioFeedbackLoading(prev => ({ ...prev, [scId]: false }));
-      setScenarioSubmitted(prev => ({ ...prev, [scId]: true }));
-      setResults(prev => ({
-        ...prev,
-        interactive: { ...prev.interactive, responses: prev.interactive.responses + 1 },
-      }));
     }
+    // 只有真正成功的反馈才计为完成（此前失败也 +1，两次失败即可解锁
+    // "完成训练"，Interactive 阶段完成门槛形同虚设）
+    setScenarioSubmitted(prev => ({ ...prev, [scId]: true }));
+    setResults(prev => ({
+      ...prev,
+      interactive: { ...prev.interactive, responses: prev.interactive.responses + 1 },
+    }));
   };
 
   const handleSubmitSummary = async () => {
@@ -474,8 +503,12 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
           userId,
         }),
       });
-      const data = await res.json();
-      setAiFeedback(data.reply || '未收到反馈');
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setAiFeedback(data?.error || '反馈请求失败，请重试');
+        return;
+      }
+      setAiFeedback(data?.reply || '未收到反馈');
     } catch {
       setAiFeedback('反馈请求失败，请重试');
     } finally {
@@ -488,11 +521,12 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
     // the suggested-question button) sees the value the user just typed
     // / had pre-filled, not the stale closure value from the click render.
     const inputNow = tutorChatInputRef.current.trim();
-    if (!inputNow) return;
+    if (!inputNow || tutorChatInflightRef.current) return;
+    tutorChatInflightRef.current = true;
     setTutorChatLoading(true);
     const msg = inputNow;
-    const newMessages = [...tutorChatMessages, { role: 'user', content: msg }];
-    setTutorChatMessages(newMessages);
+    // 函数式更新：闭包快照在两条消息并发时会互相覆盖丢消息
+    setTutorChatMessages(prev => [...prev, { role: 'user', content: msg }]);
     setTutorChatInput('');
     try {
       const res = await authFetch('/api/tutor/chat', {
@@ -506,13 +540,20 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
           history: tutorChatMessages,
         }),
       });
-      const data = await res.json();
-      setTutorChatMessages([...newMessages, { role: 'assistant', content: data.reply || '' }]);
-      setResults(prev => ({
-        ...prev,
-        interactive: { ...prev.interactive, responses: prev.interactive.responses + 1 },
-      }));
+      const data = await res.json().catch(() => null);
+      // 失败响应（429/500）不推进完成门槛（错误提示也作为气泡展示，
+      // 但不能用 return——会跳过下方的 inflight/loading 重置）
+      if (!res.ok) {
+        setTutorChatMessages(prev => [...prev, { role: 'assistant', content: data?.error || '请求失败，请重试' }]);
+      } else {
+        setTutorChatMessages(prev => [...prev, { role: 'assistant', content: data?.reply || '' }]);
+        setResults(prev => ({
+          ...prev,
+          interactive: { ...prev.interactive, responses: prev.interactive.responses + 1 },
+        }));
+      }
     } catch { /* ignore */ }
+    tutorChatInflightRef.current = false;
     setTutorChatLoading(false);
   };
 
@@ -729,7 +770,8 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
                       <Button
                         size="sm"
                         onClick={() => handleSubmitAnswer(q.id, activeAnswers[q.id] || '')}
-                        disabled={!activeAnswers[q.id]}
+                        loading={!!answerSubmitting[q.id]}
+                        disabled={!activeAnswers[q.id] || !!answerSubmitting[q.id]}
                       >
                         提交
                       </Button>
@@ -1372,13 +1414,14 @@ export function IcapPipeline({ knowledgeNodeId, knowledgeNodeTitle, onComplete, 
           <div className="flex gap-2">
             <input
               type="text"
-              className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200"
+              className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200 disabled:bg-slate-50 disabled:text-slate-400"
               placeholder="输入你的回答或提问..."
               value={tutorChatInput}
               onChange={e => setTutorChatInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleTutorChatSend()}
+              disabled={tutorChatLoading}
             />
-            <Button size="sm" onClick={handleTutorChatSend} loading={tutorChatLoading} disabled={!tutorChatInput.trim()}>
+            <Button size="sm" onClick={handleTutorChatSend} loading={tutorChatLoading} disabled={tutorChatLoading || !tutorChatInput.trim()}>
               发送
             </Button>
           </div>

@@ -96,7 +96,7 @@ export const trigScene: Scene3DDefinition = {
 
     // 内部相似小三角形（step>=2）
     const innerGeo = new THREE.BufferGeometry();
-    innerGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+    innerGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
     const innerTri = new THREE.LineLoop(
       innerGeo,
       new THREE.LineBasicMaterial({ color: '#8b5cf6' }),
@@ -242,6 +242,14 @@ export const trigScene: Scene3DDefinition = {
           specialIdx = (specialIdx + 1) % SPECIALS.length;
           tTheta = SPECIALS[specialIdx];
         }
+      },
+      getReadouts() {
+        const rad = tTheta * DEG;
+        return [
+          { label: 'sin θ', value: Math.sin(rad).toFixed(3) },
+          { label: 'cos θ', value: Math.cos(rad).toFixed(3) },
+          { label: 'tan θ', value: Math.tan(rad).toFixed(3) },
+        ];
       },
       update(dt) {
         const prev = cTheta;

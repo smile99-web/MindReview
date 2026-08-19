@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 import * as THREE from 'three';
 import type { Scene3DDefinition, SceneContext, SceneHandle } from '../types';
-import { addStageBasics, makeLabel, std } from '../three-utils';
+import { addStageBasics, disposeObject, makeLabel, std } from '../three-utils';
 
 const BOX = { x: 7, y: 3.4, z: 3 };
 const N_EACH = 42;
@@ -162,6 +162,7 @@ export const diffusionScene: Scene3DDefinition = {
         ctx.scene.remove(floor);
         ctx.scene.remove(divider);
         ctx.scene.remove(label);
+        [edges, floor, divider, label].forEach((o) => disposeObject(o));
       },
     };
   },

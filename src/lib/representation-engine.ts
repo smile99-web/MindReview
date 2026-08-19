@@ -30,7 +30,10 @@ export type RepresentationType =
 
 const REPRESENTATION_TYPES: RepresentationType[] = [
   'formula',
-  'image',
+  // 'image' 移出检测白名单：没有对应的生成器（prompt/normalize 都没有
+  // image 分支），LLM 选了它会落库 concept_map 结构 + 'image' 标签，
+  // 前端 RepresentationView 没有 image 渲染分支 → 渲染必坏。
+  // 需要配图走的是 /api/image 按需生成链路，不是表征检测。
   'step',
   'timeline',
   'causal',
@@ -90,12 +93,16 @@ function normalizeBoundary(value: unknown): string {
 
 function normalizeIndexedRelations(value: unknown, itemCount: number): Prisma.JsonArray {
   return asRecordArray(value)
-    .map((relation) => ({
-      from: clampInt(relation.from, 0, Math.max(0, itemCount - 1), 0),
-      to: clampInt(relation.to, 0, Math.max(0, itemCount - 1), 0),
-      label: asString(relation.label),
-    }))
-    .filter((relation) => relation.from !== relation.to);
+    .map((relation) => {
+      const from = typeof relation.from === 'number' ? Math.trunc(relation.from) : NaN;
+      const to = typeof relation.to === 'number' ? Math.trunc(relation.to) : NaN;
+      // 越界下标直接丢弃：钳位会把模型从未断言的关系静默接到错误概念上
+      // （与 llm-client normalizeDecomposeKnowledgeResult 的策略一致）
+      if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+      if (from < 0 || to < 0 || from >= itemCount || to >= itemCount || from === to) return null;
+      return { from, to, label: asString(relation.label) };
+    })
+    .filter((relation): relation is { from: number; to: number; label: string } => relation !== null);
 }
 
 function normalizeRepresentationContent(
@@ -416,14 +423,22 @@ const REPRESENTATION_PROMPTS: Record<
 
 /**
  * 使用 AI 生成具体的表征数据
- * @returns 根据 repType 返回对应的结构化数据
+ * @returns 实际生效的类型 + 对应结构化数据。生成失败回退 concept_map 时
+ *          返回类型也变为 'concept_map'——调用方必须保存返回的类型，
+ *          否则库里出现 representationType='formula' 配 concept_map
+ *          结构的脏数据，前端按类型读取字段必坏。
  */
 export async function generateRepresentationContent(
   nodeTitle: string,
   nodeSummary: string,
   subject: string,
   repType: string,
-): Promise<Prisma.InputJsonValue> {
+): Promise<{ type: string; data: Prisma.InputJsonValue; failed?: boolean }> {
+  // 'image' 没有生成器（无 prompt 模板、前端无渲染分支）：即使调用方显式
+  // 传入也按 concept_map 生成并落 concept_map 标签，保证类型与数据一致
+  if (repType === 'image') {
+    repType = 'concept_map';
+  }
   const promptConfig =
     REPRESENTATION_PROMPTS[repType] || REPRESENTATION_PROMPTS.concept_map;
 
@@ -454,7 +469,10 @@ ${promptConfig.exampleJson}
     });
 
     const parsed = JSON.parse(sanitizeJsonString(result)) as unknown;
-    return normalizeRepresentationContent(repType, parsed, nodeTitle, nodeSummary);
+    return {
+      type: repType,
+      data: normalizeRepresentationContent(repType, parsed, nodeTitle, nodeSummary),
+    };
   } catch (error) {
     console.error('[generateRepresentationContent] AI generation failed:', error);
 
@@ -475,10 +493,15 @@ ${promptConfig.exampleJson}
       }
     }
 
-    // 最终回退: 最少数据
+    // 最终回退: 最少数据。failed 标记给调用方：这种兜底数据不应落库缓存
+    // （否则一次 LLM 故障产生的空壳会被缓存层永久返回）
     return {
-      concepts: [{ name: nodeTitle, description: nodeSummary }],
-      relations: [],
+      type: 'concept_map',
+      data: {
+        concepts: [{ name: nodeTitle, description: nodeSummary }],
+        relations: [],
+      },
+      failed: true,
     };
   }
 }

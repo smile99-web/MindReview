@@ -147,7 +147,33 @@ export default function ScenePlayer({ def }: { def: Scene3DDefinition }) {
     handleRef.current?.setParam?.(id, value);
   };
 
+  // 📊 实时读数：场景暴露 getReadouts 时轮询显示推导量（电流/力矩/顶点…）。
+  // 值不变时不触发重渲染（学生拖滑块时每 0.4s 刷新一次足够流畅）。
+  const [readouts, setReadouts] = useState<{ label: string; value: string }[]>([]);
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const h = handleRef.current;
+      if (!h?.getReadouts) {
+        setReadouts((prev) => (prev.length === 0 ? prev : []));
+        return;
+      }
+      const next = h.getReadouts();
+      setReadouts((prev) => {
+        if (
+          prev.length === next.length &&
+          prev.every((p, i) => p.label === next[i].label && p.value === next[i].value)
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    }, 400);
+    return () => window.clearInterval(t);
+  }, [def]);
+
   const current = def.steps[step] ?? def.steps[0];
+  // def.steps 为空（异常场景定义）时 current 为 undefined，current.text 会崩
+  const currentText = current?.text ?? '';
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -213,6 +239,19 @@ export default function ScenePlayer({ def }: { def: Scene3DDefinition }) {
         </div>
       )}
 
+      {/* 📊 实时读数（场景提供 getReadouts 时显示） */}
+      {readouts.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-100 bg-cyan-50/70 px-4 py-2">
+          <span className="text-xs font-semibold text-cyan-700">📊 实时读数</span>
+          {readouts.map((r) => (
+            <span key={r.label} className="text-xs text-slate-600">
+              {r.label}{' '}
+              <b className="font-semibold tabular-nums text-cyan-900">{r.value}</b>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* 讲解步骤 */}
       <div className="border-t border-slate-100 px-4 py-3">
         <div className="mb-2 flex items-center gap-2">
@@ -255,7 +294,7 @@ export default function ScenePlayer({ def }: { def: Scene3DDefinition }) {
             </button>
           </div>
         </div>
-        <p className="min-h-12 text-sm leading-relaxed text-slate-700">{current.text}</p>
+        <p className="min-h-12 text-sm leading-relaxed text-slate-700">{currentText}</p>
         <div className="mt-2 flex items-center gap-2">
           <button
             type="button"

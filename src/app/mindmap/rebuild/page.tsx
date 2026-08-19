@@ -72,10 +72,15 @@ export default function RebuildPage() {
   const [activeChapterId, setActiveChapterId] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const res = await authFetch('/api/mindmap');
+        // 不查 res.ok 会把 401/500 的 { error } 当空数据：用户无法区分
+        // "真没数据"和"服务器挂了"
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as { nodes?: GraphNode[]; edges?: Array<{ fromId: string; toId: string }> };
+        if (cancelled) return;
         const allNodes = data.nodes ?? [];
         const edges = data.edges ?? [];
         const chapterByNodeId = new Map<string, string>();
@@ -103,11 +108,12 @@ export default function RebuildPage() {
             .sort((a, b) => a.subjectName.localeCompare(b.subjectName, 'zh')),
         );
       } catch {
-        setError('加载章节失败，请刷新重试');
+        if (!cancelled) setError('加载章节失败，请刷新重试');
       } finally {
-        setLoadingChapters(false);
+        if (!cancelled) setLoadingChapters(false);
       }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   const titleOf = (id: string) => nodes.find((n) => n.id === id)?.title ?? '?';

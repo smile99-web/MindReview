@@ -1,13 +1,26 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { clearLoginFailures, clientIp, isLoginBlocked, recordLoginFailure } from '@/lib/rate-limit';
 import { createAccessToken, createRefreshTokenValue, verifyPassword } from '@/lib/server-auth';
 
 export async function POST(request: Request) {
   try {
-    const { username, password } = await request.json();
+    const body = await request.json().catch(() => null);
+    const username = body && typeof body.username === 'string' ? body.username : '';
+    const password = body && typeof body.password === 'string' ? body.password : '';
 
     if (!username || !password) {
-      return NextResponse.json({ detail: 'Username and password are required' }, { status: 400 });
+      return NextResponse.json({ detail: 'Username and password are required', error: 'Username and password are required' }, { status: 400 });
+    }
+
+    // 防爆破：同一 用户名+IP 15 分钟内失败 10 次锁定 15 分钟（进程内计数）。
+    const throttleKey = `${String(username).toLowerCase()}|${clientIp(request)}`;
+    const blocked = isLoginBlocked(throttleKey);
+    if (!blocked.ok) {
+      return NextResponse.json(
+        { detail: `失败次数过多，请 ${Math.ceil(blocked.retryAfterSeconds / 60)} 分钟后再试`, error: `失败次数过多，请 ${Math.ceil(blocked.retryAfterSeconds / 60)} 分钟后再试` },
+        { status: 429, headers: { 'Retry-After': String(blocked.retryAfterSeconds) } },
+      );
     }
 
     const user = await prisma.user.findUnique({
@@ -16,8 +29,10 @@ export async function POST(request: Request) {
     });
 
     if (!user || !verifyPassword(password, user.passwordHash)) {
-      return NextResponse.json({ detail: 'Invalid username or password' }, { status: 401 });
+      recordLoginFailure(throttleKey);
+      return NextResponse.json({ detail: 'Invalid username or password', error: 'Invalid username or password' }, { status: 401 });
     }
+    clearLoginFailures(throttleKey);
 
     const now = new Date();
 
@@ -67,6 +82,6 @@ export async function POST(request: Request) {
       },
     });
   } catch {
-    return NextResponse.json({ detail: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ detail: 'Internal server error', error: 'Internal server error' }, { status: 500 });
   }
 }

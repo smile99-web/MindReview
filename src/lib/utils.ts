@@ -77,17 +77,70 @@ export function sanitizeJsonString(raw: string): string {
     }
   }
 
-  // Escape control characters (same approach as JSON.stringify replacement)
-  cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (ch) => {
-    if (ch === '\n') return '\\n';
-    if (ch === '\r') return '\\r';
-    if (ch === '\t') return '\\t';
-    if (ch === '\b') return '\\b';
-    if (ch === '\f') return '\\f';
-    return '\\u' + ('000' + ch.charCodeAt(0).toString(16)).slice(-4);
-  });
+  // 转义字符串字面量内的控制字符。JSON 字符串里不允许出现原始 \n \r \t 等
+  // 控制字符；字符串外只保留合法空白，其余控制字符直接丢弃。
+  // 旧实现的字符类 [\x00-\x08\x0B\x0C\x0E-\x1F] 恰好排除了 \t\n\r，
+  // 导致转义分支永远不可达（死代码），LLM 输出的字符串值带原始换行就
+  // 整个 JSON.parse 失败。
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  const VALID_ESCAPES = new Set(['"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u']);
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (inString && ch === '\\') {
+      const next = cleaned[i + 1];
+      // LLM 常在字符串里直接写 LaTeX（\frac \dfrac \pi …），而 JSON 只认
+      // \" \\ \/ \b \f \n \r \t \uXXXX 这些转义。非法转义把反斜杠自身
+      // 再转义一次（\d → \\d），保住 LaTeX 文本且 JSON 合法。
+      if (next !== undefined && !VALID_ESCAPES.has(next)) {
+        out += '\\\\';
+        continue; // next 字符下轮按普通字符处理
+      }
+      // \u 后必须跟 4 个十六进制，否则同样属于非法转义
+      if (next === 'u') {
+        const hex = cleaned.slice(i + 2, i + 6);
+        if (!/^[0-9a-fA-F]{4}$/.test(hex)) {
+          out += '\\\\';
+          continue;
+        }
+      }
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    const code = ch.charCodeAt(0);
+    if (inString) {
+      if (code < 0x20 || code === 0x7f) {
+        if (ch === '\n') out += '\\n';
+        else if (ch === '\r') out += '\\r';
+        else if (ch === '\t') out += '\\t';
+        else if (ch === '\b') out += '\\b';
+        else if (ch === '\f') out += '\\f';
+        else out += '\\u' + ('000' + code.toString(16)).slice(-4);
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+    // 字符串外：丢弃非法控制字符（JSON 合法空白是空格/\t/\n/\r）
+    if ((code < 0x20 && ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') || code === 0x7f) {
+      continue;
+    }
+    out += ch;
+  }
 
-  return cleaned.trim();
+  return out.trim();
 }
 
 export function formatDate(date: Date | string): string {

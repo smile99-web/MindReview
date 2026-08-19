@@ -1,6 +1,7 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireAdmin } from '@/lib/require-admin';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import type { Prisma } from '@prisma/client';
 
@@ -137,15 +138,22 @@ export async function GET(
   }
 }
 
-// PATCH /api/knowledge/[id] — 更新知识点
+// PATCH /api/knowledge/[id] — 更新知识点（管理员）
+// 知识点是全站共享内容（见 DELETE 注释）。此前 PATCH 只要求登录：
+// 任意用户可篡改全站知识图谱的 title/subjectId/parentId 等结构字段——
+// 与 DELETE 必须管理员的策略不对称，同文件补齐。
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
-    await resolveUserIdFromRequest(req);
-    const body = await req.json();
+    const adminDenied = await requireAdmin(req);
+    if (adminDenied) return adminDenied;
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
 
     // --- input validation ---
     const requiredStrings = ['title', 'subjectId', 'icapLevel'];
@@ -215,26 +223,59 @@ export async function PATCH(
       }
     }
 
-    const node = await prisma.knowledgeNode.update({
-      where: { id },
-      data: data as Prisma.KnowledgeNodeUpdateInput,
-    });
+    // 数值范围钳制：POST 路由专门钳过（注释点名 '★'.repeat(difficulty) 会
+    // RangeError），PATCH 此前不钳，-1 / 1e9 入库后下游页面全站崩溃。
+    const clampNum = (v: unknown, min: number, max: number) =>
+      Math.min(max, Math.max(min, v as number));
+    if ('difficulty' in data) data.difficulty = clampNum(data.difficulty, 1, 5);
+    if ('cognitiveLoad' in data) data.cognitiveLoad = clampNum(data.cognitiveLoad, 1, 5);
+    if ('masteryLevel' in data) data.masteryLevel = clampNum(data.masteryLevel, 0, 100);
+    if ('repetitions' in data) data.repetitions = Math.max(0, Math.round(data.repetitions as number));
+    if ('easeFactor' in data) data.easeFactor = clampNum(data.easeFactor, 1.3, 5);
+    if ('intervalDays' in data) data.intervalDays = clampNum(data.intervalDays, 0, 365);
+    if ('forgetRisk' in data) data.forgetRisk = clampNum(data.forgetRisk, 0, 1);
 
-    return NextResponse.json(node);
+    // 日期字符串合法性：非法日期 Prisma 会抛验证错误（500），提前 400
+    for (const key of dateFields) {
+      const v = data[key];
+      if (v !== undefined && v !== null && Number.isNaN(new Date(v as string).getTime())) {
+        return NextResponse.json({ error: `字段 "${key}" 不是合法日期` }, { status: 400 });
+      }
+    }
+
+    try {
+      const node = await prisma.knowledgeNode.update({
+        where: { id },
+        data: data as Prisma.KnowledgeNodeUpdateInput,
+      });
+      return NextResponse.json(node);
+    } catch (error: unknown) {
+      const code = (error as { code?: string })?.code;
+      if (code === 'P2025') {
+        return NextResponse.json({ error: '知识点不存在' }, { status: 404 });
+      }
+      if (code === 'P2003') {
+        return NextResponse.json({ error: '关联的学科/章节/父节点不存在' }, { status: 400 });
+      }
+      throw error;
+    }
   } catch (error: unknown) {
     const message = getErrorMessage(error);
     return NextResponse.json({ error: message }, { status: message === 'Authentication required' ? 401 : 500 });
   }
 }
 
-// DELETE /api/knowledge/[id] — 删除知识点
+// DELETE /api/knowledge/[id] — 删除知识点（管理员）
+// 知识点是全站共享内容：删除会经 onDelete: Cascade 级联删掉所有用户的
+// UserKnowledgeProgress / ReviewTask / Mistake 关联，必须要求管理员。
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
-    await resolveUserIdFromRequest(req);
+    const adminDenied = await requireAdmin(req);
+    if (adminDenied) return adminDenied;
     await prisma.knowledgeNode.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

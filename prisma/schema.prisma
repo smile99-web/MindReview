@@ -84,6 +84,10 @@ model Chapter {
   parentId  String?
   title     String
   sortOrder Int      @default(0)
+  // 学期标签 — 与 KnowledgeNode.gradeLevel 同口径（"七年级上"…"九年级下"）。
+  // 教材目录核验重建后由脚本直接写入；同名单元（如语文"第一单元"）在六个
+  // 学期各有一行，靠此列区分。旧数据为 null，subjects 页退回按节点多数派。
+  gradeLevel String?
   createdAt DateTime @default(now())
 
   subject        Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
@@ -124,7 +128,7 @@ model KnowledgeNode {
   forgetRisk         Float                        @default(0) // 遗忘风险 0-1
   representationType String? // formula/image/step/timeline/causal/mindmap etc.
   representationData Json? // 表征数据
-  embedding          Unsupported("vector(1536)")? // pgvector 语义搜索嵌入
+  embedding          Unsupported("vector(2048)")? // pgvector 语义搜索嵌入
   createdAt          DateTime                     @default(now())
   updatedAt          DateTime                     @updatedAt
 
@@ -160,6 +164,9 @@ model KnowledgeEdge {
 
   @@index([fromId])
   @@index([toId])
+  // 建边查重（fromId,toId,relationType 三元组）
+  @@unique([fromId, toId, relationType])
+  @@index([fromId, toId, relationType])
 }
 
 model KnowledgeCard {
@@ -242,6 +249,8 @@ model Mistake {
 
   // 错题本/到期复习按 userId(+nextReviewAt) 过滤，学科网格按 userId groupBy
   @@index([userId, nextReviewAt])
+  // 错题查重（record-mistakes 每条都按 userId+questionText findFirst/findMany）
+  @@index([userId, questionText])
 }
 
 model ReviewTask {
@@ -430,10 +439,12 @@ model StudyTimeLog {
   endedAt         DateTime // 本段活跃终点（≈ 发心跳时刻）
   durationSeconds Int // endedAt - startedAt，单位秒
   source          String   @default("activity-tracker") // 预留：以后接 ICAP / 答题计时
+  heartbeatId     String?  // 客户端幂等键：防弱网重试重复计时
   createdAt       DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, heartbeatId])
   @@index([userId, startedAt])
   @@index([userId, createdAt])
 }
@@ -526,4 +537,19 @@ model InviteCode {
   createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([createdById])
+}
+
+// 前端运行时错误上报（window.onerror / unhandledrejection），
+// 让白屏/JS 崩溃不再依赖用户反馈才发现
+model ClientErrorLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  message   String
+  stack     String?
+  url       String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
 }

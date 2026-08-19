@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 
 // GET /api/doc/list
 // Returns the user's recent doc uploads.
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     console.error('[doc/list] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

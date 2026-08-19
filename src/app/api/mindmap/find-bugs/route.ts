@@ -47,7 +47,12 @@ const TOKEN_TTL_SECONDS = 30 * 60;
 // --- 答案令牌签名（复用 JWT_SECRET_KEY，与 server-auth 同源的轻量 HMAC） ---
 
 function getSecret(): string {
-  return process.env.JWT_SECRET_KEY || 'mindreview-dev-secret-change-me';
+  // 生产 fail-closed，与 server-auth.ts 一致；否则公开 dev secret 可伪造答案 token
+  if (process.env.JWT_SECRET_KEY) return process.env.JWT_SECRET_KEY;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET_KEY environment variable is required in production');
+  }
+  return 'mindreview-dev-secret-change-me';
 }
 
 function base64UrlEncode(data: Buffer | string): string {
@@ -98,7 +103,10 @@ function pickDifferentType(current: string): RelationType {
 export async function POST(req: NextRequest) {
   try {
     await resolveUserIdFromRequest(req);
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const action = typeof body.action === 'string' ? body.action : '';
 
     if (action === 'create') return await createTask(body);

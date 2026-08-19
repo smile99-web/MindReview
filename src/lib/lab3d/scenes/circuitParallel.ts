@@ -6,7 +6,7 @@ import type { Scene3DDefinition, SceneContext, SceneHandle } from '../types';
 import { addStageBasics, cylinderBetween, damp, disposeObject, makeLabel, std } from '../three-utils';
 
 const Y = 1.2;
-const R_BULB = 6; // 每个灯泡电阻 Ω
+const R_BULB = 6; // 支路电阻默认值 Ω（滑块 r1/r2 的初始值）
 const N_E = 20; // 每条支路回路的电子数
 
 const V = (x: number, z: number) => new THREE.Vector3(x, Y, z);
@@ -44,6 +44,8 @@ export const circuitParallelScene: Scene3DDefinition = {
     { kind: 'button', id: 's1', label: '🔘 开关 S1（支路1）' },
     { kind: 'button', id: 's2', label: '🔘 开关 S2（支路2）' },
     { kind: 'slider', id: 'u', label: '电压 U', min: 3, max: 12, step: 0.5, defaultValue: 6, unit: 'V' },
+    { kind: 'slider', id: 'r1', label: '支路1 电阻 R1', min: 2, max: 20, step: 1, defaultValue: 6, unit: 'Ω' },
+    { kind: 'slider', id: 'r2', label: '支路2 电阻 R2', min: 2, max: 20, step: 1, defaultValue: 6, unit: 'Ω' },
   ],
   steps: [
     {
@@ -71,6 +73,8 @@ export const circuitParallelScene: Scene3DDefinition = {
     let s1 = true;
     let s2 = true;
     let voltage = 6;
+    let r1 = R_BULB;
+    let r2 = R_BULB;
     let flow1 = 0;
     let flow2 = 0;
 
@@ -196,8 +200,8 @@ export const circuitParallelScene: Scene3DDefinition = {
     const hintLabel = staticLabel('断开 S1：L1 灭，L2 亮度不变！', { fontSize: 36, scale: 0.9, color: '#b91c1c' }, [-0.5, 4.3, 0]);
 
     const refresh = () => {
-      const i1 = s1 ? voltage / R_BULB : 0;
-      const i2 = s2 ? voltage / R_BULB : 0;
+      const i1 = s1 ? voltage / r1 : 0;
+      const i2 = s2 ? voltage / r2 : 0;
       setInfo(`U = ${voltage}V，I1 = ${i1.toFixed(1)}A，I2 = ${i2.toFixed(1)}A，I总 = ${(i1 + i2).toFixed(1)}A`);
       setP1(`L1：P = ${(voltage * i1).toFixed(1)}W`);
       setP2(`L2：P = ${(voltage * i2).toFixed(1)}W`);
@@ -222,15 +226,26 @@ export const circuitParallelScene: Scene3DDefinition = {
         if (id === 's1') s1 = !s1;
         if (id === 's2') s2 = !s2;
         if (id === 'u') voltage = Number(value);
+        if (id === 'r1') r1 = Number(value);
+        if (id === 'r2') r2 = Number(value);
         refresh();
+      },
+      getReadouts() {
+        const i1 = s1 ? voltage / r1 : 0;
+        const i2 = s2 ? voltage / r2 : 0;
+        return [
+          { label: 'I₁ 支路1', value: `${i1.toFixed(2)} A` },
+          { label: 'I₂ 支路2', value: `${i2.toFixed(2)} A` },
+          { label: 'I 干路', value: `${(i1 + i2).toFixed(2)} A` },
+        ];
       },
       update(dt) {
         // 开关刀片动画
         sw1.rotation.x = damp(sw1.rotation.x, s1 ? 0 : -0.55, 8, dt);
         sw2.rotation.x = damp(sw2.rotation.x, s2 ? 0 : -0.55, 8, dt);
         // 电子流速 ∝ 各支路电流；支路断开则该回路电子停住
-        const i1 = s1 ? voltage / R_BULB : 0;
-        const i2 = s2 ? voltage / R_BULB : 0;
+        const i1 = s1 ? voltage / r1 : 0;
+        const i2 = s2 ? voltage / r2 : 0;
         flow1 += (dt * i1 * 0.5) / loop1.total;
         flow2 += (dt * i2 * 0.5) / loop2.total;
         for (let k = 0; k < N_E; k++) {
@@ -239,10 +254,10 @@ export const circuitParallelScene: Scene3DDefinition = {
           loop2.at(k / N_E + flow2, tmp);
           es2[k].position.copy(tmp);
         }
-        // 亮度 ∝ 实际功率 P = U²/R
+        // 亮度 ∝ 实际功率 P = U²/R（以默认电阻 6Ω、最大电压 12V 的功率为亮度基准）
         const pMax = (12 * 12) / R_BULB;
-        const g1 = s1 ? ((voltage * voltage) / R_BULB / pMax) * 1.8 : 0;
-        const g2 = s2 ? ((voltage * voltage) / R_BULB / pMax) * 1.8 : 0;
+        const g1 = s1 ? ((voltage * voltage) / r1 / pMax) * 1.8 : 0;
+        const g2 = s2 ? ((voltage * voltage) / r2 / pMax) * 1.8 : 0;
         bulb1.mat.emissiveIntensity = damp(bulb1.mat.emissiveIntensity, g1, 6, dt);
         bulb2.mat.emissiveIntensity = damp(bulb2.mat.emissiveIntensity, g2, 6, dt);
         bulb1.bulb.scale.setScalar(1 + bulb1.mat.emissiveIntensity * 0.1);

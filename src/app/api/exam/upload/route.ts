@@ -127,6 +127,11 @@ export async function POST(req: NextRequest) {
         parsed = { ocrText: raw.trim(), subjectName: '' };
       }
     }
+    // LLM 可能返回 JSON 字面量 null / 数组 / 标量：JSON.parse 成功但随后
+    // parsed.ocrText 解引用抛 TypeError（500）
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      parsed = { ocrText: raw.trim(), subjectName: '' };
+    }
 
     const ocrText = (parsed.ocrText || '').trim();
     const subjectName = (parsed.subjectName || '').trim();

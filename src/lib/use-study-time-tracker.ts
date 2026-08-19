@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { authFetch, getValidToken } from "@/lib/auth";
+import { authFetch, AUTH_API, getValidToken } from "@/lib/auth";
 
 /**
  * 学习时长追踪器 —— 客户端 hook。
@@ -92,11 +92,14 @@ export function useStudyTimeTracker(enabled: boolean) {
       startedAt: string;
       endedAt: string;
       durationSeconds: number;
+      heartbeatId?: string;
     }): boolean {
       if (inFlightRef.current) return false;
       inFlightRef.current = true;
       try {
-        const url = "/api/study-time/heartbeat";
+        // sendBeacon 是原生 API，不会像 authFetch 一样自动补 basePath；
+        // 应用挂在 /rm 下，裸 /api/... 会打到 nginx 其它站点 → 404 静默丢数据。
+        const url = `${AUTH_API}/api/study-time/heartbeat`;
         const blob = new Blob([JSON.stringify(body)], { type: "application/json" });
         const sent =
           typeof navigator !== "undefined" && navigator.sendBeacon?.(url, blob);
@@ -140,6 +143,10 @@ export function useStudyTimeTracker(enabled: boolean) {
         startedAt: startedAt.toISOString(),
         endedAt: endedAt.toISOString(),
         durationSeconds: seconds,
+        // 幂等键按内容派生（activeSince+seconds 唯一确定一次心跳）：
+        // 同一内容无论重发多少次服务端都只计一次；用随机 UUID 则每次
+        // 重发都是新键，去重形同虚设。
+        heartbeatId: `${s.activeSince}:${seconds}`,
       });
       if (!sent) {
         // 上一次心跳还在途：本次时长保留在 accumulatedSeconds 里下轮再发，不清零
@@ -173,6 +180,9 @@ export function useStudyTimeTracker(enabled: boolean) {
       flushHeartbeat();
     }
 
+    // 逐秒 +1 会在定时器被节流/合盖唤醒时漏计：按真实时间差累计，
+    // 单次 tick 最多补 5 秒（长时间无 tick 通常意味着挂起，不该白送时长）
+    let lastTickAt = 0;
     function tick() {
       const s = stateRef.current;
       if (!s.isActive) return;
@@ -186,7 +196,10 @@ export function useStudyTimeTracker(enabled: boolean) {
         return;
       }
 
-      s.accumulatedSeconds += 1;
+      const now = Date.now();
+      const delta = lastTickAt > 0 ? Math.min(5, Math.max(1, Math.round((now - lastTickAt) / 1000))) : 1;
+      lastTickAt = now;
+      s.accumulatedSeconds += delta;
       if (s.accumulatedSeconds >= HEARTBEAT_INTERVAL_SECONDS) {
         flushHeartbeat();
       }
@@ -264,6 +277,7 @@ export function useStudyTimeTracker(enabled: boolean) {
       };
 
       // 启动 ticker
+      lastTickAt = Date.now();
       tickerIdRef.current = window.setInterval(tick, TICK_INTERVAL_MS);
     }
 

@@ -1,8 +1,9 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { assessIcapLevel } from '@/lib/ai-tutor';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { rateLimit } from '@/lib/rate-limit';
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,6 +15,16 @@ export async function POST(req: NextRequest) {
 
     // --- Resolve userId from JWT token (with DB fallback) ---
     const userId = await resolveUserIdFromRequest(req);
+
+    // 限流：本路由每次调用都是付费 LLM（统一走 llm: 用户桶，
+    // 与 ai/decompose/schema/representation 同一配额）
+    const rl = rateLimit(`llm:${userId}`, 60, 60 * 60 * 1000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: 'AI 调用太频繁了，请稍后再试' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+      );
+    }
 
     // --- Validate required fields ---
     if (!knowledgeNodeId) {
@@ -107,7 +118,7 @@ export async function POST(req: NextRequest) {
     console.error('[Tutor Assess API] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error, '服务器内部错误') },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

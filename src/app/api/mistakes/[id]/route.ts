@@ -1,4 +1,4 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
@@ -29,7 +29,7 @@ export async function GET(
     }
     return NextResponse.json(mistake);
   } catch (error: unknown) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: getErrorStatus(error) });
   }
 }
 
@@ -59,7 +59,7 @@ export async function PATCH(
     const mistake = await prisma.mistake.findUnique({ where: { id } });
     return NextResponse.json(mistake);
   } catch (error: unknown) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: getErrorStatus(error) });
   }
 }
 
@@ -81,6 +81,6 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: getErrorStatus(error) });
   }
 }

@@ -104,6 +104,11 @@ export async function POST(req: NextRequest) {
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) try { parsed = JSON.parse(m[0]); } catch { parsed = {}; }
     }
+    // LLM 可能返回 JSON 字面量 null / 数组 / 标量：JSON.parse 成功但随后的
+    // parsed.summary 解引用抛 TypeError（500）。兜底只覆盖了 parse 失败。
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      parsed = {};
+    }
 
     const summary = (parsed.summary || `请学习概念：${concept}`).trim();
     const keywords = Array.from(new Set([
@@ -113,6 +118,16 @@ export async function POST(req: NextRequest) {
     ])).slice(0, 10);
     const difficulty = typeof parsed.difficulty === 'number' ? Math.max(1, Math.min(5, parsed.difficulty)) : 3;
     const cognitiveLoad = typeof parsed.cognitiveLoad === 'number' ? Math.max(1, Math.min(5, parsed.cognitiveLoad)) : 3;
+
+    // 双检锁：上面的 findFirst 复用检查之后隔着数秒的 LLM 调用，
+    // 期间并发请求可能已创建同名节点——create 前再查一次，存在则复用
+    const concurrent = await prisma.knowledgeNode.findFirst({
+      where: { title },
+      select: { id: true },
+    });
+    if (concurrent) {
+      return NextResponse.json({ nodeId: concurrent.id, reused: true, title });
+    }
 
     const node = await prisma.knowledgeNode.create({
       data: {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { deleteSession, listSessions, loadChatHistory } from '@/lib/tutor-persistence';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { getErrorStatus } from '@/lib/errors';
 
 export async function GET(req: NextRequest) {
   try {
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '服务器内部错误';
     console.error('[Tutor History API] GET Error:', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: getErrorStatus(error) });
   }
 }
 
@@ -44,6 +45,6 @@ export async function DELETE(req: NextRequest) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '服务器内部错误';
     console.error('[Tutor History API] DELETE Error:', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: getErrorStatus(error) });
   }
 }

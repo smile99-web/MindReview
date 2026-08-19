@@ -239,8 +239,10 @@ function topologicalSortByLevel(
 export async function generatePath(
   userId: string | null | undefined,
   subjectId: string,
-  maxSteps: number = 20,
+  // 必填参数不能跟在默认参数后（TS1016，tsc --noEmit 必失败）：
+  // prisma 前移到 maxSteps 之前
   prisma: PrismaClient,
+  maxSteps: number = 20,
 ): Promise<LearningPath> {
   // --- Resolve user ID ---
   const uid = await resolveUserId(userId);
@@ -360,6 +362,7 @@ export async function checkPrerequisites(
   // BFS to find all transitive prerequisites
   const visited = new Set<string>();
   const queue: string[] = [knowledgeNodeId];
+  visited.add(knowledgeNodeId); // 起始节点入队即标记（防环回边重复处理）
   const allPrerequisites: { nodeId: string; title: string; masteryLevel: number }[] = [];
 
   // Collect every prerequisite node id we encounter so we can fetch the
@@ -372,9 +375,9 @@ export async function checkPrerequisites(
   const prerequisiteNodeIds = new Set<string>();
 
   while (queue.length > 0) {
+    // visited 在入队时已标记（防菱形依赖重复入队），出队不能再跳过——
+    // 否则只有起始节点被处理，传递前置永远查不到（修复时一度引入的回归）
     const currentId = queue.shift()!;
-    if (visited.has(currentId)) continue;
-    visited.add(currentId);
 
     // Find edges where current node is the target (depends on from-node)
     const edges = await prisma.knowledgeEdge.findMany({
@@ -391,7 +394,10 @@ export async function checkPrerequisites(
 
     for (const edge of edges) {
       const fromId = edge.from.id;
+      // 入队即标记 visited（此前出队才标记）：菱形依赖下同一前置会被
+      // 多条路径重复入队、重复计入 allPrerequisites
       if (!visited.has(fromId)) {
+        visited.add(fromId);
         prerequisiteNodeIds.add(fromId);
         allPrerequisites.push({
           nodeId: fromId,
@@ -519,15 +525,16 @@ export async function batchCheckPrerequisites(
     const visited = new Set<string>();
     const result: { nodeId: string; title: string; masteryLevel: number }[] = [];
     const queue = [nodeId];
+    visited.add(nodeId);
 
     while (queue.length > 0) {
+      // 入队即标记（防菱形依赖重复入队），出队不再跳过
       const current = queue.shift()!;
-      if (visited.has(current)) continue;
-      visited.add(current);
 
       const prereqs = prerequisiteOf.get(current) || [];
       for (const prereq of prereqs) {
         if (!visited.has(prereq.nodeId)) {
+          visited.add(prereq.nodeId);
           result.push(prereq);
           queue.push(prereq.nodeId);
         }
@@ -601,7 +608,11 @@ export async function adaptPath(
       continue;
     }
 
-    const currentIcapIndex = ICAP_ORDER.indexOf(step.icapLevel);
+    // 非法 icapLevel 时 indexOf=-1：晋级分支会把未知等级"晋级"成
+    // ICAP_ORDER[0]（Passive），方向完全反了。先归一化为合法等级再取序号。
+    const normalizedLevel = ICAP_ORDER.includes(step.icapLevel) ? step.icapLevel : 'Active';
+    if (normalizedLevel !== step.icapLevel) step.icapLevel = normalizedLevel;
+    const currentIcapIndex = ICAP_ORDER.indexOf(normalizedLevel);
 
     // --- Regression: very poor performance ---
     if (perf.accuracy < 0.2) {
@@ -646,30 +657,38 @@ export async function adaptPath(
 
           if (prereqEdges.length > 0 && prereqEdges[0].from) {
             const prereq = prereqEdges[0].from;
-            const remedialLevel = 'Passive';
-            const remedialStep: PathStep = {
-              nodeId: prereq.id,
-              title: `[补充] ${prereq.title}`,
-              icapLevel: remedialLevel,
-              estimatedMinutes: estimateMinutes(prereq.difficulty, remedialLevel),
-              masteryLevel: prereq.masteryLevel,
-              difficulty: prereq.difficulty,
-              summary: prereq.summary,
-            };
+            // 插入前查重：路径本是拓扑排序产物，前置节点极可能已在 steps
+            // 中（或被多个表现差的 step 共享）——重复 nodeId 会虚增
+            // totalSteps、造成前端 key 冲突
+            const alreadyInPath = adaptedSteps.some((s) => s.nodeId === prereq.id);
+            if (!alreadyInPath) {
+              const remedialLevel = 'Passive';
+              const remedialStep: PathStep = {
+                nodeId: prereq.id,
+                title: `[补充] ${prereq.title}`,
+                icapLevel: remedialLevel,
+                estimatedMinutes: estimateMinutes(prereq.difficulty, remedialLevel),
+                masteryLevel: prereq.masteryLevel,
+                difficulty: prereq.difficulty,
+                summary: prereq.summary,
+              };
 
-            adaptedSteps.splice(i, 0, remedialStep);
-            i++; // Skip the inserted node in iteration
+              adaptedSteps.splice(i, 0, remedialStep);
+              i++; // Skip the inserted node in iteration
 
-            changes.push({
-              nodeId: prereq.id,
-              changeType: 'insert_remedial',
-              fromLevel: undefined,
-              toLevel: remedialLevel,
-              reason: `因"${step.title}"表现不佳，插入前置知识点巩固基础`,
-            });
+              changes.push({
+                nodeId: prereq.id,
+                changeType: 'insert_remedial',
+                fromLevel: undefined,
+                toLevel: remedialLevel,
+                reason: `因"${step.title}"表现不佳，插入前置知识点巩固基础`,
+              });
+            }
           }
-        } catch {
-          // If the lookup fails, skip remedial insertion
+        } catch (lookupErr: unknown) {
+          // If the lookup fails, skip remedial insertion — 但至少留日志，
+          // catch{} 全静默会让 Prisma 错误长期无人察觉
+          console.warn('[adaptPath] remedial prerequisite lookup failed:', lookupErr);
         }
       }
 

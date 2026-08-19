@@ -17,6 +17,7 @@ interface HeartbeatBody {
   endedAt?: string;
   durationSeconds?: number;
   source?: string;
+  heartbeatId?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -54,13 +55,13 @@ export async function POST(req: NextRequest) {
     duration = MAX_HEARTBEAT_SECONDS;
   }
 
-  // 起点缺省为 endedAt - duration
-  const finalStartedAt = startedAt || new Date(endedAt.getTime() - duration * 1000);
+  // 起点统一由 endedAt - duration 重算：客户端同时传 startedAt +
+  // durationSeconds 时，duration 被钳到 300s 后库里会出现"跨度 1 小时、
+  // 时长 300 秒"的自相矛盾段落。派生起点保证三者始终一致。
+  const finalStartedAt = new Date(endedAt.getTime() - duration * 1000);
 
-  // 拒绝明显未来的时间（容忍 2 分钟时钟漂移）
-  if (finalStartedAt.getTime() > endedAt.getTime() + 2 * 60 * 1000) {
-    return NextResponse.json({ error: 'startedAt 晚于 endedAt' }, { status: 400 });
-  }
+  // endedAt 拒绝明显未来时间（容忍 2 分钟时钟漂移）。
+  // （原"startedAt 晚于 endedAt"检查已删：起点由 endedAt-duration 派生后恒成立，属死代码）
   if (endedAt.getTime() > now.getTime() + 2 * 60 * 1000) {
     return NextResponse.json({ error: 'endedAt 不能是未来时间' }, { status: 400 });
   }
@@ -71,6 +72,9 @@ export async function POST(req: NextRequest) {
   const source = typeof body.source === 'string' && body.source.trim()
     ? body.source.trim().slice(0, 32)
     : 'activity-tracker';
+  const heartbeatId = typeof body.heartbeatId === 'string' && body.heartbeatId.trim()
+    ? body.heartbeatId.trim().slice(0, 64)
+    : null;
 
   try {
     const created = await prisma.studyTimeLog.create({
@@ -80,6 +84,7 @@ export async function POST(req: NextRequest) {
         endedAt,
         durationSeconds: duration,
         source,
+        heartbeatId,
       },
       select: { id: true, durationSeconds: true },
     });
@@ -90,6 +95,11 @@ export async function POST(req: NextRequest) {
       duration: created.durationSeconds,
     });
   } catch (err) {
+    // 幂等：同一 (userId, heartbeatId) 已落库（弱网重试/响应丢失重发），
+    // 直接返回成功不重复计时
+    if ((err as { code?: string })?.code === 'P2002') {
+      return NextResponse.json({ ok: true, dedup: true, duration });
+    }
     return NextResponse.json(
       { error: `心跳记录失败: ${getErrorMessage(err)}` },
       { status: 500 },

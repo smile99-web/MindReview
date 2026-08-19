@@ -208,10 +208,17 @@ export async function suggestSchemaNodes(
   }
   neighbourIds.delete(knowledgeNodeId);
 
-  if (neighbourIds.size === 0) return [];
+  // 二跳邻居必须设上限：高度连通的图会把数千节点塞进 LLM prompt
+  // （token 爆炸 + 超时）。保留直接邻居优先（Set 插入序）。
+  const MAX_NEIGHBOURS = 80;
+  const cappedNeighbourIds = neighbourIds.size > MAX_NEIGHBOURS
+    ? new Set([...neighbourIds].slice(0, MAX_NEIGHBOURS))
+    : neighbourIds;
+
+  if (cappedNeighbourIds.size === 0) return [];
 
   const neighbours = await prisma.knowledgeNode.findMany({
-    where: { id: { in: [...neighbourIds] } },
+    where: { id: { in: [...cappedNeighbourIds] } },
     select: { id: true, title: true, summary: true, keywords: true, representationType: true },
   });
 
@@ -365,18 +372,16 @@ ${edgeLines.length > 0 ? edgeLines.join('\n') : '(no relations)'}`,
       },
     });
 
-    await Promise.all(
-      members.map((member: SchemaMemberNode) =>
-        tx.knowledgeEdge.create({
-          data: {
-            fromId: node.id,
-            toId: member.id,
-            relationType: 'schema_member',
-            label: `Member of schema "${finalName}"`,
-          },
-        }),
-      ),
-    );
+    // createMany 一次写入：交互式事务内 Promise.all 并发 create 在同一
+    // tx 连接上实际串行无收益，还放大 5s 事务超时的回滚风险
+    await tx.knowledgeEdge.createMany({
+      data: members.map((member: SchemaMemberNode) => ({
+        fromId: node.id,
+        toId: member.id,
+        relationType: 'schema_member',
+        label: `Member of schema "${finalName}"`,
+      })),
+    });
 
     return node;
   });

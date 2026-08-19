@@ -371,7 +371,8 @@ export default function SettingsPage() {
   };
 
   // ===== 方舟统一调用：保存 / 开关 / 测试 =====
-  const saveArk = async (enabledOverride?: boolean) => {
+  // 返回是否成功：toggleArk 乐观更新后需要依据成败决定是否回滚
+  const saveArk = async (enabledOverride?: boolean): Promise<boolean> => {
     setArk((prev) => ({ ...prev, saving: true, result: null }));
     try {
       const res = await authFetch("/api/settings", {
@@ -400,9 +401,11 @@ export default function SettingsPage() {
       const refreshRes = await authFetch("/api/settings");
       const saved = await refreshRes.json().catch(() => null);
       if (Array.isArray(saved)) applySavedKeys(saved);
+      return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : "保存失败";
       setArk((prev) => ({ ...prev, result: { ok: false, error: message } }));
+      return false;
     } finally {
       setArk((prev) => ({ ...prev, saving: false }));
     }
@@ -417,7 +420,12 @@ export default function SettingsPage() {
     }
     setArk((prev) => ({ ...prev, enabled: next }));
     if (ark.saved) {
-      await saveArk(next);
+      const ok = await saveArk(next);
+      // 乐观更新失败必须回滚：否则 UI 显示"已开启"而服务端仍是关闭，
+      // 用户以为切换成功，刷新后状态"神秘"变回
+      if (!ok) {
+        setArk((prev) => ({ ...prev, enabled: !next }));
+      }
     }
   };
 

@@ -19,16 +19,20 @@ const FORBIDDEN_KEYWORDS_BY_GRADE_VOLUME: Record<string, string[]> = {
   '初二上册': ['一元二次方程', '二次函数', '反比例函数', '相似', '锐角三角函数', '圆', '投影', '视图'],
   '初二下册': ['一元二次方程', '二次函数', '反比例函数', '相似', '锐角三角函数', '圆', '投影'],
   '初三上册': ['相交线与平行线', '实数', '二元一次方程组', '不等式', '整式', '三角形全等', '轴对称', '分式', '二次根式', '勾股定理'],
-  '初三十册': ['相交线与平行线', '实数', '二元一次方程组', '不等式', '整式', '三角形全等', '轴对称', '分式', '二次根式', '勾股定理'],
   '初三下册': ['一元二次方程', '二次函数', '旋转', '圆', '概率初步'],
-  '初三十一册': ['一元二次方程', '二次函数', '旋转', '圆', '概率初步'],
   '初一全册': ['一元二次方程', '二次函数', '反比例函数', '相似', '锐角三角函数', '圆', '投影', '视图', '全等三角形', '轴对称', '分式', '二次根式', '勾股定理', '平行四边形', '一次函数', '数据分析'],
   '初二全册': ['一元二次方程', '二次函数', '反比例函数', '相似', '锐角三角函数', '圆', '投影', '视图'],
   '初三全册': ['相交线与平行线', '实数', '二元一次方程组', '不等式', '整式', '三角形全等', '轴对称', '分式', '二次根式', '勾股定理'],
-  '高一下册': ['一元二次方程'],
-  '高二下册': ['一元二次方程'],
-  '高三十册': ['一元二次方程'],
-  '高三十一册': ['一元二次方程'],
+  // 高中各学期：初中核心概念（一元二次方程/二次函数等初中章节）不应混入
+  '高一上册': ['一元二次方程', '反比例函数', '相似', '锐角三角函数', '投影', '视图'],
+  '高一下册': ['一元二次方程', '反比例函数', '相似', '锐角三角函数', '投影', '视图'],
+  '高一全册': ['一元二次方程', '反比例函数', '相似', '锐角三角函数', '投影', '视图'],
+  '高二上册': ['一元二次方程', '反比例函数', '相似', '锐角三角函数', '投影', '视图'],
+  '高二下册': ['一元二次方程', '反比例函数', '相似', '锐角三角函数', '投影', '视图'],
+  '高二全册': ['一元二次方程', '反比例函数', '相似', '锐角三角函数', '投影', '视图'],
+  '高三上册': ['一元二次方程', '反比例函数', '相似', '锐角三角函数', '投影', '视图'],
+  '高三下册': ['一元二次方程', '反比例函数', '相似', '锐角三角函数', '投影', '视图'],
+  '高三全册': ['一元二次方程', '反比例函数', '相似', '锐角三角函数', '投影', '视图'],
 };
 
 function getForbiddenKeywords(grade: string, volume: string): string[] {
@@ -400,11 +404,10 @@ export async function POST(req: NextRequest) {
     const config = SUBJECT_CONFIG[subject];
     const subjectRecord = await prisma.subject.upsert({
       where: { name: subject },
-      update: {
-        icon: config.icon,
-        colorClass: config.colorClass,
-        description: `${grade}${volume} 人教版教材内容`,
-      },
+      // Subject 是全局共享表（无 userId）：update 不能覆写展示字段——
+      // 同一学科被多册别/多用户复用时，description/icon 会随最后一次
+      // 生成随机漂移，且会覆盖管理员的定制。只在 create 时初始化。
+      update: {},
       create: {
         name: subject,
         icon: config.icon,
@@ -496,8 +499,25 @@ export async function POST(req: NextRequest) {
           // Use the LLM-supplied gradeLevel, falling back to the
           // user's grade+volume selection. KB.gradeLevel is what the
           // subjects page uses to group chapters by semester.
+          // grade 取值为 初一/初二/初三/高一…，而分组词汇表口径是
+          // "七年级上"|"八年级下"|…"高三"（schema.prisma 注释 + llm-client）。
+          // 直接拼接会产出"初一上"这类无法识别的组；"全册"不映射到单一学期。
           gradeLevel: (nodeItem.gradeLevel ||
-            `${grade}${volume === '上册' ? '上' : volume === '下册' ? '下' : '上'}`),
+            (() => {
+              // 词汇表口径（schema.prisma + llm-client）：初中"七~九年级上/下"，
+              // 高中只有"高一/高二/高三"（无上下册后缀），"全册"不映射单一学期
+              const juniorMap: Record<string, string> = {
+                初一: '七年级', 初二: '八年级', 初三: '九年级',
+              };
+              if (juniorMap[grade]) {
+                if (volume === '上册') return `${juniorMap[grade]}上`;
+                if (volume === '下册') return `${juniorMap[grade]}下`;
+                return '';
+              }
+              if (['高一', '高二', '高三'].includes(grade)) return grade;
+              return '';
+            })() ||
+            null),
         };
         const node = existingNode
           ? await prisma.knowledgeNode.update({

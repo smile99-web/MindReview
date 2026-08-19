@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getErrorMessage } from "@/lib/errors";
+import { rateLimit } from "@/lib/rate-limit";
 import { resolveTtsConfig, synthesizeSpeechAuto } from "@/lib/tts-client";
 import { resolveUserIdFromRequest } from "@/lib/user-context";
 import type { Prisma } from "@prisma/client";
@@ -8,7 +9,9 @@ import type { Prisma } from "@prisma/client";
 export async function POST(req: NextRequest) {
   try {
     // 鉴权：TTS 是付费调用；缓存改为全库共享后不再按用户过滤
-    await resolveUserIdFromRequest(req);
+    const userId = await resolveUserIdFromRequest(req);
+    // 限流：缓存命中不计费也不计数，只有真正调合成接口才计（换文本绕缓存的
+    // 脚本会被这里挡住）——每人每天 300 次新生成，正常使用绰绰有余。
     const body = await req.json();
     const { text, contentType, contentRefId, voiceType } = body;
 
@@ -45,6 +48,15 @@ export async function POST(req: NextRequest) {
         durationMs: existing.durationMs,
         cached: true,
       });
+    }
+
+    // 只有未命中缓存、真正要付费合成时才计限流
+    const rl = rateLimit(`tts:${userId}`, 300, 24 * 60 * 60 * 1000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: '今日语音生成次数已用完，请明天再来' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+      );
     }
 
     const { audioUrl, durationMs } = await synthesizeSpeechAuto({ text, voiceType });

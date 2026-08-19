@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { PDFParse } from 'pdf-parse';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { getErrorMessage } from '@/lib/errors';
@@ -69,6 +70,24 @@ export async function POST(req: NextRequest) {
     let content: string;
     let fileType: 'pdf' | 'docx' | 'txt';
 
+    // 魔数校验：仅看扩展名时，任意文件改名 .pdf 就会进入 pdf-parse，
+    // 畸形文件在 2GB 内存的 VPS 上消耗解析 CPU/内存（已知放大风险），
+    // 且解析抛错被归类成 500 干扰监控。魔数不符直接 415。
+    const startsWith = (ascii: string) =>
+      buf.length >= ascii.length && buf.subarray(0, ascii.length).toString('latin1') === ascii;
+    if (ext === '.pdf' && !startsWith('%PDF-')) {
+      return NextResponse.json(
+        { error: '文件内容不是有效的 PDF（扩展名与实际内容不符）' },
+        { status: 415 },
+      );
+    }
+    if (ext === '.docx' && !(buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04)) {
+      return NextResponse.json(
+        { error: '文件内容不是有效的 DOCX（扩展名与实际内容不符）' },
+        { status: 415 },
+      );
+    }
+
     if (ext === '.txt') {
       content = buf.toString('utf-8').trim();
       fileType = 'txt';
@@ -87,14 +106,22 @@ export async function POST(req: NextRequest) {
       }
       fileType = 'docx';
     } else {
-      // .pdf — pdf-parse is a synchronous parser; we dynamic-import
-      // because it's a CJS module and not always needed. v2.x is
-      // pure ESM (no default export) so we read the named export.
-      const pdfMod = await import('pdf-parse');
-      const pdfParse = (pdfMod as { default?: (data: Buffer) => Promise<{ text: string; numpages: number }>; })
-        .default ?? (pdfMod as unknown as (data: Buffer) => Promise<{ text: string; numpages: number }>);
-      const result = await pdfParse(buf);
-      content = (result.text || '').trim();
+      // .pdf — pdf-parse v2.x 是纯 ESM 且没有可调用的默认导出，
+      // 正确用法是 new PDFParse({data}) + getText()（已实测 v2.4.5）。
+      // 旧代码把模块对象当函数调用，所有 PDF 上传都会 500。
+      const parser = new PDFParse({ data: buf });
+      try {
+        const result = await parser.getText();
+        content = (result.text || '').trim();
+      } catch (parseErr: unknown) {
+        // 解析失败是客户端文件问题（4xx），不是服务器故障（500）
+        return NextResponse.json(
+          { error: `PDF 解析失败：${getErrorMessage(parseErr)}` },
+          { status: 422 },
+        );
+      } finally {
+        await parser.destroy().catch(() => {});
+      }
       if (!content) {
         return NextResponse.json(
           { error: 'PDF 文件解析后内容为空（可能为扫描版 PDF / 图片 PDF）' },
@@ -129,7 +156,8 @@ export async function POST(req: NextRequest) {
       id: created.id,
       fileName: created.fileName,
       fileType: created.fileType,
-      content: created.content,
+      // 不回传整本教材全文（20MB PDF 提取文本可达数 MB，纯带宽浪费；
+      // 前端只需要 id 跳转，全文由 /api/textbook/[id] 提供）
       charCount: created.content.length,
       createdAt: created.createdAt,
     });

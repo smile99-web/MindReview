@@ -4,9 +4,11 @@ import type { NextRequest } from 'next/server';
 
 const ACCESS_COOKIE = 'mindreview_access_token';
 const DEV_JWT_SECRET = 'mindreview-dev-secret-change-me';
-// 7 天：与 refresh token 一致，避免浏览器不活跃时 access token 过期导致掉线。
-// 安全上仍受 refresh_token rotation 保护（每次 refresh 替换旧 token）。
-const ACCESS_TOKEN_EXPIRE_SECONDS = 7 * 24 * 60 * 60;
+// 1 小时：access token 是自包含 JWT，签发后无法吊销，7 天窗口期过长
+// （rotation 只保护 refresh 路径，对泄露的 access token 无缩短作用）。
+// 前端有完整自动刷新链路（getValidToken 过期前 30s 自动走 refresh），
+// 缩短无体验代价。
+const ACCESS_TOKEN_EXPIRE_SECONDS = 60 * 60;
 const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 
 function getSecret(): string {

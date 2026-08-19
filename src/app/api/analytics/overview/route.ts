@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { loadProgressByNodeId } from '@/lib/user-knowledge-progress';
 import { appDateKey, startOfAppDay } from '@/lib/date-utils';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 
 export async function GET(req: NextRequest) {
   try {
@@ -259,15 +259,31 @@ export async function GET(req: NextRequest) {
     }
 
     // --- 6. Knowledge Node Growth (last 30 days, inclusive of today) ---
+    // SQL 聚合：此前在 JS 里对 allNodes 做 30 次全量 filter（O(30×N)，
+    // 节点上万后接口明显变慢）。改为两条 SQL：起始日之前的存量基数 +
+    // 30 天内按天分组的新增量，JS 只做 30 次加法。
+    const growthStart = new Date(startOfToday.getTime() - 29 * 24 * 60 * 60 * 1000);
+    const growthEnd = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
+    const [baseRows, perDayRows] = await Promise.all([
+      prisma.$queryRaw<Array<{ c: bigint | number }>>`
+        SELECT count(*)::int AS c FROM "KnowledgeNode" WHERE "createdAt" < ${growthStart}
+      `,
+      prisma.$queryRaw<Array<{ day: string; c: bigint | number }>>`
+        SELECT to_char(date_trunc('day', ("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Shanghai'), 'YYYY-MM-DD') AS day,
+               count(*)::int AS c
+        FROM "KnowledgeNode"
+        WHERE "createdAt" >= ${growthStart} AND "createdAt" < ${growthEnd}
+        GROUP BY 1
+      `,
+    ]);
+    const incByDay = new Map(perDayRows.map((r) => [r.day, Number(r.c)]));
+    let cumulative = Number(baseRows[0]?.c ?? 0);
     const nodeGrowthByDay: { date: string; count: number }[] = [];
-    for (let i = 0; i < 31; i++) {
-      const d = new Date(startOfToday.getTime() - (30 - i) * 24 * 60 * 60 * 1000);
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(startOfToday.getTime() - (29 - i) * 24 * 60 * 60 * 1000);
       const key = appDateKey(d);
-      const nextD = new Date(d.getTime() + 24 * 60 * 60 * 1000);
-      const count = allNodes.filter(
-        (n) => n.createdAt < nextD,
-      ).length;
-      nodeGrowthByDay.push({ date: key, count });
+      cumulative += incByDay.get(key) ?? 0;
+      nodeGrowthByDay.push({ date: key, count: cumulative });
     }
 
     // --- 7. Review Quality Distribution (SM-2 quality scores) ---
@@ -370,6 +386,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (error: unknown) {
     const message = getErrorMessage(error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: getErrorStatus(error) });
   }
 }

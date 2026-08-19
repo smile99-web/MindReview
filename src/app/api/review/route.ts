@@ -1,4 +1,4 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { calcCurrentForgetRisk, getQualityLabel, sm2 } from '@/lib/sm2';
@@ -83,7 +83,7 @@ function buildReviewReason(node: ReviewDueNode, taskType: string, now: Date): Re
   const riskText = `遗忘风险 ${riskPercent}%`;
 
   let label = '按计划复习';
-  if (triggers.includes('new_node')) label = '新知识需要首次回忆';
+  if (triggers.includes('new_node')) label = '新知识点：先完成首次学习（阅读讲解），再进入间隔复习';
   else if (triggers.includes('high_forget_risk')) label = '遗忘风险正在升高';
   else if (triggers.includes('low_mastery')) label = '掌握度偏低，需要练习';
   else if (triggers.includes('due_now')) label = 'SM-2 建议今天复习';
@@ -117,7 +117,10 @@ export async function GET(req: NextRequest) {
           userId,
           OR: [{ nextReviewAt: { lte: now } }, { nextReviewAt: null }],
         },
-        orderBy: { nextReviewAt: 'asc' },
+        // nulls first：Postgres ASC 默认 NULLS LAST，nextReviewAt=null 的
+        // progress 行（仅阅读卡片经 mark-step 产生，从未排期）排在末尾，
+        // 到期行超 200 时最先被 take 截掉——与"新内容优先"的设计意图相反
+        orderBy: { nextReviewAt: { sort: 'asc', nulls: 'first' } },
         take: 200,
         select: { knowledgeNodeId: true },
       }),
@@ -168,6 +171,12 @@ export async function GET(req: NextRequest) {
         }),
       }))
       .sort((a, b) => {
+        // 新节点（首次回忆）必须排最前：calcCurrentForgetRisk 对
+        // lastReviewAt=null 恒返回 0，纯按遗忘风险降序会把新节点压到
+        // 队尾被 slice 切掉——候选池注释明言新节点"应最优先首次回忆"。
+        const aNew = a.repetitions === 0 || !a.lastReviewAt ? 1 : 0;
+        const bNew = b.repetitions === 0 || !b.lastReviewAt ? 1 : 0;
+        if (aNew !== bNew) return bNew - aNew;
         if ((b.currentForgetRisk ?? 0) !== (a.currentForgetRisk ?? 0)) {
           return (b.currentForgetRisk ?? 0) - (a.currentForgetRisk ?? 0);
         }
@@ -217,9 +226,10 @@ export async function GET(req: NextRequest) {
             { isolationLevel: 'Serializable' },
           );
         } catch (error: unknown) {
-          // Serializable 冲突（P2034）：并发请求已建好任务，重新查询返回已有任务
+          // Serializable 冲突（P2034/40001）：并发请求已建好任务，重新查询返回已有任务。
+          // 与同文件 POST 及 mistakes/[id]/review 一致，两个码都要处理
           const code = (error as { code?: string } | null)?.code;
-          if (code !== 'P2034') throw error;
+          if (code !== 'P2034' && code !== '40001') throw error;
           const existingTask = await prisma.reviewTask.findFirst({
             where: { userId, knowledgeNodeId: node.id, completed: false },
           });
@@ -264,13 +274,16 @@ export async function GET(req: NextRequest) {
       total: tasks.length,
     });
   } catch (error: unknown) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: getErrorStatus(error) });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const { taskId, quality, knowledgeNodeId, durationSeconds } = body;
     const uid = await resolveUserIdFromRequest(req);
 
@@ -453,6 +466,6 @@ export async function POST(req: NextRequest) {
       log: outcome.result.log,
     });
   } catch (error: unknown) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: getErrorStatus(error) });
   }
 }

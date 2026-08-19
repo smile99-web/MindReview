@@ -23,6 +23,7 @@ export const liquidPressureScene: Scene3DDefinition = {
   camera: { position: [4, 3.4, 7.5], target: [0, 1.4, 0] },
   controls: [
     { kind: 'slider', id: 'level', label: '注水深度', min: 0.3, max: 1, step: 0.05, defaultValue: 0.8 },
+    { kind: 'slider', id: 'rho', label: '液体密度 ρ', min: 600, max: 1600, step: 50, defaultValue: 1000, unit: 'kg/m³' },
     {
       kind: 'select',
       id: 'view',
@@ -61,6 +62,7 @@ export const liquidPressureScene: Scene3DDefinition = {
     let step = 0;
     let view: ViewMode = 'holes';
     let level = 0.8;
+    let rho = 1000; // 液体密度 kg/m³（水 = 1000）
     let sloshT = 99; // 连通器晃动计时
 
     // ---------------- 视图一：侧孔喷水 ----------------
@@ -220,10 +222,25 @@ export const liquidPressureScene: Scene3DDefinition = {
           sloshT = 0; // 连通器重新晃动
           refreshInfo();
         }
+        if (id === 'rho') {
+          rho = Number(value);
+          refreshInfo();
+        }
         if (id === 'view') {
           view = String(value) as ViewMode;
           applyView();
         }
+      },
+      getReadouts() {
+        // level 即水深 h（米），见 refreshInfo；喷射动画按场景比例 h→2.2h 映射
+        const waterTop = TANK_BOTTOM + level * 2.2;
+        const depth = Math.max(waterTop - HOLE_Y[0], 0); // 最下孔（HOLE_Y 最低）的淹没深度
+        const v0 = 0.55 * Math.sqrt(2 * 9.8 * depth * (rho / 1000));
+        return [
+          { label: '水深 h', value: `${level.toFixed(2)} m` },
+          { label: '底部压强 p=ρgh', value: `${(rho * 10 * level).toFixed(0)} Pa` },
+          { label: '最下孔射速', value: `${v0.toFixed(2)} m/s` },
+        ];
       },
       update(dt, elapsed) {
         if (view === 'holes') {
@@ -234,7 +251,7 @@ export const liquidPressureScene: Scene3DDefinition = {
           HOLE_Y.forEach((hy, hi) => {
             const depth = waterTop - hy;
             const active = depth > 0.03;
-            const v0 = 0.55 * Math.sqrt(2 * 9.8 * Math.max(depth, 0));
+            const v0 = 0.55 * Math.sqrt(2 * 9.8 * Math.max(depth, 0) * (rho / 1000)); // p = ρgh
             const gEff = 3.2;
             const life = Math.sqrt((2 * hy) / gEff) + 0.12;
             for (let i = 0; i < DROP_N; i++) {

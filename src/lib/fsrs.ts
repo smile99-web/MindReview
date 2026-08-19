@@ -61,7 +61,8 @@ const RATING_COLOR: Record<Rating, string> = {
  * new state + a log entry the caller can append to Mistake.history.
  *
  * Parameters follow the simplified FSRS algorithm (Anki-derived):
- *   - again (0): reset stability to ~1 day, difficulty += 0.2 (capped 1-10),
+ *   - again (0): stability decays to 40%（下限 0.5 天；是衰减不是重置，
+ *     与早期文档"reset to ~1 day"不同——成熟卡同样按比例衰减）, difficulty += 0.2 (capped 1-10),
  *     lapses += 1, reps += 1（reps 语义 = 总复习次数，含 lapse；
  *     毕业判定另有 stability >= 5 门槛，Again 后 stability 被压低，不会误毕业）,
  *     state → 'relearning' if was 'review' else 'learning'.

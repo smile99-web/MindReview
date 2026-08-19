@@ -28,8 +28,18 @@ export async function requireAdmin(req: NextRequest): Promise<NextResponse | nul
     .map((name) => name.trim())
     .filter(Boolean);
 
-  // 未配置管理员名单时保持现状放行（生产环境务必配置 ADMIN_USERNAMES）
-  if (adminUsernames.length === 0) return null;
+  // 生产环境未配置管理员名单时 fail-closed：与 server-auth 对 JWT_SECRET_KEY
+  // 的处理一致。否则任意登录用户都能改写全局 AI 配置（含 baseUrl 劫持 key 外泄）。
+  // 开发环境仍放行，避免破坏本地单人调试。
+  if (adminUsernames.length === 0) {
+    if (process.env.NODE_ENV === "production") {
+      return NextResponse.json(
+        { error: "服务未配置管理员名单（ADMIN_USERNAMES），拒绝执行管理操作" },
+        { status: 403 },
+      );
+    }
+    return null;
+  }
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user || !adminUsernames.includes(user.username)) {

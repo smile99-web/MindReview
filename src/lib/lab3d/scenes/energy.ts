@@ -223,6 +223,16 @@ export const energyScene: Scene3DDefinition = {
         }
         if (id === 'release') release();
       },
+      getReadouts() {
+        // 场景高度单位按米处理：释放高度 = hFrac × 轨道左端高度 trackY(X0)
+        const hMeters = hFrac * trackY(X0);
+        return [
+          { label: '释放高度', value: `${hMeters.toFixed(2)} m` },
+          { label: '重力势能', value: `${(9.8 * hMeters).toFixed(1)} J` }, // Ep = mgh，m=1kg
+          { label: '最低点速度', value: `${Math.sqrt(2 * 9.8 * hMeters).toFixed(1)} m/s` }, // v = √(2gh)
+          { label: '摩擦状态', value: friction ? '开' : '关' },
+        ];
+      },
       update(dt) {
         if (running) {
           const { x } = posAtS(s);

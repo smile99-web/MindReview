@@ -32,7 +32,12 @@ export default function LoginPage() {
 
     try {
       await login(username.trim(), password);
-      router.push("/dashboard");
+      // redirectToLogin 写入的 ?next=：登录成功后回到原目标页。
+      // 仅接受站内路径（'/' 开头且非 '//'），防开放重定向。
+      // 事件处理里读 window.location 无 hydration 问题，无需 useSearchParams/Suspense。
+      const next = new URLSearchParams(window.location.search).get('next');
+      const target = next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
+      router.push(target);
     } catch (err: unknown) {
       setError(getErrorMessage(err, "登录失败"));
     } finally {

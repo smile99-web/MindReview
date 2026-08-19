@@ -66,23 +66,14 @@ ${kpSummary ? `拆解出的关键知识点：\n${kpSummary}\n` : ''}
 请围绕上述原题考察的相同知识点，生成 ${count} 道考察深度相似的练习题。题目难度与原题一致或略高，题型以"原题考察的核心概念"为主，避免直接重复原题。`;
 
     const subject = exam.subjectName || '通用';
-    // We don't bind to a specific knowledgeNodeId here (the practice
-    // questions are stored on the exam, not as Question rows). The
-    // generateQuestions LLM client handles the (subject, topic, icap,
-    // count) shape, so we ask for 4-option multiple choice.
-    // generateQuestions signature: (knowledgeTitle, knowledgeSummary,
-    // subject, questionType, icapLevel, count). Previous caller was
-    // passing the subject name as the title and an 80-char OCR slice
-    // as the summary — the LLM had no anchor to the actual question
-    // text and produced generic questions. Use the OCR text as the
-    // knowledge title (the question itself is what the student is
-    // studying) and a longer summary slice.
-    const ocrSummary = exam.ocrText.length > 80
-      ? exam.ocrText.slice(0, 400) + '...'
-      : exam.ocrText;
+    // conditioning 此前是死代码：拼好了"原题 + 拆解知识点"的条件串却从未
+    // 传给 LLM，只传了 80/400 字符的 OCR 切片（doc/practice:71-83 是正确
+    // 做法）。generateQuestions(title, summary, ...) 的用户提示为
+    // `知识点：${title}\n解释：${summary}`，把 conditioning 作为 summary
+    // 传入，LLM 才能锚定原题与知识点出"类似题"。
     const result: GenerateQuestionsResult = await generateQuestions(
       exam.ocrText.slice(0, 80) || '拍照题目',
-      ocrSummary || '拍照题目',
+      conditioning,
       subject,
       'multiple_choice',
       'Active',
@@ -100,6 +91,16 @@ ${kpSummary ? `拆解出的关键知识点：\n${kpSummary}\n` : ''}
       difficulty: q.difficulty || 3,
       cognitiveLoad: q.cognitiveLoad || 3,
     }));
+
+    // 空结果不落库：LLM 归一化后合法返回空数组时，静默把已存的
+    // practiceQuestions 覆盖为 []（用户已生成的练习被清空还返回 200）。
+    // doc/practice:119-126 已修过同款问题，此处是漏修的副本。
+    if (questions.length === 0) {
+      return NextResponse.json(
+        { error: 'AI 出题失败，未生成有效题目，请重试' },
+        { status: 502 },
+      );
+    }
 
     await prisma.examUpload.update({
       where: { id: examId },

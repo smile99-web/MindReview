@@ -2,17 +2,42 @@ import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { decomposeKnowledge } from '@/lib/llm-client';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { rateLimit } from '@/lib/rate-limit';
 import type { KnowledgeNode } from '@prisma/client';
 
 // POST /api/knowledge/decompose — 知识点拆解
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { subject, grade, chapter: chapterTitle, content } = body;
+    // 鉴权 + 限流：本路由调付费 LLM 且向全站共享的 Subject/Chapter 写入，
+    // 此前仅靠 proxy 单层兜底（项目自身约定见 api/image 注释）
+    const userId = await resolveUserIdFromRequest(req);
+    const rl = rateLimit(`llm:${userId}`, 60, 60 * 60 * 1000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: 'AI 调用太频繁了，请稍后再试' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+      );
+    }
 
-    if (!subject || !content) {
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
+    const { grade, chapter: chapterTitle, content } = body as {
+      grade?: unknown; chapter?: unknown; content?: unknown;
+    };
+    const subject = typeof (body as { subject?: unknown }).subject === 'string'
+      ? ((body as { subject: string }).subject.trim())
+      : '';
+
+    // typeof 校验：非字符串真值（数字/对象）直接透传 Prisma 会 500；
+    // grade 缺省时 prompt 里出现 "年级：undefined"
+    if (!subject || typeof content !== 'string' || !content.trim()) {
       return NextResponse.json({ error: '缺少必填字段' }, { status: 400 });
     }
+    const gradeStr = typeof grade === 'string' && grade.trim() ? grade.trim() : '通用';
+    const chapterStr = typeof chapterTitle === 'string' ? chapterTitle.trim() : '';
 
     // 1. 查找或创建学科（upsert：并发拆解同名新学科时 findUnique→create
     // 会撞 unique 约束，后者直接 500）
@@ -28,13 +53,13 @@ export async function POST(req: NextRequest) {
       prisma.$transaction(
         async (tx) => {
           const found = await tx.chapter.findFirst({
-            where: { subjectId: subjectRecord.id, title: chapterTitle || '未分类', parentId: null },
+            where: { subjectId: subjectRecord.id, title: chapterStr || '未分类', parentId: null },
           });
           if (found) return found;
           return tx.chapter.create({
             data: {
               subjectId: subjectRecord.id,
-              title: chapterTitle || '未分类',
+              title: chapterStr || '未分类',
             },
           });
         },
@@ -50,7 +75,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. AI拆解知识点
-    const result = await decomposeKnowledge(subject, grade, chapterTitle, content);
+    const result = await decomposeKnowledge(subject, gradeStr, chapterStr, content);
 
     if (!result.nodes || !Array.isArray(result.nodes)) {
       return NextResponse.json({ error: 'AI拆解失败，返回格式不正确' }, { status: 500 });
@@ -136,7 +161,7 @@ export async function POST(req: NextRequest) {
         data: {
           generatorType: 'llm',
           model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-          prompt: `拆解${subject}-${chapterTitle}`,
+          prompt: `拆解${subject}-${chapterStr}`,
           status: 'success',
         },
       });

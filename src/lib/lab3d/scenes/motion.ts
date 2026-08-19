@@ -39,6 +39,7 @@ export const motionScene: Scene3DDefinition = {
       ],
       defaultValue: 'ground',
     },
+    { kind: 'slider', id: 'v', label: '速度 v', min: 1, max: 10, step: 0.5, defaultValue: 2.4, unit: 'm/s' },
     { kind: 'button', id: 'go', label: '🚗 启动 / 停车' },
   ],
   steps: [
@@ -67,6 +68,8 @@ export const motionScene: Scene3DDefinition = {
     let ref: RefKind = 'ground';
     let running = false;
     let carX = 0;
+    let carSpeed = CAR_SPEED;
+    let driveT = 0;
     let blend = 0;
     let step = 0;
 
@@ -200,12 +203,23 @@ export const motionScene: Scene3DDefinition = {
       },
       setParam(id, value) {
         if (id === 'ref') ref = String(value) as RefKind;
+        if (id === 'v') carSpeed = Number(value);
         if (id === 'go') running = !running;
         applyRings();
         refreshVerdict();
       },
+      getReadouts() {
+        return [
+          { label: '速度 v', value: `${carSpeed.toFixed(1)} m/s` },
+          { label: '运动时间 t', value: `${driveT.toFixed(1)} s` },
+          { label: '路程 s = v·t', value: `${carX.toFixed(1)} m` },
+        ];
+      },
       update(dt, elapsed) {
-        if (running) carX += CAR_SPEED * dt;
+        if (running) {
+          carX += carSpeed * dt;
+          driveT += dt;
+        }
         const offset = carX % ROAD_LEN;
         blend = damp(blend, ref === 'car' ? 1 : 0, 3.2, dt);
         // 地面参照：红车沿路面循环前进；红车参照：红车钉在原地，世界向后滑

@@ -1,7 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/auth';
-import { useCallback, useEffect, useState, useMemo, type ComponentProps } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo, type ComponentProps } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/Card';
@@ -59,6 +59,11 @@ function ReviewContent() {
 
   const { densityLevel, infoChunkSize } = useDensity();
 
+  // 复习请求序号：快速切换模式时，慢的旧响应不得覆盖新模式的结果
+  const loadSeqRef = useRef(0);
+  // 用户手动点过模式按钮后，晚到的 profile 建议不得再覆盖用户选择
+  const modeTouchedRef = useRef(false);
+
   // Paginate tasks in non-compact modes.
   const [visibleCount, setVisibleCount] = useState(infoChunkSize);
 
@@ -70,16 +75,19 @@ function ReviewContent() {
   const hasMoreTasks = visibleTasks.length < tasks.length;
 
   const loadTasks = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     try {
       const res = await authFetch(`/api/review?mode=${mode}`);
       const data = await res.json();
+      if (seq !== loadSeqRef.current) return; // 已有更新的请求，丢弃过期响应
       setTasks(data.tasks || []);
       setCompletedCount((data.tasks || []).filter((task: ReviewTask) => task.completed).length);
     } catch (err) {
+      if (seq !== loadSeqRef.current) return;
       console.error(err);
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }, [mode]);
 
@@ -95,6 +103,9 @@ function ReviewContent() {
   useEffect(() => {
     async function applyProfile() {
       if (profileApplied) return;
+      // userId 未就绪（初始 ''）时不发必败请求：若后端容错返回 200，
+      // setProfileApplied(true) 会让真实 userId 到达后永不重拉
+      if (!userId) return;
       try {
         const res = await authFetch(`/api/learner/profile?userId=${encodeURIComponent(userId)}`);
         if (!res.ok) return;
@@ -117,7 +128,8 @@ function ReviewContent() {
         if (recs) {
           const suggested = modeMap[recs.suggestedMode];
           if (suggested) {
-            setMode(suggested);
+            // 用户已手动选过模式时，晚到的 profile 不得覆盖其选择
+            if (!modeTouchedRef.current) setMode(suggested);
             setRecommendedMode(suggested === 'challenge' ? '挑战模式' : suggested === 'standard' ? '标准模式' : '基础模式');
           }
         }
@@ -253,7 +265,7 @@ function ReviewContent() {
         {(Object.entries(REVIEW_MODE_CONFIG) as [ReviewMode, (typeof REVIEW_MODE_CONFIG)[ReviewMode]][]).map(([key, config]) => (
           <button
             key={key}
-            onClick={() => setMode(key)}
+            onClick={() => { modeTouchedRef.current = true; setMode(key); }}
             className={`relative px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
               mode === key
                 ? 'bg-white text-indigo-600 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.02)] border border-indigo-200/60'

@@ -44,11 +44,14 @@ function MistakePie({ patterns }: { patterns: LearnerProfile['mistakePatterns'] 
     );
   }
 
+  // color 必须是真实 CSS 色值而非 Tailwind 类名：conic-gradient 的色标
+  // 写 'bg-rose-400' 会被浏览器判为非法声明整条丢弃 → 饼图渲染为空白圆
+  // （图例圆点用 className 是对的，所以呈现"图例有色、饼图空白"）
   const segments = [
-    { label: '概念', value: patterns.conceptual, color: 'bg-rose-400' },
-    { label: '计算', value: patterns.calculation, color: 'bg-amber-400' },
-    { label: '粗心', value: patterns.careless, color: 'bg-sky-400' },
-    { label: '应用', value: patterns.application, color: 'bg-purple-400' },
+    { label: '概念', value: patterns.conceptual, color: '#fb7185' },
+    { label: '计算', value: patterns.calculation, color: '#fbbf24' },
+    { label: '粗心', value: patterns.careless, color: '#38bdf8' },
+    { label: '应用', value: patterns.application, color: '#c084fc' },
   ].filter((s) => s.value > 0);
 
   let cumulative = 0;
@@ -72,7 +75,7 @@ function MistakePie({ patterns }: { patterns: LearnerProfile['mistakePatterns'] 
       <div className="flex flex-col gap-1 text-xs">
         {segments.map((seg) => (
           <div key={seg.label} className="flex items-center gap-1.5">
-            <span className={`w-2.5 h-2.5 rounded-full ${seg.color}`} />
+            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: seg.color }} />
             <span className="text-slate-500">{seg.label}</span>
             <span className="text-slate-700 font-medium tabular-nums">{seg.value}</span>
           </div>
@@ -162,6 +165,11 @@ export default function LearnerProfileCard({ userId, compact = false }: LearnerP
   const [error, setError] = useState<string | null>(null);
 
   const loadProfile = useCallback(async () => {
+    // userId 为空时不发必败请求（空 userId 会让错误卡一闪而过）
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {

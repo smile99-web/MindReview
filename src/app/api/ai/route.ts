@@ -1,6 +1,8 @@
 import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { rateLimit } from '@/lib/rate-limit';
+import { requireAdmin } from '@/lib/require-admin';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import {
   analyzeMistake,
@@ -117,6 +119,11 @@ export async function GET(req: NextRequest) {
     const action = searchParams.get('action');
 
     if (action === 'list-logs') {
+      // 管理员专用：AiGenerationLog 的 prompt/response 含全部用户的辅导与聊天
+      // 原文（tutor-persistence/chat 都会写入），必须挡住普通登录用户。
+      const adminDenied = await requireAdmin(req);
+      if (adminDenied) return adminDenied;
+
       const typesParam = searchParams.get('types');
       // parseInt 对非数字输入得 NaN，NaN 的 skip/take 会让 Prisma 忽略分页（全表扫描）
       const rawPage = parseInt(searchParams.get('page') || '1', 10);
@@ -165,11 +172,22 @@ export async function POST(req: NextRequest) {
     // Require auth — every action below issues a deepseek LLM call ($$$).
     // Without this guard, a caller that slipped past the proxy could
     // burn the project owner's API quota or trigger image generation.
-    // Note: GET (list-logs) is an admin-facing viewer and remains open to
-    // any authenticated user; auth is still enforced by the proxy.
-    await resolveUserIdFromRequest(req);
+    // GET list-logs 含全站用户聊天原文，已在 GET 内单独 requireAdmin。
+    const userId = await resolveUserIdFromRequest(req);
 
-    const body = await req.json();
+    // 限流：本路由所有 action 都会调付费 LLM，每人每小时 60 次
+    const rl = rateLimit(`llm:${userId}`, 60, 60 * 60 * 1000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: 'AI 调用太频繁了，请稍后再试' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+      );
+    }
+
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const { action } = body;
 
     switch (action) {

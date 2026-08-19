@@ -666,9 +666,35 @@ export async function loadScene(id: string): Promise<Scene3DDefinition | null> {
 
 /**
  * 按知识点内容匹配场景。
- * title 命中关键词 +3 分/个；keywords 命中 +2 分/个；学科一致 +1。
+ * 标题命中关键词 +3 分/个；keywords 命中 +2 分/个；学科一致 +1。
  * 返回得分 ≥3 的场景，按分数降序，最多 3 个。
+ *
+ * 精度修正（防止"长度与时间的测量"误配电阻场景这类错配）：
+ * - 单字关键词（"力"、"族"）不参与匹配——会命中"巧克力"、"民族"；
+ * - 跨学科通用词（长度/时间/材料/温度/运动/动力/阻力…）只值 0.5 分，
+ *   它们单独凑不够阈值，必须与具体概念词共同命中才出线。
+ * 评分规则经全库 786 个节点回归验证：剔除的几乎全是跨学科误配，
+ * 各场景对其主知识点的 canonical 匹配全部保留。
  */
+const GENERIC_KEYWORDS = new Set([
+  // 跨学科通用概念词
+  '长度', '时间', '材料', '温度', '速度', '质量', '体积', '面积', '压力',
+  '热量', '能量', '运动', '机械', '实验', '测量', '现象', '状态', '作用',
+  '变化', '过程', '方法', '分类', '应用', '性质', '计算', '单位', '因素', '条件',
+  '原理', '规律', '特点', '动力', '阻力', '拉力', '推力', '引力', '周期',
+  // 第二轮全库审计补充：驱动误配的通用词
+  '频率', // 数学"用频率估计概率" → 声现象
+  '空气', // 生物"监测空气污染的植物" → 空气成分
+  '元素', // 数学"圆的基本元素" → 元素周期表
+  '系数', // 数学"待定系数法" → 化学方程式配平
+  '函数', // 一切函数概念节点 → 函数图象变换（应只匹配具体函数）
+  '对称', // 对称/顶点/平移 把几何节点错拉到函数图象变换
+  '顶点',
+  '平移',
+  // 物理单位词：任何含单位的节点被错拉到 密度/功和功率 场景
+  '千克', '焦耳', '瓦特', '牛顿', '安培', '伏特', '欧姆', '帕斯卡', '摄氏度',
+]);
+
 export function matchScenes(input: {
   title?: string | null;
   keywords?: string[] | string | null;
@@ -684,9 +710,11 @@ export function matchScenes(input: {
   const scored = SCENES.map((scene) => {
     let score = 0;
     for (const kw of scene.keywords) {
+      if (kw.trim().length < 2) continue; // 单字关键词不参与匹配
       const k = kw.toLowerCase();
-      if (title.includes(k)) score += 3;
-      else if (kwText.includes(k)) score += 2;
+      const generic = GENERIC_KEYWORDS.has(k);
+      if (title.includes(k)) score += generic ? 0.5 : 3;
+      else if (kwText.includes(k)) score += generic ? 0.5 : 2;
     }
     if (input.subjectName && scene.subject === input.subjectName) score += 1;
     return { scene, score };

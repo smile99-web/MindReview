@@ -3,10 +3,17 @@
 // ---------------------------------------------------------------------------
 import * as THREE from 'three';
 import type { Scene3DDefinition, SceneContext, SceneHandle } from '../types';
-import { addStageBasics, makeLabel, std } from '../three-utils';
+import { addStageBasics, disposeObject, makeLabel, std } from '../three-utils';
 
 const G = 9.8;
 const WORLD = 0.45; // 世界缩放：1m → 0.45 单位
+
+/** 不同星球的重力加速度 */
+const PLANET_G: Record<string, number> = {
+  earth: 9.8,
+  moon: 1.6,
+  jupiter: 24.8,
+};
 
 export const projectileScene: Scene3DDefinition = {
   id: 'phys-projectile',
@@ -19,6 +26,17 @@ export const projectileScene: Scene3DDefinition = {
   controls: [
     { kind: 'slider', id: 'angle', label: '发射角', min: 15, max: 75, step: 5, defaultValue: 45, unit: '°' },
     { kind: 'slider', id: 'speed', label: '初速度', min: 4, max: 12, step: 0.5, defaultValue: 8, unit: 'm/s' },
+    {
+      kind: 'select',
+      id: 'planet',
+      label: '星球',
+      options: [
+        { value: 'earth', label: '🌍 地球 g=9.8' },
+        { value: 'moon', label: '🌙 月球 g=1.6' },
+        { value: 'jupiter', label: '🪐 木星 g=24.8' },
+      ],
+      defaultValue: 'earth',
+    },
     { kind: 'button', id: 'fire', label: '🚀 发射' },
   ],
   steps: [
@@ -44,6 +62,7 @@ export const projectileScene: Scene3DDefinition = {
     let step = 0;
     let angleDeg = 45;
     let speed = 8;
+    let g = G;
     let flying = false;
     let t = 0;
 
@@ -111,9 +130,9 @@ export const projectileScene: Scene3DDefinition = {
     );
     const posAt = (tt: number) => {
       const v = v0();
-      return new THREE.Vector3(v.x * tt * WORLD, (v.y * tt - 0.5 * G * tt * tt) * WORLD + 0.25, 0);
+      return new THREE.Vector3(v.x * tt * WORLD, (v.y * tt - 0.5 * g * tt * tt) * WORLD + 0.25, 0);
     };
-    const flightTime = () => (2 * v0().y) / G;
+    const flightTime = () => (2 * v0().y) / g;
 
     const rebuildTrajectory = () => {
       const T = flightTime();
@@ -157,11 +176,23 @@ export const projectileScene: Scene3DDefinition = {
       setParam(id, value) {
         if (id === 'angle') angleDeg = Number(value);
         if (id === 'speed') speed = Number(value);
+        if (id === 'planet') g = PLANET_G[String(value)] ?? G;
         if (id === 'fire') {
           flying = true;
           t = 0;
         }
         if (id !== 'fire') rebuildTrajectory();
+      },
+      getReadouts() {
+        const theta = THREE.MathUtils.degToRad(angleDeg);
+        const range = (speed * speed * Math.sin(2 * theta)) / g; // R = v²·sin(2θ)/g
+        const height = (speed * Math.sin(theta)) ** 2 / (2 * g); // H = (v·sinθ)²/(2g)
+        const time = (2 * speed * Math.sin(theta)) / g; // t = 2·v·sinθ/g
+        return [
+          { label: '预计射程', value: `${range.toFixed(1)} m` },
+          { label: '最大高度', value: `${height.toFixed(1)} m` },
+          { label: '飞行时间', value: `${time.toFixed(1)} s` },
+        ];
       },
       update(dt) {
         if (flying) {
@@ -186,7 +217,7 @@ export const projectileScene: Scene3DDefinition = {
         }
         // 速度分量箭头贴着小球
         const v = v0();
-        const vy = flying ? v.y - G * t : v.y;
+        const vy = flying ? v.y - g * t : v.y;
         const vxLen = v.x * 0.12;
         const vyLen = Math.abs(vy) * 0.12;
         const show = step >= 1 || flying;
@@ -205,6 +236,7 @@ export const projectileScene: Scene3DDefinition = {
         ctx.scene.remove(base, barrel, barrelLabel, ball, traj, flown, vxArrow, vyArrow, vxLabel, vyLabel, infoLabel);
         trajGeo.dispose();
         flownGeo.dispose();
+        [base, barrel, barrelLabel, ball, traj, flown, vxArrow, vyArrow, vxLabel, vyLabel, infoLabel].forEach((o) => disposeObject(o));
       },
     };
   },

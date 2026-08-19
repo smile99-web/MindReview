@@ -180,6 +180,41 @@ export const lensScene: Scene3DDefinition = {
 
     const V = (x: number, y: number, z = 0) => new THREE.Vector3(x, y, z);
 
+    interface ImageCase {
+      kind: 'parallel' | 'real' | 'virtual';
+      /** 像的性质（含应用举例） */
+      nature: string;
+      /** 性质牌完整文案 */
+      propText: string;
+      /** |像距|（f 单位）；不成像时为 0 */
+      v: number;
+      /** 放大率 |v/u| */
+      m: number;
+    }
+
+    /** 透镜公式 1/u + 1/v = 1/f（f=1）的分类与数值：渲染与读数共用 */
+    const analyze = (uu: number): ImageCase => {
+      if (Math.abs(uu - 1) < 0.06) {
+        return { kind: 'parallel', nature: '不成像', propText: 'u = f：不成像（折射光平行射出）', v: 0, m: 0 };
+      }
+      if (uu > 1) {
+        // 实像：v = u·f/(u−f)，f = 1
+        const v = uu / (uu - 1);
+        const prefix = uu > 2.06 ? 'u > 2f' : Math.abs(uu - 2) <= 0.06 ? 'u = 2f' : 'f < u < 2f';
+        const nature =
+          uu > 2.06
+            ? '倒立缩小的实像（照相机）'
+            : Math.abs(uu - 2) <= 0.06
+              ? '倒立等大的实像'
+              : '倒立放大的实像（投影仪）';
+        return { kind: 'real', nature, propText: `${prefix}：${nature}`, v, m: v / uu };
+      }
+      // u < f：正立放大的虚像
+      const vAbs = uu / (1 - uu);
+      const nature = '正立放大的虚像（放大镜）';
+      return { kind: 'virtual', nature, propText: `u < f：${nature}`, v: vAbs, m: vAbs / uu };
+    };
+
     const rebuild = () => {
       const candleX = -u * FW;
       candle.position.set(candleX, 0, 0);
@@ -189,9 +224,9 @@ export const lensScene: Scene3DDefinition = {
       dash1.visible = false;
       dash2.visible = false;
 
-      let propText: string;
+      const res = analyze(u);
       let numText: string;
-      if (Math.abs(u - 1) < 0.06) {
+      if (res.kind === 'parallel') {
         // u = f：折射光平行，不成像
         r1a.set(top, V(0, H_OBJ));
         const d1 = V(FW, -H_OBJ).normalize(); // 经透镜后穿焦点方向
@@ -202,11 +237,9 @@ export const lensScene: Scene3DDefinition = {
         r3b.group.visible = false;
         imgArrow.group.visible = false;
         imgLabel.visible = false;
-        propText = 'u = f：不成像（折射光平行射出）';
         numText = `u = ${u.toFixed(1)}f`;
-      } else if (u > 1) {
-        // 实像：v = u·f/(u−f)，f = 1
-        const v = u / (u - 1);
+      } else if (res.kind === 'real') {
+        const v = res.v;
         let imgX = v * FW;
         let imgY = (-H_OBJ * v) / u;
         if (imgX > X_CLAMP) {
@@ -230,16 +263,10 @@ export const lensScene: Scene3DDefinition = {
         imgMat.opacity = 1;
         imgArrow.set(V(imgX, 0, 0.22), V(imgX, imgY, 0.22));
         imgLabel.position.set(imgX, imgY - 0.45, 0);
-        propText =
-          u > 2.06
-            ? 'u > 2f：倒立缩小的实像（照相机）'
-            : Math.abs(u - 2) <= 0.06
-              ? 'u = 2f：倒立等大的实像'
-              : 'f < u < 2f：倒立放大的实像（投影仪）';
         numText = `u = ${u.toFixed(1)}f    v = ${v.toFixed(1)}f    像高 = ${(v / u).toFixed(1)} × 物高`;
       } else {
         // u < f：正立放大的虚像（反向延长线会聚）
-        const vAbs = u / (1 - u);
+        const vAbs = res.v;
         let imgX = -vAbs * FW;
         let imgY = H_OBJ / (1 - u);
         if (imgX < -X_CLAMP) {
@@ -261,10 +288,9 @@ export const lensScene: Scene3DDefinition = {
         imgMat.opacity = 0.45; // 虚像半透明
         imgArrow.set(V(imgX, 0, 0.22), V(imgX, imgY, 0.22));
         imgLabel.position.set(imgX, imgY + 0.5, 0);
-        propText = 'u < f：正立放大的虚像（放大镜）';
         numText = `u = ${u.toFixed(1)}f    虚像与物同侧，放大 ${(vAbs / u).toFixed(1)} 倍`;
       }
-      setText(propLabel, propText, PROP_OPTS);
+      setText(propLabel, res.propText, PROP_OPTS);
       setText(numLabel, numText, NUM_OPTS);
     };
     rebuild();
@@ -283,6 +309,24 @@ export const lensScene: Scene3DDefinition = {
           u = Number(value);
           rebuild();
         }
+      },
+      getReadouts() {
+        const res = analyze(u);
+        if (res.kind === 'parallel') return [{ label: '状态', value: '不成像（u=f）' }];
+        if (res.kind === 'real') {
+          return [
+            { label: '物距 u', value: `${u.toFixed(1)} f` },
+            { label: '像距 v', value: `${res.v.toFixed(2)} f` },
+            { label: '放大率 m', value: `${res.m.toFixed(2)}×` },
+            { label: '像的性质', value: res.nature },
+          ];
+        }
+        return [
+          { label: '物距 u', value: `${u.toFixed(1)} f` },
+          { label: '像距', value: '虚像' },
+          { label: '放大率 m', value: `${res.m.toFixed(2)}×` },
+          { label: '像的性质', value: res.nature },
+        ];
       },
       update(dt, elapsed) {
         // 烛焰摇曳

@@ -1,5 +1,5 @@
 import { llmCall } from '@/lib/llm-client';
-import { sanitizeJsonString } from '@/lib/utils';
+import { parseAiJson } from '@/lib/ai-service';
 
 // ========== TYPES ==========
 
@@ -75,7 +75,9 @@ function asStringArray(value: unknown): string[] {
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> {
-  const parsed = JSON.parse(sanitizeJsonString(raw)) as unknown;
+  // 与 llm-client 统一走 parseAiJson：截断/非法 JSON 抛带分类的
+  // AiServiceError（parse），不再是裸 SyntaxError
+  const parsed = parseAiJson<unknown>(raw, 'ai-tutor');
   return isRecord(parsed) ? parsed : {};
 }
 

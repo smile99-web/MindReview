@@ -40,7 +40,10 @@ export async function POST(req: NextRequest) {
   try {
     await resolveUserIdFromRequest(req);
 
-    const body = (await req.json()) as IcapRequestBody;
+    const body = (await req.json().catch(() => null)) as IcapRequestBody | null;
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const { action, knowledgeNodeId } = body;
 
     if (!action) {
@@ -75,7 +78,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'validateExplanation') {
-      if (!body.response?.trim()) {
+      // response 必须显式判字符串：number/object 真值调 .trim 会 TypeError
+      if (typeof body.response !== 'string' || !body.response.trim()) {
         return NextResponse.json({ error: '缺少 response' }, { status: 400 });
       }
 
@@ -89,7 +93,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'detectCognitiveGaps') {
-      if (!body.response?.trim()) {
+      if (typeof body.response !== 'string' || !body.response.trim()) {
         return NextResponse.json({ error: '缺少 response' }, { status: 400 });
       }
 

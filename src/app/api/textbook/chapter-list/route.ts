@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { getErrorMessage } from '@/lib/errors';
 import { llmCallWithLog } from '@/lib/llm-client';
+import { parseAiJson } from '@/lib/ai-service';
 import { prisma } from '@/lib/prisma';
 import { SUBJECT_CONFIG } from '@/types';
 import type { SubjectName } from '@/types';
@@ -97,14 +98,16 @@ ${forbiddenHint}
       throw new Error('AI 返回内容为空 — 请检查 API Key 和网络');
     }
 
+    // 统一走 parseAiJson：LaTeX 反斜杠非法转义由 sanitizeJsonString 修复，
+    // 裸 JSON.parse 的二次提取分支此前会把 V8 原始错误直接冒泡成 500
     let parsed: { candidates?: { title?: string; overview?: string }[]; editionNote?: string; confidence?: string };
     try {
-      parsed = JSON.parse(raw);
+      parsed = parseAiJson<typeof parsed>(raw, 'textbook_chapter_list');
     } catch {
-      // 容错：提取首段 {...} 块
-      const m = raw.match(/\{[\s\S]*\}/);
-      if (!m) throw new Error('AI 返回非 JSON 格式');
-      parsed = JSON.parse(m[0]);
+      throw new Error('AI 返回的内容不是有效 JSON，请稍后重试');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('AI 返回的内容不是有效 JSON，请稍后重试');
     }
 
     const raw2 = parsed.candidates || [];

@@ -28,6 +28,10 @@ const PUBLIC_API_PREFIXES = [
   "/api/auth/register",
   "/api/auth/refresh",
   "/api/health",
+  // 错误上报探针：白屏/掉登录时也要能收到上报（接口自身有 IP 限流）
+  "/api/client-error",
+  // 家长周报分享（GET 公开只读；POST 创建在路由内有鉴权）
+  "/api/share",
 ];
 const ACCESS_COOKIE = "mindreview_access_token";
 const DEV_JWT_SECRET = "mindreview-dev-secret-change-me";

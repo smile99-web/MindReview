@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { decomposeKnowledge, llmCall } from '@/lib/llm-client';
 import type { DecomposeKnowledgeResult } from '@/lib/llm-client';
 
@@ -19,7 +19,10 @@ import type { DecomposeKnowledgeResult } from '@/lib/llm-client';
 export async function POST(req: NextRequest) {
   try {
     const userId = await resolveUserIdFromRequest(req);
-    const body = (await req.json()) as { docId?: unknown; subject?: unknown };
+    const body = (await req.json().catch(() => null)) as { docId?: unknown; subject?: unknown } | null;
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const docId = typeof body.docId === 'string' ? body.docId.trim() : '';
     if (!docId) {
       return NextResponse.json({ error: 'docId is required' }, { status: 400 });
@@ -96,7 +99,7 @@ export async function POST(req: NextRequest) {
     console.error('[doc/analyze] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

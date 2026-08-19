@@ -1,6 +1,7 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { Prisma } from '@prisma/client';
 
 // GET /api/subjects — 获取学科列表
 export async function GET() {
@@ -52,14 +53,25 @@ export async function POST(req: NextRequest) {
 
     // 字段白名单：直接传 body 会让多余字段触发 Prisma 校验错误（500），
     // 也可能写入调用方本不该控制的列
-    const subject = await prisma.subject.create({
-      data: {
-        name: body.name.trim(),
-        icon: body.icon ?? null,
-        colorClass: body.colorClass ?? null,
-        description: body.description ?? null,
-      },
-    });
+    // Subject.name 为 @unique：重名创建撞 P2002，返回 409 而非不透明 500。
+    // 不做 findUnique 预检——预检存在 TOCTOU 竞态，约束兜底才是正解
+    // （写法与 auth/register 的 P2002 处理一致）
+    let subject;
+    try {
+      subject = await prisma.subject.create({
+        data: {
+          name: body.name.trim(),
+          icon: body.icon ?? null,
+          colorClass: body.colorClass ?? null,
+          description: body.description ?? null,
+        },
+      });
+    } catch (err: unknown) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        return NextResponse.json({ error: '该学科已存在' }, { status: 409 });
+      }
+      throw err;
+    }
     return NextResponse.json(subject);
   } catch (error: unknown) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });

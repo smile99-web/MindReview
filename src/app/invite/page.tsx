@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { authFetch } from "@/lib/auth";
@@ -57,21 +57,33 @@ export default function InvitePage() {
 
   const remove = async (id: string) => {
     if (!confirm("确定删除这个推荐码吗？删除后它将无法用于注册。")) return;
-    const res = await authFetch(`/api/invite-codes?id=${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
-    if (res.ok) {
-      setCodes((prev) => prev.filter((c) => c.id !== id));
-    } else {
-      setError("删除失败，请重试");
+    try {
+      const res = await authFetch(`/api/invite-codes?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setCodes((prev) => prev.filter((c) => c.id !== id));
+      } else {
+        setError("删除失败，请重试");
+      }
+    } catch {
+      // authFetch 网络层失败会抛错：此前无 catch 是 unhandled rejection
+      setError("网络异常，删除失败，请重试");
     }
   };
 
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 卸载时清理复制提示定时器（避免卸载后 setState）
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
   const copy = async (c: InviteCode) => {
     try {
       await navigator.clipboard.writeText(c.code);
       setCopiedId(c.id);
-      setTimeout(() => setCopiedId(null), 1500);
+      // 清理上一个定时器，避免卸载后 setState / 旧定时器把新提示提前清掉
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopiedId(null), 1500);
     } catch {
       // 剪贴板不可用时选中即可，用户手动复制
     }

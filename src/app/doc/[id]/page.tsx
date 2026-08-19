@@ -437,6 +437,12 @@ export default function DocDetailPage({
                 // 错题本 picks them up with FSRS scheduling.
                 const wrongs = allQuestions
                   .filter((q, i) => {
+                    // 只有选项正常的选择题参与判分/录错题（填空/简答/文本
+                    // 回退题措辞不同即误判，正确答案不能进错题本）
+                    const gradableMC =
+                      (q.questionType || 'multiple_choice') === 'multiple_choice' &&
+                      !!q.options && q.options.length > 0;
+                    if (!gradableMC) return false;
                     const ans = practiceAnswers[i];
                     return ans && q.answer && ans !== q.answer;
                   })
@@ -493,36 +499,49 @@ function PracticeSession({
 }) {
   // 是否全部答完基于全部题目（而非当前过滤视图）；answers 以原始下标为 key
   const allAnswered = allQuestions.length > 0 && allQuestions.every((_, i) => !!answers[i]);
+  // 只有选项正常的选择题参与红绿判分/计分（与 DocUploadCard 的 isGradableMC
+  // 同口径）：填空/简答及选项畸形的文本回退题措辞不同即误判（"0.5" vs "0.50"、
+  // 多一个空格都判错 → 正确答案被记进错题本），只展示参考答案对照。
+  const isGradableMC = (q: PracticeQuestion) =>
+    (q.questionType || 'multiple_choice') === 'multiple_choice' && !!q.options && q.options.length > 0;
+  const mcCount = questions.filter(({ q }) => isGradableMC(q)).length;
   const correctCount = questions.filter(
-    ({ q, originalIdx }) => answers[originalIdx] && q.answer && answers[originalIdx] === q.answer,
+    ({ q, originalIdx }) => isGradableMC(q) && answers[originalIdx] && q.answer && answers[originalIdx] === q.answer,
   ).length;
 
   return (
     <div>
-      {submitted && (
+      {submitted && mcCount > 0 && (
         <div className="mb-3 text-sm">
           <span
             className={
-              correctCount === questions.length
+              correctCount === mcCount
                 ? 'text-emerald-600 font-medium'
                 : correctCount > 0
                   ? 'text-amber-600 font-medium'
                   : 'text-rose-600 font-medium'
             }
           >
-            得分 {correctCount}/{questions.length}
+            得分 {correctCount}/{mcCount}
           </span>
         </div>
       )}
       <div className="space-y-3">
         {questions.map(({ q, originalIdx: qi }) => {
           const userAns = answers[qi];
-          const correct = submitted && userAns && userAns === q.answer;
-          const wrong = submitted && userAns && userAns !== q.answer;
           const qType = q.questionType || 'multiple_choice';
           const isMC = qType === 'multiple_choice';
           const isFill = qType === 'fill_blank';
           const isShort = qType === 'short_answer';
+          // options 畸形（缺失/为空）的选择题回退为文本作答：否则不渲染
+          // 任何作答控件 → allAnswered 永 false → 提交按钮永久禁用（死锁）。
+          // DocUploadCard 已修过同款问题（mcFallbackText），本页是漏改副本。
+          const mcFallback = isMC && (!q.options || q.options.length === 0);
+          // 只有选项正常的选择题参与 exact-match 判分（红绿高亮/计分/错题收录）；
+          // 填空/简答/文本回退题只展示答案对照（与 DocUploadCard 同口径）
+          const gradable = isMC && !mcFallback;
+          const correct = gradable && submitted && userAns && userAns === q.answer;
+          const wrong = gradable && submitted && userAns && userAns !== q.answer;
 
           return (
             <div
@@ -581,6 +600,27 @@ function PracticeSession({
                     );
                   })}
                 </div>
+              ) : mcFallback && !submitted ? (
+                <input
+                  type="text"
+                  value={userAns || ''}
+                  onChange={(e) => onAnswer(qi, e.target.value)}
+                  placeholder="输入你的答案..."
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 outline-none"
+                />
+              ) : mcFallback && submitted ? (
+                <div className="text-sm">
+                  <span className="text-slate-500">你的答案：</span>
+                  <span className="text-slate-700">{userAns || '（未作答）'}</span>
+                  {q.answer && (
+                    <>
+                      <span className="text-slate-400 mx-1">|</span>
+                      <span className="text-emerald-700 font-medium">
+                        参考: {q.answer}
+                      </span>
+                    </>
+                  )}
+                </div>
               ) : isFill && !submitted ? (
                 <input
                   type="text"
@@ -592,14 +632,14 @@ function PracticeSession({
               ) : isFill && submitted ? (
                 <div className="text-sm">
                   <span className="text-slate-500">你的答案：</span>
-                  <span className={correct ? 'text-emerald-700 font-medium' : 'text-rose-700 font-medium'}>
+                  <span className="text-slate-700">
                     {userAns || '（未作答）'}
                   </span>
                   {q.answer && (
                     <>
                       <span className="text-slate-400 mx-1">|</span>
                       <span className="text-emerald-700 font-medium">
-                        正确: {q.answer}
+                        参考: {q.answer}
                       </span>
                     </>
                   )}
@@ -616,7 +656,7 @@ function PracticeSession({
                 <div className="text-sm">
                   <div className="mb-1">
                     <span className="text-slate-500">你的答案：</span>
-                    <span className={correct ? 'text-emerald-700 font-medium' : 'text-rose-700 font-medium'}>
+                    <span className="text-slate-700">
                       {userAns || '（未作答）'}
                     </span>
                   </div>

@@ -8,6 +8,7 @@ import { ChatProvider } from "@/components/chat/ChatProvider";
 import { ChatLauncher } from "@/components/chat/ChatLauncher";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { StudyTimeTracker } from "@/components/study-time/StudyTimeTracker";
+import { ErrorReporter } from "@/components/ErrorReporter";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,6 +36,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[#f0f2f5]">
+        <ErrorReporter />
         <AuthProvider>
           <ChatProvider>
             <ErrorBoundary>

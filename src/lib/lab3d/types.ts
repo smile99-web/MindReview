@@ -45,6 +45,13 @@ export interface SceneHandle {
   setStep(index: number): void;
   /** 自定义控件回调；button 每次点击都会触发（value 为递增计数） */
   setParam?(id: string, value: number | string): void;
+  /**
+   * 实时读数（可选）：返回当前参数推导出的物理量/几何量，
+   * 由 ScenePlayer 定时轮询显示在"📊 实时读数"条上。
+   * 例如杠杆：F₁L₁ 与 F₂L₂；电路：电流 I、功率 P。
+   * 让调参数立刻看到定量结果，是"参数调节"实用性的核心。
+   */
+  getReadouts?(): { label: string; value: string }[];
   /** 每帧回调：dt 秒数、elapsed 总秒数 */
   update?(dt: number, elapsed: number): void;
   /** 卸载清理（几何体/材质/事件） */

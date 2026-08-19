@@ -499,33 +499,38 @@ function PracticeSession({
   onMore: () => void;
 }) {
   const allAnswered = questions.every((_, i) => !!answers[i]);
+  // 只有选项正常的选择题参与红绿判分/计分（与 DocUploadCard 同口径）：
+  // 文本作答的题措辞不同即误判，只展示参考答案对照
+  const isGradableMC = (q: PracticeQuestion) => !!q.options && q.options.length > 0;
+  const mcCount = questions.filter(isGradableMC).length;
   const correctCount = questions.filter(
-    (q, i) => answers[i] && q.answer && answers[i] === q.answer,
+    (q, i) => isGradableMC(q) && answers[i] && q.answer && answers[i] === q.answer,
   ).length;
 
   return (
     <div className="mb-3">
       <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-2">
         类似题训练
-        {submitted && (
+        {submitted && mcCount > 0 && (
           <span
             className={`text-[10px] font-normal normal-case tracking-normal ${
-              correctCount === questions.length
+              correctCount === mcCount
                 ? 'text-emerald-600'
                 : correctCount > 0
                   ? 'text-amber-600'
                   : 'text-rose-600'
             }`}
           >
-            {correctCount}/{questions.length} 正确
+            {correctCount}/{mcCount} 正确
           </span>
         )}
       </div>
       <div className="space-y-3">
         {questions.map((q, i) => {
           const userAns = answers[i];
-          const correct = submitted && userAns === q.answer;
-          const wrong = submitted && userAns && userAns !== q.answer;
+          const gradable = isGradableMC(q);
+          const correct = gradable && submitted && userAns === q.answer;
+          const wrong = gradable && submitted && userAns && userAns !== q.answer;
           return (
             <div
               key={i}

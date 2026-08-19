@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 
 // GET /api/mistakes/subjects
 // Returns per-subject mistake counts so the landing page can render
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
     console.error('[mistakes/subjects] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

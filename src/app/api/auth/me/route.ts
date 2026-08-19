@@ -20,7 +20,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ detail: 'User not found' }, { status: 401 });
     }
 
-    return NextResponse.json(user);
+    // 管理员标记：与 requireAdmin 同口径，前端据此隐藏管理向按钮
+    // （如思维导图"补全导图关系"），避免普通用户点了才收到 403
+    const adminUsernames = (process.env.ADMIN_USERNAMES || '')
+      .split(',')
+      .map((n) => n.trim())
+      .filter(Boolean);
+    const isAdmin = adminUsernames.length > 0 && adminUsernames.includes(user.username);
+
+    return NextResponse.json({ ...user, isAdmin });
   } catch {
     return NextResponse.json({ detail: 'Internal server error' }, { status: 500 });
   }

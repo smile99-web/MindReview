@@ -262,6 +262,7 @@ export const pythagorasScene: Scene3DDefinition = {
         if (tiles) {
           ctx.scene.remove(tiles.mesh);
           tiles.mesh.geometry.dispose();
+          (tiles.mesh.material as THREE.Material).dispose();
         }
         statics.forEach((o) => {
           ctx.scene.remove(o);

@@ -1,4 +1,4 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { batchCheckPrerequisites } from '@/lib/learning-path';
@@ -25,7 +25,10 @@ import { resolveUserIdFromRequest } from '@/lib/user-context';
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const { nodeIds } = body;
 
     if (!Array.isArray(nodeIds) || nodeIds.length === 0) {
@@ -45,7 +48,7 @@ export async function POST(req: NextRequest) {
     console.error('[path/prerequisites POST]', error);
     return NextResponse.json(
       { error: getErrorMessage(error, 'Internal server error') },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

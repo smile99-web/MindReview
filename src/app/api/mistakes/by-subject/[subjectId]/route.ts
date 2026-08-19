@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 
 // GET /api/mistakes/by-subject/[subjectId]
 // Returns the user's mistakes for one subject. Defaults to
@@ -32,12 +32,15 @@ export async function GET(
       }),
       prisma.mistake.findMany({
         where,
-        // 去重：同题答错多次只展示一条。
+        // 去重：同题答错多次只展示一条。保留的是 distinct 排序后每组第一行
+        // ——必须与 mistakes/due 同口径保留调度最深的行（nextReviewAt desc），
+        // 否则同一题在 due 列表显示"10 天后"、此处却按最旧行显示"已到期"。
+        // Postgres DESC 时 NULL 排前，符合"未排期=立即到期"语义。
         distinct: ['questionText'],
         include: {
           knowledgeNode: { select: { id: true, title: true } },
         },
-        orderBy: [{ questionText: 'asc' }, { createdAt: 'asc' }],
+        orderBy: [{ questionText: 'asc' }, { nextReviewAt: 'desc' }],
         take: limit,
       }),
     ]);
@@ -65,7 +68,7 @@ export async function GET(
     console.error('[mistakes/by-subject] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

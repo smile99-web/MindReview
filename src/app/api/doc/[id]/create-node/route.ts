@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 
 // POST /api/doc/[id]/create-node
 // Creates a KnowledgeNode from the parsed doc so the user can do
@@ -103,7 +103,7 @@ export async function POST(
     console.error('[doc/create-node] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

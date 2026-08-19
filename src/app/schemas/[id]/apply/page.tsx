@@ -12,11 +12,9 @@ interface SchemaData {
   id: string;
   name: string;
   description: string | null;
-  schemaType?: string;
-  keyInsights?: string[];
-  applicationScope?: string;
-  typicalExample?: string;
-  transferHints?: string;
+  // schemaType/keyInsights/applicationScope/typicalExample/transferHints
+  // 实际嵌在 /api/schema/list 响应的 representationData 下（unknown，需收窄）
+  representationData?: unknown;
   members: Array<{ id: string; title: string; subject?: { name: string } }>;
 }
 
@@ -82,6 +80,22 @@ export default function SchemaApplyPage({ params }: PageProps) {
     );
   }
 
+  // 五个图式字段嵌在 representationData 下；收窄为 Record 后逐字段取 string
+  const rep: Record<string, unknown> =
+    schema.representationData && typeof schema.representationData === 'object'
+      ? (schema.representationData as Record<string, unknown>)
+      : {};
+  const asString = (v: unknown) => (typeof v === 'string' ? v : undefined);
+  const schemaData = {
+    schemaType: asString(rep.schemaType),
+    keyInsights: Array.isArray(rep.keyInsights)
+      ? (rep.keyInsights as unknown[]).filter((x): x is string => typeof x === 'string')
+      : undefined,
+    applicationScope: asString(rep.applicationScope),
+    typicalExample: asString(rep.typicalExample),
+    transferHints: asString(rep.transferHints),
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/40 p-6">
       <div className="max-w-4xl mx-auto">
@@ -107,13 +121,7 @@ export default function SchemaApplyPage({ params }: PageProps) {
           schemaId={schema.id}
           schemaName={schema.name}
           schemaDescription={schema.description}
-          schemaData={{
-            schemaType: schema.schemaType,
-            keyInsights: schema.keyInsights,
-            applicationScope: schema.applicationScope,
-            typicalExample: schema.typicalExample,
-            transferHints: schema.transferHints,
-          }}
+          schemaData={schemaData}
           memberCount={schema.members?.length}
           onComplete={(score) => {
             // 成绩落库（此前只 console.log，练习数据全部丢失）。

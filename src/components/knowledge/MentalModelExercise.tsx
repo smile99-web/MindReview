@@ -45,17 +45,22 @@ export function MentalModelExercise({
   const [error, setError] = useState('');
 
   useEffect(() => {
+    // knowledgeNodeId 快速切换时，晚到的旧响应不得覆盖新数据
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) setNodeLoading(true); });
     authFetch(`/api/knowledge/${knowledgeNodeId}`)
       .then((r) => r.json())
       .then((data) => {
+        if (cancelled) return;
         if (data.error) {
           setNode({ title: knowledgeNodeTitle });
         } else {
           setNode(data);
         }
       })
-      .catch(() => setNode({ title: knowledgeNodeTitle }))
-      .finally(() => setNodeLoading(false));
+      .catch(() => { if (!cancelled) setNode({ title: knowledgeNodeTitle }); })
+      .finally(() => { if (!cancelled) setNodeLoading(false); });
+    return () => { cancelled = true; };
   }, [knowledgeNodeId, knowledgeNodeTitle]);
 
   const handleCheck = async () => {

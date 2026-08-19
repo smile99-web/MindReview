@@ -94,7 +94,7 @@ export default function MistakeReviewPage({
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
   const [fsrsSubmitting, setFsrsSubmitting] = useState(false);
-  const [fsrsResult, setFsrsResult] = useState<ReviewResult | null>(null);
+  const [fsrsResult, setFsrsResult] = useState<(ReviewResult & { nextReviewInDays: number }) | null>(null);
   // 题目展示时间戳：submitFSRS 用它计算本次复习耗时（durationMs）
   const startTimeRef = useRef<number>(0);
 
@@ -166,7 +166,17 @@ export default function MistakeReviewPage({
       });
       const data = (await res.json()) as ReviewResult & { error?: string };
       if (!res.ok) throw new Error(data.error || `提交失败 (${res.status})`);
-      setFsrsResult(data);
+      // 下次复习天数在这里（提交回调）算好存进 state——渲染期算 Date.now()
+      // 是不纯渲染（react-compiler lint 报错）
+      const nextReviewInDays = data.nextReviewAt
+        ? Math.max(
+            0,
+            Math.round(
+              (new Date(data.nextReviewAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000),
+            ),
+          )
+        : 0;
+      setFsrsResult({ ...data, nextReviewInDays });
     } catch (err: unknown) {
       setError(getErrorMessage(err, '提交失败'));
     } finally {
@@ -197,14 +207,7 @@ export default function MistakeReviewPage({
 
   // FSRS scheduled view (final)
   if (fsrsResult) {
-    const days = fsrsResult.nextReviewAt
-      ? Math.max(
-          0,
-          Math.round(
-            (new Date(fsrsResult.nextReviewAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000),
-          ),
-        )
-      : 0;
+    const days = fsrsResult.nextReviewInDays;
     return (
       <div className="min-h-[calc(100vh-3.5rem)] bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 p-6">
         <div className="max-w-2xl mx-auto">

@@ -217,6 +217,15 @@ export const densityScene: Scene3DDefinition = {
         mShown = 0; // 砝码重新一个个加，横梁先倾后平
         refreshMass();
       },
+      getReadouts() {
+        const info = MATS[selected];
+        return [
+          { label: '质量 m', value: `${mass().toFixed(1)} kg` },
+          { label: '体积 V', value: `${vol.toFixed(1)} L` },
+          { label: '密度 ρ', value: `${info.rho.toFixed(1)}×10³ kg/m³` },
+          { label: '状态（放入水中）', value: info.rho < 1 ? '漂浮' : '沉底' },
+        ];
+      },
       update(dt, elapsed) {
         const m = mass();
         mShown = damp(mShown, m, 1.8, dt);

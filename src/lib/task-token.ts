@@ -9,7 +9,13 @@ import crypto from 'crypto';
  */
 
 function getSecret(): string {
-  return process.env.JWT_SECRET_KEY || 'mindreview-dev-secret-change-me';
+  // 与 server-auth.ts 保持一致：生产环境缺失 JWT_SECRET_KEY 时直接抛错，
+  // 否则任何人都能用源码公开的 dev secret 伪造游戏 token（读/改答案）。
+  if (process.env.JWT_SECRET_KEY) return process.env.JWT_SECRET_KEY;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET_KEY environment variable is required in production');
+  }
+  return 'mindreview-dev-secret-change-me';
 }
 
 function base64UrlEncode(data: Buffer | string): string {

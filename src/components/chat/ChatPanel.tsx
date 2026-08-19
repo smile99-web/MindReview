@@ -180,8 +180,12 @@ export function ChatPanel() {
         setMessages((prev) => [...prev, assistant]);
       }
       if (data.isNewConversation) {
-        setActiveId(data.conversationId);
-        // 顺手刷新列表
+        // 与消息插入同一个竞态守卫：等待响应期间用户已切到其他会话，
+        // 不能把 TA 的视图强行拽回刚创建的新会话
+        if (activeIdRef.current === convAtSend) {
+          setActiveId(data.conversationId);
+        }
+        // 顺手刷新列表（放守卫外无妨，只更新侧栏）
         void loadConversations();
       }
     } catch (err) {
@@ -196,7 +200,14 @@ export function ChatPanel() {
       e.stopPropagation();
       if (!confirm("确定删除这个对话吗？")) return;
       try {
-        await authFetch(`/api/chat/${id}`, { method: "DELETE" });
+        // 必须检查 res.ok：authFetch 只在 401/网络异常时抛错，服务端
+        // 500/403 会正常 resolve——不检查会把没删成的会话从 UI 抹掉，
+        // 刷新后"复活"（UI/服务端状态分叉）
+        const res = await authFetch(`/api/chat/${id}`, { method: "DELETE" });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error || `删除失败 (${res.status})`);
+        }
         if (activeId === id) {
           setActiveId(null);
           setMessages([]);

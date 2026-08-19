@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 import * as THREE from 'three';
 import type { Scene3DDefinition, SceneContext, SceneHandle } from '../types';
-import { addStageBasics, cylinderBetween, makeLabel, std } from '../three-utils';
+import { addStageBasics, cylinderBetween, disposeObject, makeLabel, std } from '../three-utils';
 
 export const leverScene: Scene3DDefinition = {
   id: 'phys-lever',
@@ -15,6 +15,7 @@ export const leverScene: Scene3DDefinition = {
   camera: { position: [6, 4, 9], target: [0, 1.2, 0] },
   controls: [
     { kind: 'slider', id: 'f1', label: '动力 F₁', min: 5, max: 30, step: 1, defaultValue: 10, unit: 'N' },
+    { kind: 'slider', id: 'f2', label: '阻力 F₂', min: 5, max: 30, step: 1, defaultValue: 10, unit: 'N' },
     { kind: 'slider', id: 'l1', label: '动力臂 L₁', min: 1, max: 4, step: 0.5, defaultValue: 2, unit: 'm' },
     { kind: 'slider', id: 'l2', label: '阻力臂 L₂', min: 1, max: 4, step: 0.5, defaultValue: 2, unit: 'm' },
   ],
@@ -38,7 +39,7 @@ export const leverScene: Scene3DDefinition = {
     let f1 = 10;
     let l1 = 2;
     let l2 = 2;
-    const F2 = 10; // 阻力固定 10N（挂一个重物）
+    let f2 = 10; // 阻力（挂一个重物），可由滑块调节
 
     const pivotY = 1.6;
 
@@ -91,6 +92,13 @@ export const leverScene: Scene3DDefinition = {
     f2Label.position.y = -2.0;
     f2Group.add(f2Label);
     beam.add(f2Group);
+    const refreshF2Label = () => {
+      f2Label.material.map?.dispose();
+      f2Label.material.dispose();
+      const nl = makeLabel(`阻力 F₂ = ${f2}N`, { fontSize: 38, scale: 0.85 });
+      f2Label.material = nl.material;
+      f2Label.scale.copy(nl.scale);
+    };
 
     // 力臂标注（随支点到作用点的红色彩带 + 标签）
     const armMat = std('#ef4444', { emissive: '#b91c1c', emissiveIntensity: 0.4 });
@@ -122,6 +130,7 @@ export const leverScene: Scene3DDefinition = {
     const forceLine2 = mkLine(l2);
     beam.add(forceLine1, forceLine2);
 
+    let balanced = true;
     const rebuildArms = () => {
       // 力臂杆：原地替换几何体（不摘除 l1Arm/l2Arm，避免丢引用）
       const a1 = cylinderBetween(new THREE.Vector3(0, 0.32, 0), new THREE.Vector3(-l1, 0.32, 0), 0.04, armMat);
@@ -153,8 +162,8 @@ export const leverScene: Scene3DDefinition = {
       forceLine2.computeLineDistances();
       // 状态牌
       const t1 = f1 * l1;
-      const t2 = F2 * l2;
-      const balanced = Math.abs(t1 - t2) < 0.001;
+      const t2 = f2 * l2;
+      balanced = Math.abs(t1 - t2) < 0.001;
       const text = balanced
         ? `✅ 平衡！F₁L₁ = F₂L₂ = ${t1.toFixed(0)}`
         : t1 > t2
@@ -185,18 +194,33 @@ export const leverScene: Scene3DDefinition = {
       },
       setParam(id, value) {
         if (id === 'f1') f1 = Number(value);
+        if (id === 'f2') {
+          f2 = Number(value);
+          refreshF2Label();
+        }
         if (id === 'l1') l1 = Number(value);
         if (id === 'l2') l2 = Number(value);
         rebuildArms();
       },
+      getReadouts() {
+        return [
+          { label: '动力矩 F₁L₁', value: `${(f1 * l1).toFixed(1)} N·m` },
+          { label: '阻力矩 F₂L₂', value: `${(f2 * l2).toFixed(1)} N·m` },
+          { label: '状态', value: balanced ? '平衡' : f1 * l1 > f2 * l2 ? '向左倾' : '向右倾' },
+        ];
+      },
       update(dt) {
         // 力矩差决定倾斜角（限幅 ±13°）
-        const torque = F2 * l2 - f1 * l1;
+        const torque = f2 * l2 - f1 * l1;
         const target = THREE.MathUtils.clamp(torque * 0.03, -0.23, 0.23);
         beam.rotation.z = THREE.MathUtils.damp(beam.rotation.z, target, 4, dt);
       },
       dispose() {
         ctx.scene.remove(fulcrum, fulcrumLabel, beam, status);
+        disposeObject(fulcrum);
+        disposeObject(fulcrumLabel);
+        disposeObject(beam);
+        disposeObject(status);
       },
     };
   },

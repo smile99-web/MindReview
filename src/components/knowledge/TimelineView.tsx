@@ -120,7 +120,9 @@ export function TimelineView({
               {/* Dot marker */}
               <div
                 className={`absolute left-[-22px] top-1.5 w-3.5 h-3.5 rounded-full border-2 border-white shadow-sm ${
-                  importanceColors[event.importance || 1]
+                  // importance 越界时 importanceColors[...] 得 undefined，
+                  // className 会拼上 "undefined" 字符串
+                  importanceColors[Math.min(3, Math.max(1, event.importance || 1))]
                 }`}
               />
               {/* Event card */}
@@ -131,7 +133,7 @@ export function TimelineView({
                   </span>
                   {event.importance && event.importance >= 2 && (
                     <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded-full text-white ${importanceColors[event.importance]}`}
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full text-white ${importanceColors[Math.min(3, Math.max(1, event.importance))]}`}
                     >
                       {event.importance === 3 ? '重要' : '较重要'}
                     </span>

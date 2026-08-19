@@ -1,7 +1,13 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { adaptPath, type LearningPath, type PerformanceEntry } from '@/lib/learning-path';
+import { resolveUserIdFromRequest } from '@/lib/user-context';
+
+// 入参上限：每个 accuracy<0.2 的 step 都会触发一次 DB 查询（learning-path
+// adaptPath），无上限时一个构造的请求可放大成上万次串行 DB 往返
+const MAX_ADAPT_STEPS = 200;
+const MAX_ADAPT_PERFORMANCE = 200;
 
 /**
  * POST /api/path/adapt
@@ -31,7 +37,11 @@ import { adaptPath, type LearningPath, type PerformanceEntry } from '@/lib/learn
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    await resolveUserIdFromRequest(req);
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const { currentPath, performance } = body;
 
     // --- Validation ---
@@ -49,9 +59,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (currentPath.steps.length > MAX_ADAPT_STEPS) {
+      return NextResponse.json(
+        { error: `currentPath.steps 过长（上限 ${MAX_ADAPT_STEPS}）` },
+        { status: 400 },
+      );
+    }
+
     if (!performance || !Array.isArray(performance)) {
       return NextResponse.json(
         { error: 'performance must be an array of PerformanceEntry objects' },
+        { status: 400 },
+      );
+    }
+
+    if (performance.length > MAX_ADAPT_PERFORMANCE) {
+      return NextResponse.json(
+        { error: `performance 过长（上限 ${MAX_ADAPT_PERFORMANCE}）` },
         { status: 400 },
       );
     }
@@ -64,13 +88,15 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
-      if (typeof entry.accuracy !== 'number' || entry.accuracy < 0 || entry.accuracy > 1) {
+      // NaN 会穿透 typeof/range 三重检查（NaN<0、NaN>1 均为 false），
+      // 下游 estimateMinutes 产出 NaN 污染 totalEstimatedMinutes
+      if (typeof entry.accuracy !== 'number' || !Number.isFinite(entry.accuracy) || entry.accuracy < 0 || entry.accuracy > 1) {
         return NextResponse.json(
           { error: `Invalid accuracy for node ${entry.nodeId}: must be 0-1` },
           { status: 400 },
         );
       }
-      if (typeof entry.quality !== 'number' || entry.quality < 0 || entry.quality > 5) {
+      if (typeof entry.quality !== 'number' || !Number.isFinite(entry.quality) || entry.quality < 0 || entry.quality > 5) {
         return NextResponse.json(
           { error: `Invalid quality for node ${entry.nodeId}: must be 0-5` },
           { status: 400 },
@@ -101,7 +127,7 @@ export async function POST(req: NextRequest) {
     console.error('[path/adapt POST]', error);
     return NextResponse.json(
       { error: getErrorMessage(error, 'Internal server error') },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

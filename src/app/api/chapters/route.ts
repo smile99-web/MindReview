@@ -1,6 +1,7 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireAdmin } from '@/lib/require-admin';
 import type { Prisma } from '@prisma/client';
 
 // GET /api/chapters?subjectId=xxx — 获取章节列表
@@ -37,7 +38,14 @@ export async function GET(req: NextRequest) {
 // POST /api/chapters — 创建章节
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    // 章节是全站共享结构：写操作与 knowledge/[id] DELETE 同级，必须管理员
+    // （此前仅靠 proxy 单层，且无任何前端调用方）
+    const adminDenied = await requireAdmin(req);
+    if (adminDenied) return adminDenied;
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
 
     // --- validation ---
     if (typeof body.title !== 'string' || body.title.trim() === '') {

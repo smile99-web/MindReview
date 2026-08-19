@@ -1,7 +1,8 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { rateLimit } from '@/lib/rate-limit';
 import { suggestSchemaNodes } from '@/lib/schema-builder';
 
 // POST /api/schema/suggest
@@ -80,17 +81,27 @@ export async function GET(req: NextRequest) {
     console.error('[schema/suggest] GET Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    // Auth gate — this route is read-only but still behind auth.
-    await resolveUserIdFromRequest(req);
+    // Auth gate + 限流：schema 构建链路的调用都可能触发付费 LLM
+    const userId = await resolveUserIdFromRequest(req);
+    const rl = rateLimit(`llm:${userId}`, 60, 60 * 60 * 1000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: 'AI 调用太频繁了，请稍后再试' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+      );
+    }
 
-    const body = (await req.json()) as { seedNodeId?: unknown };
+    const body = (await req.json().catch(() => null)) as { seedNodeId?: unknown } | null;
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const seedNodeId = typeof body.seedNodeId === 'string' ? body.seedNodeId.trim() : '';
     if (!seedNodeId) {
       return NextResponse.json(
@@ -105,7 +116,7 @@ export async function POST(req: NextRequest) {
     console.error('[schema/suggest] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

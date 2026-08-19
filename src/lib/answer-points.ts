@@ -42,9 +42,9 @@ export function splitIntoPoints(answer: string): string[] {
     if (stripped) norm = stripped;
   }
 
-  // 2. 分号切分
+  // 2. 分号切分（中英文分号都算；此前只认中文；，英文 ; 不切分）
   if (parts.length <= 1) {
-    if (norm.includes('；')) {
+    if (/[；;]/.test(norm)) {
       parts = norm.split(/[；;]+/).map((s) => s.trim()).filter((s) => s.length > 0);
     } else if (norm.includes('.')) {
       // English period, but only if it looks like a sentence boundary

@@ -4,43 +4,46 @@ import { createAccessToken, createRefreshTokenValue, hashPassword } from '@/lib/
 
 export async function POST(request: Request) {
   try {
-    const { username, password, email, name, inviteCode } = await request.json();
+    const body = await request.json().catch(() => ({}));
+    const { username, password, email, name, inviteCode } =
+      body && typeof body === 'object' ? body : {};
     const normalizedUsername = typeof username === 'string' ? username.trim() : '';
-    const normalizedEmail = typeof email === 'string' ? email.trim() : '';
+    // 邮箱大小写归一：Gmail 等邮箱本地部分大小写不敏感，不归一会同邮箱双账号
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     const normalizedInviteCode = typeof inviteCode === 'string' ? inviteCode.trim() : '';
 
     // 推荐码必填，先校验再查库，避免无码请求打到数据库
     if (!normalizedInviteCode) {
-      return NextResponse.json({ detail: '请填写推荐码' }, { status: 400 });
+      return NextResponse.json({ detail: '请填写推荐码', error: '请填写推荐码' }, { status: 400 });
     }
     const invite = await prisma.inviteCode.findUnique({ where: { code: normalizedInviteCode } });
     if (!invite) {
-      return NextResponse.json({ detail: '推荐码无效' }, { status: 403 });
+      return NextResponse.json({ detail: '推荐码无效', error: '推荐码无效' }, { status: 403 });
     }
     if (invite.maxUses > 0 && invite.usedCount >= invite.maxUses) {
-      return NextResponse.json({ detail: '推荐码使用次数已用完' }, { status: 403 });
+      return NextResponse.json({ detail: '推荐码使用次数已用完', error: '推荐码使用次数已用完' }, { status: 403 });
     }
 
     if (normalizedUsername.length < 3 || normalizedUsername.length > 30) {
-      return NextResponse.json({ detail: '用户名长度必须为 3-30 个字符' }, { status: 400 });
+      return NextResponse.json({ detail: '用户名长度必须为 3-30 个字符', error: '用户名长度必须为 3-30 个字符' }, { status: 400 });
     }
     if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
-      return NextResponse.json({ detail: '密码长度必须为 6-128 个字符' }, { status: 400 });
+      return NextResponse.json({ detail: '密码长度必须为 6-128 个字符', error: '密码长度必须为 6-128 个字符' }, { status: 400 });
     }
     if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(normalizedUsername)) {
-      return NextResponse.json({ detail: '用户名只能包含中文、字母、数字和下划线' }, { status: 400 });
+      return NextResponse.json({ detail: '用户名只能包含中文、字母、数字和下划线', error: '用户名只能包含中文、字母、数字和下划线' }, { status: 400 });
     }
 
     const existing = await prisma.user.findUnique({ where: { username: normalizedUsername } });
     if (existing) {
-      return NextResponse.json({ detail: '用户名已存在' }, { status: 409 });
+      return NextResponse.json({ detail: '用户名已存在', error: '用户名已存在' }, { status: 409 });
     }
 
     if (normalizedEmail) {
       const emailExists = await prisma.user.findUnique({ where: { email: normalizedEmail } });
       if (emailExists) {
-        return NextResponse.json({ detail: '邮箱已存在' }, { status: 409 });
+        return NextResponse.json({ detail: '邮箱已存在', error: '邮箱已存在' }, { status: 409 });
       }
     }
 
@@ -79,10 +82,10 @@ export async function POST(request: Request) {
       });
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'INVITE_CODE_EXHAUSTED') {
-        return NextResponse.json({ detail: '推荐码使用次数已用完' }, { status: 403 });
+        return NextResponse.json({ detail: '推荐码使用次数已用完', error: '推荐码使用次数已用完' }, { status: 403 });
       }
       if ((err as { code?: string })?.code === 'P2002') {
-        return NextResponse.json({ detail: '用户名或邮箱已存在' }, { status: 409 });
+        return NextResponse.json({ detail: '用户名或邮箱已存在', error: '用户名或邮箱已存在' }, { status: 409 });
       }
       throw err;
     }
@@ -108,6 +111,6 @@ export async function POST(request: Request) {
       user,
     });
   } catch {
-    return NextResponse.json({ detail: '服务器内部错误' }, { status: 500 });
+    return NextResponse.json({ detail: '服务器内部错误', error: '服务器内部错误' }, { status: 500 });
   }
 }

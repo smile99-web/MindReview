@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await resolveUserIdFromRequest(_req);
+    const userId = await resolveUserIdFromRequest(_req);
     const { id } = await params;
     const doc = await prisma.docUpload.findUnique({
       where: { id },
@@ -28,7 +28,7 @@ export async function GET(
     if (!doc) {
       return NextResponse.json({ error: '文件不存在' }, { status: 404 });
     }
-    if (doc.userId !== (await resolveUserIdFromRequest(_req))) {
+    if (doc.userId !== userId) {
       return NextResponse.json({ error: '无权访问' }, { status: 403 });
     }
     return NextResponse.json(doc);
@@ -36,7 +36,7 @@ export async function GET(
     console.error('[doc/get] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }
@@ -77,7 +77,7 @@ export async function PATCH(
     console.error('[doc/patch] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }
@@ -122,7 +122,7 @@ export async function DELETE(
     console.error('[doc/delete] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

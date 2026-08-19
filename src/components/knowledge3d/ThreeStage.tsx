@@ -42,7 +42,20 @@ export default function ThreeStage({
     controls.dampingFactor = 0.08;
     controls.target.set(...(def.camera?.target ?? [0, 1, 0]));
 
-    const handle = def.build({ scene, camera, renderer, controls });
+    // def.build 抛错时 effect 中断、下方 cleanup 从未注册：已创建的
+    // WebGLRenderer（占用一个 live WebGL context，浏览器每页上限 ~16 个）、
+    // 已挂载的 canvas、OrbitControls 全部泄漏，累积后整站 3D 黑屏。
+    // 失败路径手动清理已建资源再向上抛（交给错误边界）。
+    let handle: SceneHandle;
+    try {
+      handle = def.build({ scene, camera, renderer, controls });
+    } catch (err) {
+      controls.dispose();
+      disposeObject(scene);
+      renderer.dispose();
+      if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
+      throw err;
+    }
     cbRef.current(handle);
 
     const resize = () => {

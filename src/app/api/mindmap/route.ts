@@ -1,6 +1,7 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireAdmin } from '@/lib/require-admin';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import {
   applyProgressToNode,
@@ -93,7 +94,15 @@ export async function GET(req: NextRequest) {
 // POST /api/mindmap/edge — 创建关系
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    // 图谱是全站共享内容，且这些边是 cloze/find-bugs/rebuild 三个游戏的
+    // ground truth：写操作必须管理员（此前仅靠 proxy 单层，任意登录学生
+    // 即可污染全体用户的评分标准；semantic-edges 已用 requireAdmin）
+    const adminDenied = await requireAdmin(req);
+    if (adminDenied) return adminDenied;
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
 
     if (body.action === 'generate-relations') {
       const subjectId = typeof body.subjectId === 'string' ? body.subjectId.trim() : '';
@@ -129,20 +138,30 @@ export async function POST(req: NextRequest) {
         byChapter.set(key, [...(byChapter.get(key) || []), node]);
       }
 
+      // 一次性取出候选节点间已有的 prerequisite 边（Set 判重），
+      // 替代循环内 findFirst→create：后者既慢又有先查后写竞态
+      // （两个并发请求双双通过检查各建一条重复边，稀释游戏计分）。
+      const nodeIds = nodes.map((n) => n.id);
+      const existingEdges = await prisma.knowledgeEdge.findMany({
+        where: {
+          relationType: 'prerequisite',
+          fromId: { in: nodeIds },
+          toId: { in: nodeIds },
+        },
+        select: { fromId: true, toId: true },
+      });
+      const edgeSet = new Set(existingEdges.map((e) => `${e.fromId}→${e.toId}`));
+
       let created = 0;
       for (const chapterNodes of byChapter.values()) {
         for (let index = 0; index < chapterNodes.length - 1; index += 1) {
           const fromNode = chapterNodes[index];
           const toNode = chapterNodes[index + 1];
-          const existing = await prisma.knowledgeEdge.findFirst({
-            where: {
-              fromId: fromNode.id,
-              toId: toNode.id,
-              relationType: 'prerequisite',
-            },
-          });
-
-          if (!existing) {
+          const key = `${fromNode.id}→${toNode.id}`;
+          if (edgeSet.has(key)) continue;
+          // 先写入 Set：循环内相邻对重复时不会重复建边
+          edgeSet.add(key);
+          try {
             await prisma.knowledgeEdge.create({
               data: {
                 fromId: fromNode.id,
@@ -152,6 +171,9 @@ export async function POST(req: NextRequest) {
               },
             });
             created += 1;
+          } catch (error: unknown) {
+            // 唯一约束兜底跨请求竞态：并发请求已建同一条边则跳过
+            if ((error as { code?: string })?.code !== 'P2002') throw error;
           }
         }
       }
@@ -193,16 +215,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '边的端点节点不存在' }, { status: 400 });
     }
 
-    // 字段白名单：直接传 body 会让多余字段触发 Prisma 校验错误（500）
-    const edge = await prisma.knowledgeEdge.create({
-      data: {
-        fromId,
-        toId,
-        relationType: body.relationType.trim(),
-        label: body.label ?? null,
-      },
+    // 字段白名单：直接传 body 会让多余字段触发 Prisma 校验错误（500）。
+    // 先查重：重复边会进 cloze/rebuild 出题池，同一命题出现两次会稀释计分
+    const existingEdge = await prisma.knowledgeEdge.findFirst({
+      where: { fromId, toId, relationType: body.relationType.trim() },
     });
-    return NextResponse.json(edge);
+    if (existingEdge) {
+      return NextResponse.json(existingEdge);
+    }
+    try {
+      const edge = await prisma.knowledgeEdge.create({
+        data: {
+          fromId,
+          toId,
+          relationType: body.relationType.trim(),
+          label: body.label ?? null,
+        },
+      });
+      return NextResponse.json(edge);
+    } catch (error: unknown) {
+      // 唯一约束兜底并发：另一个请求刚建好同一条边，返回已有边
+      if ((error as { code?: string })?.code === 'P2002') {
+        const dup = await prisma.knowledgeEdge.findFirst({
+          where: { fromId, toId, relationType: body.relationType.trim() },
+        });
+        if (dup) return NextResponse.json(dup);
+      }
+      throw error;
+    }
   } catch (error: unknown) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }

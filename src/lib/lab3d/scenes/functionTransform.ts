@@ -173,6 +173,16 @@ export const functionScene: Scene3DDefinition = {
         if (id === 'v') v = Number(value);
         rebuild();
       },
+      getReadouts() {
+        const sgn = (n: number) => (n < 0 ? `− ${Math.abs(n).toFixed(1)}` : `+ ${n.toFixed(1)}`);
+        const inner = h < 0 ? `x + ${Math.abs(h).toFixed(1)}` : `x − ${h.toFixed(1)}`;
+        const core = fnKind === 'quad' ? `(${inner})²` : fnKind === 'sin' ? `sin(${inner})` : `|${inner}|`;
+        const point =
+          fnKind === 'sin'
+            ? { label: '对称中心', value: `(${h.toFixed(1)}, ${v.toFixed(1)})` }
+            : { label: '顶点', value: `(${h.toFixed(1)}, ${v.toFixed(1)})` };
+        return [{ label: '当前解析式', value: `y = ${a.toFixed(1)}·${core} ${sgn(v)}` }, point];
+      },
       update(dt, elapsed) {
         // 轻微浮动呼吸感
         group.position.y = 1.8 + Math.sin(elapsed * 0.8) * 0.05;

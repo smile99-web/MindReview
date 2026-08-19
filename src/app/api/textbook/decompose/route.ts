@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import { getErrorMessage } from '@/lib/errors';
 import { llmCall } from '@/lib/llm-client';
+import { parseAiJson } from '@/lib/ai-service';
 
 interface ChapterTitle {
   title: string;
@@ -102,7 +103,15 @@ export async function POST(req: NextRequest) {
             where: { id: textbookId },
             data: { subjectId: subject.id },
           });
+          // subjectId 变量此前装的是学科"名字"（如"数学"），找到行后必须
+          // 换成真实 id——否则返回值把名字当 id，前端拿去调接口直接 400
+          subjectId = subject.id;
+        } else {
+          // 分类名不在库里：残留的非法字符串不能当 id 返回
+          subjectId = '';
         }
+      } else {
+        subjectId = '';
       }
     }
 
@@ -132,18 +141,17 @@ export async function POST(req: NextRequest) {
       jsonMode: true,
     });
 
+    // 统一走 parseAiJson：教材原文含大量数理化公式，LLM 输出的 LaTeX
+    // 反斜杠（\dfrac \sqrt \pi）是非法 JSON 转义——裸 JSON.parse 失败后
+    // 静默 parsed={} 会误报 422"AI 未能提取章节标题"
     let parsed: { chapters?: ChapterTitle[] } = {};
     try {
-      const cleaned = raw
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/```\s*$/, '')
-        .trim();
-      parsed = JSON.parse(cleaned);
+      parsed = parseAiJson<{ chapters?: ChapterTitle[] }>(raw, 'textbook_decompose');
     } catch {
-      const match = raw.match(/\{[\s\S]*\}/);
-      if (match) {
-        try { parsed = JSON.parse(match[0]); } catch { parsed = {}; }
-      }
+      parsed = {};
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      parsed = {};
     }
 
     const chapters = (parsed.chapters || [])
@@ -163,30 +171,31 @@ export async function POST(req: NextRequest) {
 
     // Persist the chapter list along with import status. Chapters
     // already imported keep their 'imported' status / chapterId /
-    // nodeIds (matched by title) — a repeat decompose must not wipe
-    // them; unmatched old entries are dropped.
+    // nodeIds — a repeat decompose must not wipe them.
+    // 匹配口径 = 同下标且同标题：此前按 title 建 Map，教材里同名章节
+    // （各单元都有的"复习与小结""数学活动"）会让第二个同名章节错配成
+    // 第一个章节的 imported 状态且永久锁死无法导入。
+    // 拆出的章节顺序/标题变化时回退 pending（安全默认，绝不错配）。
     const prevImports = ((tb.chapterImports as unknown) as Array<{
       chapterTitle: string;
       status: string;
       chapterId?: string;
       nodeIds?: string[];
     }>) || [];
-    const importedByTitle = new Map(
-      prevImports
-        .filter((c) => c.status === 'imported')
-        .map((c) => [c.chapterTitle, c]),
-    );
     await prisma.textbookUpload.update({
       where: { id: textbookId },
       data: {
         decomposedChapters: chapters as unknown as object,
-        chapterImports: chapters.map(
-          (c) =>
-            importedByTitle.get(c.title) ?? {
-              chapterTitle: c.title,
-              status: 'pending',
-            },
-        ) as unknown as object,
+        chapterImports: chapters.map((c, i) => {
+          const prev = prevImports[i];
+          if (prev?.status === 'imported' && prev.chapterTitle === c.title) {
+            return prev;
+          }
+          return {
+            chapterTitle: c.title,
+            status: 'pending',
+          };
+        }) as unknown as object,
       },
     });
 

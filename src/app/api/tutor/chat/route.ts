@@ -1,6 +1,7 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { rateLimit } from '@/lib/rate-limit';
 import { socraticDialogue } from '@/lib/ai-tutor';
 import { saveChatMessage } from '@/lib/tutor-persistence';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
@@ -23,6 +24,15 @@ export async function POST(req: NextRequest) {
 
     // --- Resolve userId from JWT token (with DB fallback) ---
     const userId = await resolveUserIdFromRequest(req);
+
+    // 限流：每次对话都是一次付费 LLM 调用，每人每小时 60 条，防脚本化烧额度
+    const rl = rateLimit(`tutor:${userId}`, 60, 60 * 60 * 1000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: '提问太频繁了，休息一会儿再继续吧' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+      );
+    }
 
     // --- Validate required fields ---
     if (!knowledgeNodeId) {
@@ -80,7 +90,7 @@ export async function POST(req: NextRequest) {
     console.error('[Tutor Chat API] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error, '服务器内部错误') },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

@@ -244,6 +244,26 @@ export const quadraticFunctionScene: Scene3DDefinition = {
         if (id === 'b') tb = Number(value);
         if (id === 'c') tc = Number(value);
       },
+      getReadouts() {
+        if (ta === 0) {
+          return [
+            { label: '提示', value: 'a=0 退化为一次函数（直线）' },
+            { label: '斜率', value: `${tb}` },
+          ];
+        }
+        const vx = -tb / (2 * ta);
+        const vy = ta * vx * vx + tb * vx + tc;
+        const disc = tb * tb - 4 * ta * tc;
+        return [
+          { label: '开口方向', value: ta > 0 ? '向上' : '向下' },
+          { label: '对称轴', value: `x = ${vx.toFixed(2)}` },
+          { label: '顶点坐标', value: `(${vx.toFixed(2)}, ${vy.toFixed(2)})` },
+          {
+            label: `与x轴交点 (Δ=${disc.toFixed(1)})`,
+            value: disc > 0 ? '2个' : disc === 0 ? '1个' : '无',
+          },
+        ];
+      },
       update(dt, elapsed) {
         // 参数阻尼过渡：a 过零时开口平滑翻转
         const pa = ca;

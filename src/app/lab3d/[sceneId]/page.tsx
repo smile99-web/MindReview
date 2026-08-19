@@ -24,11 +24,21 @@ export default function Lab3DScenePage() {
   useEffect(() => {
     if (!sceneId) return;
     let cancelled = false;
-    loadScene(sceneId).then((d) => {
-      if (cancelled) return;
-      if (d) setDef(d);
-      else setFailed(true);
-    });
+    // 场景切换（底部"更多演示"是客户端导航，组件不卸载）时必须重置状态：
+    // 否则 A 场景失败后的 failed=true 会卡死 B 场景（永久显示加载失败），
+    // 且 B 加载完成前会用 B 的标题渲染 A 的画面（张冠李戴）。
+    setDef(null);
+    setFailed(false);
+    loadScene(sceneId)
+      .then((d) => {
+        if (cancelled) return;
+        if (d) setDef(d);
+        else setFailed(true);
+      })
+      // loadScene 内部 reject 时此前是 unhandled rejection + 永远停在加载中
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
     return () => {
       cancelled = true;
     };

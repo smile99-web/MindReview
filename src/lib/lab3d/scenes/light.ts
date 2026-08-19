@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 import * as THREE from 'three';
 import type { Scene3DDefinition, SceneContext, SceneHandle } from '../types';
-import { addStageBasics, makeLabel, std } from '../three-utils';
+import { addStageBasics, disposeObject, makeLabel, std } from '../three-utils';
 
 const N_AIR = 1.0;
 const N_WATER = 1.33;
@@ -159,6 +159,7 @@ export const lightScene: Scene3DDefinition = {
       },
       dispose() {
         ctx.scene.remove(water, waterLabel, airLabel, normal, normalLabel, source, sourceLabel, incident, reflected, refracted, angleLabel);
+        [water, waterLabel, airLabel, normal, normalLabel, source, sourceLabel, incident, reflected, refracted, angleLabel].forEach((o) => disposeObject(o));
       },
     };
   },

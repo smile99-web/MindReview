@@ -1,5 +1,5 @@
 import { getErrorMessage } from '@/lib/errors';
-import { parseAiJson, runAiTask } from '@/lib/ai-service';
+import { AiServiceError, parseAiJson, runAiTask } from '@/lib/ai-service';
 import { getArkConfig } from '@/lib/ark';
 import OpenAI from 'openai';
 import { prisma } from '@/lib/prisma';
@@ -120,8 +120,14 @@ export interface AnswerGradeResult {
 }
 
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-const LLM_TIMEOUT_MS = Number(process.env.AI_LLM_TIMEOUT_MS || 60_000);
-const LLM_RETRIES = Number(process.env.AI_LLM_RETRIES || 1);
+// 环境变量配成非数字时 Number() 得 NaN：NaN 超时会瞬间超时、NaN retries
+// 让重试循环一次不执行就抛误导性错误。必须 Number.isFinite 兜底。
+const envInt = (name: string, fallback: number, min = 1): number => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n >= min ? n : fallback;
+};
+const LLM_TIMEOUT_MS = envInt('AI_LLM_TIMEOUT_MS', 60_000, 1000);
+const LLM_RETRIES = envInt('AI_LLM_RETRIES', 1, 0);
 const VALID_ICAP_LEVELS = ['Passive', 'Active', 'Constructive', 'Interactive'];
 const VALID_RELATION_TYPES = ['contains', 'prerequisite', 'cause', 'compare', 'formula', 'experiment'];
 const VALID_MISTAKE_TYPES = ['conceptual', 'calculation', 'careless', 'application'];
@@ -188,6 +194,9 @@ function normalizeDecomposeKnowledgeResult(value: unknown): DecomposeKnowledgeRe
           icapLevel: VALID_ICAP_LEVELS.includes(asString(node.icapLevel))
             ? asString(node.icapLevel)
             : 'Active',
+          // LLM 按提示返回的年级标签此前没拷进返回值：import-chapter 写库
+          // 恒 null，subjects 页按学期分组静默失效
+          gradeLevel: asString(node.gradeLevel) || undefined,
         }))
         .filter((node) => !!node.title)
     : [];
@@ -195,15 +204,32 @@ function normalizeDecomposeKnowledgeResult(value: unknown): DecomposeKnowledgeRe
   const edges = Array.isArray(root.edges)
     ? root.edges
         .filter(isRecord)
-        .map((edge): DecomposedKnowledgeEdge => ({
-          fromIndex: clampInt(edge.fromIndex, 0, Math.max(0, nodes.length - 1), 0),
-          toIndex: clampInt(edge.toIndex, 0, Math.max(0, nodes.length - 1), 0),
-          relationType: VALID_RELATION_TYPES.includes(asString(edge.relationType))
-            ? asString(edge.relationType)
-            : 'contains',
-          label: asString(edge.label),
-        }))
-        .filter((edge) => edge.fromIndex !== edge.toIndex)
+        .map((edge): DecomposedKnowledgeEdge | null => {
+          // 越界下标直接丢弃：钳位会把模型从未断言的关系静默写进图谱
+          // （10 个节点时 fromIndex=99 会被改写成指向节点 9 的边）。
+          const fromIndex = typeof edge.fromIndex === 'number' ? Math.trunc(edge.fromIndex) : NaN;
+          const toIndex = typeof edge.toIndex === 'number' ? Math.trunc(edge.toIndex) : NaN;
+          if (
+            !Number.isFinite(fromIndex) ||
+            !Number.isFinite(toIndex) ||
+            fromIndex < 0 ||
+            toIndex < 0 ||
+            fromIndex >= nodes.length ||
+            toIndex >= nodes.length ||
+            fromIndex === toIndex
+          ) {
+            return null;
+          }
+          return {
+            fromIndex,
+            toIndex,
+            relationType: VALID_RELATION_TYPES.includes(asString(edge.relationType))
+              ? asString(edge.relationType)
+              : 'contains',
+            label: asString(edge.label),
+          };
+        })
+        .filter((edge): edge is DecomposedKnowledgeEdge => edge !== null)
     : [];
 
   return { nodes, edges };
@@ -217,6 +243,10 @@ function normalizeGenerateQuestionsResult(value: unknown): GenerateQuestionsResu
     rawQuestions = value;
   } else if (isRecord(value) && Array.isArray((value as Record<string,unknown>).questions)) {
     rawQuestions = (value as Record<string,unknown>).questions as unknown[];
+  } else if (isRecord(value) && (value.stem !== undefined || value.question !== undefined)) {
+    // 提示词示例展示的是单题对象形状，LLM 偶尔照示例返回单个题目对象
+    // （而非数组）：此前被静默归一化为空 → 空白练习页。兜底包成单元素数组。
+    rawQuestions = [value];
   }
 
   const questions = rawQuestions
@@ -505,6 +535,9 @@ export async function llmCall(options: LlmCallOptions): Promise<string> {
     return content;
   } catch (error: unknown) {
     console.error('[llmCall] Error:', getErrorMessage(error));
+    // AiServiceError 带 category/retryable/statusCode 分类信息（超时/限流/
+    // 鉴权），重包装成裸 Error 会全丢——调用方无法区分"该重试"与"该报错"
+    if (error instanceof AiServiceError) throw error;
     throw new Error(`LLM调用失败: ${getErrorMessage(error)}`);
   }
 }
@@ -514,7 +547,10 @@ export async function llmCallWithLog(
   prisma?: Pick<PrismaClient, 'aiGenerationLog'>,
 ): Promise<string> {
   const startTime = Date.now();
-  const prompt = options.messages.map(m => `[${m.role}] ${m.content}`).join('\n');
+  // 多模态 content（text/image 部件数组）直接模板拼接会落成 [object Object]
+  const prompt = options.messages
+    .map((m) => `[${m.role}] ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
+    .join('\n');
   const settings = await getLlmSettings();
 
   try {
@@ -522,6 +558,7 @@ export async function llmCallWithLog(
     const durationMs = Date.now() - startTime;
 
     if (prisma) {
+      // 日志写库失败（DB 抖动）不能把一次成功的 LLM 调用变成失败
       await prisma.aiGenerationLog.create({
         data: {
           generatorType: options.generatorType || 'llm',
@@ -531,6 +568,8 @@ export async function llmCallWithLog(
           status: 'success',
           durationMs,
         },
+      }).catch((logErr: unknown) => {
+        console.warn('[llmCallWithLog] 成功日志写库失败（忽略）:', getErrorMessage(logErr));
       });
     }
 
@@ -548,7 +587,7 @@ export async function llmCallWithLog(
           errorMessage: getErrorMessage(error),
           durationMs,
         },
-      });
+      }).catch(() => { /* 原始错误优先，日志失败忽略 */ });
     }
 
     throw error;

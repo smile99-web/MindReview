@@ -1,7 +1,7 @@
 import { getErrorMessage } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { requireAdmin } from '@/lib/require-admin';
 
 // GET /api/chapters/[id] — 获取单个章节详情
 export async function GET(
@@ -35,7 +35,9 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    await resolveUserIdFromRequest(req);
+    // 章节是全站共享内容，删除会改写所有节点归属，必须管理员
+    const adminDenied = await requireAdmin(req);
+    if (adminDenied) return adminDenied;
 
     const chapter = await prisma.chapter.findUnique({ where: { id } });
     if (!chapter) {

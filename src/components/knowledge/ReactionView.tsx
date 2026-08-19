@@ -110,12 +110,14 @@ function parseAtoms(formula: string): Record<string, number> {
   // 不展开的话 Cu(OH)₂/Ca(OH)₂/Al₂(SO₄)₃ 这类初中化学极常见的
   // 形态会把 O/H 少数一半，配平正确也误判"未配平"。
   // 循环处理以支持嵌套括号，guard 防畸形输入死循环。
+  // 倍数钳制在 1–99：畸形/恶意输入（如 (HO)1000000000）否则会让
+  // repeat 分配超大字符串直接崩掉渲染。
   let expanded = cleaned;
   const groupRe = /\(([^()]*)\)(\d*)/;
   let guard = 0;
   while (groupRe.test(expanded) && guard++ < 20) {
     expanded = expanded.replace(groupRe, (_, inner: string, n: string) =>
-      inner.repeat(n ? parseInt(n, 10) : 1),
+      inner.repeat(Math.min(Math.max(1, parseInt(n, 10) || 1), 99)),
     );
   }
 

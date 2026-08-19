@@ -210,12 +210,15 @@ export async function resolveTtsConfig(voiceOverride?: string): Promise<Resolved
   }
 
   const saved = await prisma.apiKey.findUnique({ where: { service: 'tts' } }).catch(() => null);
+  // 与 llm/image 客户端一致：设置页禁用（isActive=false）后不得再发请求计费。
+  // 禁用后回退到环境变量（无则 apiKey=undefined，由 synthesizeSpeech 报"未配置"）。
+  const activeSaved = saved?.isActive ? saved : null;
   return {
     mode: 'openspeech',
-    apiKey: saved?.key ? decryptSecret(saved.key) : undefined,
+    apiKey: activeSaved?.key ? decryptSecret(activeSaved.key) : undefined,
     endpoint: TTS_ENDPOINT,
-    resourceId: saved?.baseUrl || RESOURCE_ID,
-    voice: voiceOverride || saved?.model || DEFAULT_VOICE,
+    resourceId: activeSaved?.baseUrl || RESOURCE_ID,
+    voice: voiceOverride || activeSaved?.model || DEFAULT_VOICE,
   };
 }
 

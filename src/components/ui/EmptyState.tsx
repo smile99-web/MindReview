@@ -1,6 +1,7 @@
 'use client';
 
 import { ReactNode } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 
 interface EmptyStateProps {
@@ -28,9 +29,10 @@ export function EmptyState({ icon = '📭', title, description, action, children
       {action && (
         <div className="mt-4">
           {action.href ? (
-            <a href={action.href}>
+            // <a> 整页刷新丢 SPA 状态，且 <a><button> 是非法嵌套——用 next/link
+            <Link href={action.href}>
               <Button>{action.label}</Button>
-            </a>
+            </Link>
           ) : (
             <Button onClick={action.onClick}>{action.label}</Button>
           )}

@@ -123,11 +123,12 @@ export async function POST(req: NextRequest) {
       '通用',
       '通用',
       chapter.title,
-      // Feed a slice of the textbook content (limit to ~10k
-      // chars to stay within LLM context). The LLM is instructed
-      // to focus on this chapter; passing a bit of surrounding
-      // context helps it resolve ambiguous references.
-      tb.content.slice(0, 10000),
+      // Feed a slice of the textbook content. decomposeKnowledge 内部
+      // 对 >4000 字启用 180s 超时档（且只取前 6000 字）——必超 nginx 60s
+      // 网关超时，用户收假 504 而后台继续写库。截到 4000 字保持 120s 档，
+      // 并显式 preferNonReasoning（交互式调用，实测 24.5s→6.6s）。
+      tb.content.slice(0, 4000),
+      { preferNonReasoning: true },
     )) as DecomposeKnowledgeResult;
 
     const knowledgeNodes = (result.nodes || []).map((n: DecomposedNode) => ({

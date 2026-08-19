@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { analyzeMistake } from '@/lib/llm-client';
 
 interface WrongAnswer {
@@ -60,14 +60,27 @@ export async function POST(
       subjectId = s?.id || null;
     }
 
-    // 数组内按 questionText 去重：双击提交/前端重复 push 会写重复行
+    // 数组内按 questionText 去重：双击提交/前端重复 push 会写重复行。
+    // 元素类型必须先校验：null 元素或非字符串字段会让 .slice/.trim 抛
+    // TypeError（此前整个请求 500），非字符串 correctAnswer 也会炸。
     const seen = new Set<string>();
-    const items = arr.slice(0, 20).filter((item) => {
-      const key = (item.questionText || '').slice(0, 2000).trim();
-      if (!key || !item.correctAnswer || seen.has(key)) return false;
+    const rawItems = arr.slice(0, 20).filter((item) => {
+      if (!item || typeof item !== 'object') return false;
+      if (typeof item.questionText !== 'string') return false;
+      if (typeof item.correctAnswer !== 'string' || !item.correctAnswer.trim()) return false;
+      if (item.wrongAnswer !== undefined && item.wrongAnswer !== null && typeof item.wrongAnswer !== 'string') return false;
+      const key = item.questionText.trim().slice(0, 2000);
+      if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
     });
+    // 统一 trim + 截断后的规范化文本：批内去重用 trim 过的 key，而入库/查重
+    // 之前用未 trim 的原文，"题目 " 与 "题目" 会重复建档（口径不一致）。
+    const items = rawItems.map((item) => ({
+      questionText: item.questionText.trim().slice(0, 2000),
+      wrongAnswer: (typeof item.wrongAnswer === 'string' ? item.wrongAnswer : '').slice(0, 500),
+      correctAnswer: item.correctAnswer.trim().slice(0, 500),
+    }));
     if (items.length === 0) {
       return NextResponse.json({ recorded: 0 });
     }
@@ -76,12 +89,12 @@ export async function POST(
     const existing = await prisma.mistake.findMany({
       where: {
         userId,
-        questionText: { in: items.map((i) => i.questionText.slice(0, 2000)) },
+        questionText: { in: items.map((i) => i.questionText) },
       },
       select: { questionText: true },
     });
     const existingTexts = new Set(existing.map((e) => e.questionText));
-    const toCreate = items.filter((i) => !existingTexts.has(i.questionText.slice(0, 2000)));
+    const toCreate = items.filter((i) => !existingTexts.has(i.questionText));
 
     // LLM 分析 + 写库按条并行（allSettled）：单条失败不影响其余条目
     const results = await Promise.allSettled(
@@ -116,7 +129,7 @@ export async function POST(
           prisma.$transaction(
             async (tx) => {
               const dup = await tx.mistake.findFirst({
-                where: { userId, questionText: item.questionText.slice(0, 2000) },
+                where: { userId, questionText: item.questionText },
                 select: { id: true },
               });
               if (dup) return null;
@@ -125,9 +138,9 @@ export async function POST(
                   userId,
                   knowledgeNodeId: null,
                   subjectId,
-                  questionText: item.questionText.slice(0, 2000),
-                  wrongAnswer: (item.wrongAnswer || '').slice(0, 500),
-                  correctAnswer: item.correctAnswer.slice(0, 500),
+                  questionText: item.questionText,
+                  wrongAnswer: item.wrongAnswer,
+                  correctAnswer: item.correctAnswer,
                   mistakeType,
                   analysis,
                   state: 'new',
@@ -144,22 +157,23 @@ export async function POST(
             { isolationLevel: 'Serializable' },
           );
         try {
-          await createIfAbsent();
+          return (await createIfAbsent()) !== null;
         } catch (error: unknown) {
           const code = (error as { code?: string })?.code;
-          if (code === 'P2034' || code === '40001') await createIfAbsent();
-          else throw error;
+          if (code === 'P2034' || code === '40001') return (await createIfAbsent()) !== null;
+          throw error;
         }
       }),
     );
-    const recorded = results.filter((r) => r.status === 'fulfilled').length;
+    // recorded 只计真正新建的行：查重跳过（返回 null）与失败（rejected）都不算
+    const recorded = results.filter((r) => r.status === 'fulfilled' && r.value === true).length;
 
     return NextResponse.json({ recorded });
   } catch (error: unknown) {
     console.error('[doc/record-mistakes] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

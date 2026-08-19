@@ -576,6 +576,8 @@ export class GalaxyEngine {
       for (const n of this.nodes) {
         n.mesh.material = this.bucketMats[n.bucket];
         n.glow.material = this.glowMats[n.bucket];
+        // 取消聚焦/悬停后必须恢复辉光可见（聚焦分支把它隐藏过）
+        n.glow.visible = true;
       }
     } else {
       const neighborIds = new Set<string>([activeId]);
@@ -587,11 +589,17 @@ export class GalaxyEngine {
         if (n.id === activeId || neighborIds.has(n.id)) {
           n.mesh.material = this.bucketHiMats[n.bucket];
           n.glow.material = this.glowMats[n.bucket];
+          // 高亮节点必须恢复 glow 可见（聚焦分支会把非聚焦节点的 glow 隐藏）
+          n.glow.visible = true;
         } else if (focusing) {
           n.mesh.material = this.dimMat;
+          // 聚焦时辉光也要调暗：AdditiveBlending 的 glow 仍全亮会让
+          // 非聚焦节点在视觉上几乎无差别，聚焦对比度失效
+          n.glow.visible = false;
         } else {
           n.mesh.material = this.bucketMats[n.bucket];
           n.glow.material = this.glowMats[n.bucket];
+          n.glow.visible = true;
         }
       }
     }

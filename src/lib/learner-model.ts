@@ -125,7 +125,11 @@ export async function buildLearnerProfile(
       _count: { id: true },
       where: { representationType: { not: null } },
     }),
-    prisma.knowledgeEdge.count(),
+    prisma.knowledgeNode.count({
+      // schemaCount 语义是"图式节点数"（representationType='schema' 的节点），
+      // 此前误用 knowledgeEdge.count()（全库边数）
+      where: { representationType: 'schema' },
+    }),
 
     // ReviewLog data – last 50 sessions for velocity
     prisma.reviewLog.findMany({
@@ -256,16 +260,29 @@ export async function buildLearnerProfile(
   for (const node of masteryNodes) {
     const subjectName = node.subject?.name;
     if (!subjectName) continue;
+    // 只统计用户有学习记录（progress 行）的节点：全库未学节点 mastery=0
+    // 会把新用户每个学科的平均掌握度稀释到 <40 → 所有学科判弱项 →
+    // 下方"新用户入门诊断"引导分支成为永远到不了的死代码
+    if (!progressMasteryByNodeId.has(node.id)) continue;
     const values = masteryBySubject.get(subjectName) ?? [];
     values.push(node.masteryLevel);
     masteryBySubject.set(subjectName, values);
   }
 
-  for (const [subjectName, values] of masteryBySubject) {
-    if (values.length === 0) continue;
-    const avgM = values.reduce((sum, mastery) => sum + mastery, 0) / values.length;
-    const mistakeRatio = (subjectMistakeCount[subjectName] || 0) / values.length;
-    if (avgM > 75) {
+  // 有错题但无 progress 行的学科也要参与判定（错题本就来自练习）
+  const judgedSubjects = new Set<string>([
+    ...masteryBySubject.keys(),
+    ...Object.keys(subjectMistakeCount),
+  ]);
+  for (const subjectName of judgedSubjects) {
+    const values = masteryBySubject.get(subjectName) ?? [];
+    const avgM = values.length > 0
+      ? values.reduce((sum, mastery) => sum + mastery, 0) / values.length
+      : 0;
+    const mistakeRatio = values.length > 0
+      ? (subjectMistakeCount[subjectName] || 0) / values.length
+      : (subjectMistakeCount[subjectName] || 0) > 0 ? 1 : 0;
+    if (values.length > 0 && avgM > 75) {
       strengthAreas.push(subjectName);
     }
     if (avgM < 40 || mistakeRatio > 0.5) {
@@ -764,7 +781,9 @@ export async function runOnboardingDiagnostic(
   await prisma.reviewLog.create({
     data: {
       userId,
-      knowledgeNodeId: selectedNodes[0]?.id ?? 'unknown',
+      // 字段可空：'unknown' 字面量会撞 FK 约束变 500（当前 selectedNodes
+      // 恒非空所以不可达，但这是个脆弱不变量）
+      knowledgeNodeId: selectedNodes[0]?.id ?? null,
       action: 'diagnostic',
       masteryBefore: null,
       masteryAfter: avgScore,

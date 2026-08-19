@@ -42,6 +42,7 @@ export default function ChapterDetailPage() {
 
   const [chapter, setChapter] = useState<ChapterDetail | null>(null);
   const [nodes, setNodes] = useState<KnowledgeNodeListItem[]>([]);
+  const [totalNodes, setTotalNodes] = useState(0);
   const [loading, setLoading] = useState(true);
   const [blockedMap, setBlockedMap] = useState<Map<string, BlockedPrerequisite[]>>(new Map());
 
@@ -50,15 +51,33 @@ export default function ChapterDetailPage() {
       try {
         const [chRes, nodeRes] = await Promise.all([
           authFetch(`/api/chapters/${id}`),
-          authFetch(`/api/knowledge?chapterId=${id}&limit=100`),
+          authFetch(`/api/knowledge?chapterId=${id}&limit=200`),
         ]);
 
         if (chRes.ok) {
           setChapter(await chRes.json());
         }
 
-        const nodeData = ((await nodeRes.json()).nodes || []) as KnowledgeNodeListItem[];
+        // nodeRes 非 200 时 body 是 { error }：不查 ok 会静默当空列表展示
+        if (!nodeRes.ok) throw new Error(`知识点加载失败 (${nodeRes.status})`);
+        const nodeJson = (await nodeRes.json()) as { nodes?: KnowledgeNodeListItem[]; total?: number };
+        let nodeData = nodeJson.nodes || [];
+        const total = nodeJson.total ?? nodeData.length;
+        // 超过单页上限（200）的章节：循环拉取剩余页合并，不再静默截断
+        if (total > nodeData.length) {
+          const rest: KnowledgeNodeListItem[] = [];
+          for (let skip = nodeData.length; skip < total; skip += 200) {
+            const page = Math.floor(skip / 200) + 1;
+            const moreRes = await authFetch(`/api/knowledge?chapterId=${id}&limit=200&page=${page}`);
+            const moreJson = (await moreRes.json()) as { nodes?: KnowledgeNodeListItem[] };
+            const moreNodes = moreJson.nodes || [];
+            rest.push(...moreNodes);
+            if (moreNodes.length === 0) break; // 防御：无更多数据时避免死循环
+          }
+          nodeData = [...nodeData, ...rest];
+        }
         setNodes(nodeData);
+        setTotalNodes(total);
 
         // Batch prerequisite check for all nodes in this chapter
         if (nodeData.length > 0) {
@@ -120,7 +139,7 @@ export default function ChapterDetailPage() {
             返回学科
           </Link>
           <h1 className="text-[28px] font-bold text-slate-800 tracking-tight mt-1">{chapter.title}</h1>
-          <p className="text-slate-500 mt-1.5 text-[15px]">{nodes.length} 个知识点</p>
+          <p className="text-slate-500 mt-1.5 text-[15px]">{totalNodes} 个知识点</p>
         </div>
         <Link href={`/mindmap?chapterId=${id}`}>
           <Button variant="secondary">查看思维导图</Button>
@@ -142,7 +161,7 @@ export default function ChapterDetailPage() {
                     <h4 className="font-medium text-slate-800">{node.title}</h4>
                     <Badge variant="purple" size="sm">{node.icapLevel}</Badge>
                     <span className="text-xs text-slate-400">
-                      {'★'.repeat(node.difficulty)}
+                      {'★'.repeat(Math.max(0, Math.min(5, Math.round(node.difficulty) || 0)))}
                     </span>
                   </div>
                   <LatexText text={node.summary || ""} className="text-xs text-slate-500 line-clamp-1" />

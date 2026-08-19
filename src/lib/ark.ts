@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { decryptSecret } from '@/lib/secrets';
+import { assertSafeExternalBaseUrl } from '@/lib/url-security';
 
 /**
  * 火山方舟统一调用（Agent Plan 订阅）：一个 API Key 走方舟 OpenAI 兼容端点
@@ -50,14 +51,20 @@ export interface ArkConfig {
 export function parseArkModels(raw: string | null | undefined): ArkModels {
   if (!raw) return { ...ARK_DEFAULT_MODELS };
   try {
-    const obj = JSON.parse(raw) as Partial<ArkModels>;
+    // JSON.parse('null')/'"doubao"' 不抛错但得到非对象：此前直接 .llm
+    // 解引用走 catch，把 'null' 当成 llm 模型名返回（调用必 400）
+    const obj: unknown = JSON.parse(raw);
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return { ...ARK_DEFAULT_MODELS };
+    }
+    const partial = obj as Partial<ArkModels>;
     return {
-      llm: obj.llm || ARK_DEFAULT_MODELS.llm,
-      vision: obj.vision || ARK_DEFAULT_MODELS.vision,
-      image: obj.image || ARK_DEFAULT_MODELS.image,
-      embedding: obj.embedding || ARK_DEFAULT_MODELS.embedding,
-      tts: obj.tts || ARK_DEFAULT_MODELS.tts,
-      voice: obj.voice || ARK_DEFAULT_MODELS.voice,
+      llm: partial.llm || ARK_DEFAULT_MODELS.llm,
+      vision: partial.vision || ARK_DEFAULT_MODELS.vision,
+      image: partial.image || ARK_DEFAULT_MODELS.image,
+      embedding: partial.embedding || ARK_DEFAULT_MODELS.embedding,
+      tts: partial.tts || ARK_DEFAULT_MODELS.tts,
+      voice: partial.voice || ARK_DEFAULT_MODELS.voice,
     };
   } catch {
     return { ...ARK_DEFAULT_MODELS, llm: raw };
@@ -73,9 +80,19 @@ export async function getArkConfig(): Promise<ArkConfig | null> {
     .findUnique({ where: { service: 'ark' } })
     .catch(() => null);
   if (!row?.isActive || !row.key) return null;
+  // 读取侧复核 baseUrl：写入侧（settings）已校验一次，但 DB 可能被直接
+  // 篡改；方舟 key 一把钥匙覆盖全部模型，baseUrl 被改成攻击者域名即明文
+  // 外泄（与 llm-client 的读取侧校验同一威胁模型，此前唯独 ark 总入口漏了）
+  let baseUrl: string;
+  try {
+    baseUrl = assertSafeExternalBaseUrl(row.baseUrl || ARK_DEFAULT_BASE_URL);
+  } catch {
+    console.error('[ark] ApiKey(ark) 的 baseUrl 未通过安全校验，已忽略该行配置');
+    return null;
+  }
   return {
     apiKey: decryptSecret(row.key),
-    baseUrl: row.baseUrl || ARK_DEFAULT_BASE_URL,
+    baseUrl,
     models: parseArkModels(row.model),
   };
 }

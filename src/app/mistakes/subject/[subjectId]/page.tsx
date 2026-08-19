@@ -48,10 +48,12 @@ export default function SubjectMistakesPage({
 
   useEffect(() => {
     let cancelled = false;
+    // 「已掌握」tab 也需要列表里带上已掌握错题，否则数量永远显示 (0)
+    const includeResolved = showResolved || filter === 'resolved';
     void (async () => {
       try {
         const res = await authFetch(
-          `/api/mistakes/by-subject/${subjectId}${showResolved ? '?includeResolved=true' : ''}`,
+          `/api/mistakes/by-subject/${subjectId}${includeResolved ? '?includeResolved=true' : ''}`,
         );
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -71,7 +73,7 @@ export default function SubjectMistakesPage({
     return () => {
       cancelled = true;
     };
-  }, [subjectId, showResolved]);
+  }, [subjectId, showResolved, filter]);
 
   const filtered = mistakes.filter((m) => {
     if (filter === 'due') return m.isDue;

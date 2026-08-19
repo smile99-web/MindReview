@@ -100,9 +100,25 @@ export async function POST(req: NextRequest) {
         data[key] = body[key].filter((v: unknown) => typeof v === 'string');
       }
     }
-    const numberFields = ['difficulty', 'cognitiveLoad'];
-    for (const key of numberFields) {
-      if (typeof body[key] === 'number' && Number.isFinite(body[key])) data[key] = body[key];
+    // 数值字段逐字段钳制到合法区间——仅验 Number.isFinite 会让 -1 / 1e9
+    // 入库，chapters 页 '★'.repeat(difficulty) 直接崩溃
+    if (typeof body.difficulty === 'number' && Number.isFinite(body.difficulty)) {
+      data.difficulty = Math.max(1, Math.min(5, Math.round(body.difficulty)));
+    }
+    if (typeof body.cognitiveLoad === 'number' && Number.isFinite(body.cognitiveLoad)) {
+      data.cognitiveLoad = Math.max(1, Math.min(5, Math.round(body.cognitiveLoad)));
+    }
+    if (typeof body.masteryLevel === 'number' && Number.isFinite(body.masteryLevel)) {
+      data.masteryLevel = Math.max(0, Math.min(100, Math.round(body.masteryLevel)));
+    }
+    if (typeof body.repetitions === 'number' && Number.isFinite(body.repetitions)) {
+      data.repetitions = Math.max(0, Math.round(body.repetitions));
+    }
+    if (typeof body.intervalDays === 'number' && Number.isFinite(body.intervalDays)) {
+      data.intervalDays = Math.max(0, Math.round(body.intervalDays));
+    }
+    if (typeof body.easeFactor === 'number' && Number.isFinite(body.easeFactor)) {
+      data.easeFactor = Math.max(1.3, Math.min(3.0, body.easeFactor));
     }
     if (
       body.representationData &&

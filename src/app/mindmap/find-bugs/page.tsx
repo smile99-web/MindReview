@@ -95,10 +95,14 @@ export default function FindBugsPage() {
   const [activeChapterId, setActiveChapterId] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const res = await authFetch('/api/mindmap');
+        // 不查 res.ok 会把 401/500 的 { error } 当空数据展示
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as { nodes?: GraphNode[]; edges?: GraphEdge[] };
+        if (cancelled) return;
         const nodes = data.nodes ?? [];
         const edges = data.edges ?? [];
         const chapterByNodeId = new Map<string, string>();
@@ -131,11 +135,12 @@ export default function FindBugsPage() {
           .sort((a, b) => a.subjectName.localeCompare(b.subjectName, 'zh'));
         setChapters(playable);
       } catch {
-        setError('加载章节失败，请刷新重试');
+        if (!cancelled) setError('加载章节失败，请刷新重试');
       } finally {
-        setLoadingChapters(false);
+        if (!cancelled) setLoadingChapters(false);
       }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   const titleById = useMemo(() => {

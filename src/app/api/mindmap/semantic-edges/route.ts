@@ -45,7 +45,10 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
 
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const chapterId = typeof body.chapterId === 'string' ? body.chapterId.trim() : '';
     const dryRun = body.dryRun === true;
 

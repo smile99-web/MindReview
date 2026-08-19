@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, useId } from 'react';
 import { Button } from '@/components/ui/Button';
 import { BoundaryCallout } from './BoundaryCallout';
 import { LatexText } from '@/components/ui/LatexText';
@@ -97,6 +97,10 @@ function ForceArrow({
   const x2 = cx + vec.dx * arrowLen;
   const y2 = cy + vec.dy * arrowLen;
   const color = force.color || defaultColors[index % defaultColors.length];
+  // SVG marker id 是文档级解析：同页两个 ForceDiagram 实例时，
+  // `url(#arrow-0)` 会用错第一个实例的箭头 → 用 useId 加实例前缀
+  const instanceId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const markerId = `arrow-${instanceId}-${index}`;
 
   const lx = cx + vec.dx * arrowLen * 0.55;
   const ly = cy + vec.dy * arrowLen * 0.55;
@@ -109,11 +113,11 @@ function ForceArrow({
       <line
         x1={cx} y1={cy} x2={x2} y2={y2}
         stroke={color} strokeWidth="2"
-        markerEnd={`url(#arrow-${index})`}
+        markerEnd={`url(#${markerId})`}
       />
       <defs>
         <marker
-          id={`arrow-${index}`} viewBox="0 0 10 10"
+          id={markerId} viewBox="0 0 10 10"
           refX="9" refY="5" markerWidth="6" markerHeight="6"
           orient="auto"
         >

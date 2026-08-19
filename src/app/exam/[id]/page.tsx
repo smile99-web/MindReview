@@ -406,32 +406,37 @@ function PracticeSession({
   busy: boolean;
 }) {
   const allAnswered = questions.every((_, i) => !!answers[i]);
+  // 只有选项正常的选择题参与红绿判分/计分（与 DocUploadCard 同口径）：
+  // 文本作答的题措辞不同即误判，只展示参考答案对照
+  const isGradableMC = (q: PracticeQuestion) => !!q.options && q.options.length > 0;
+  const mcCount = questions.filter(isGradableMC).length;
   const correctCount = questions.filter(
-    (q, i) => answers[i] && q.answer && answers[i] === q.answer,
+    (q, i) => isGradableMC(q) && answers[i] && q.answer && answers[i] === q.answer,
   ).length;
 
   return (
     <div>
-      {submitted && (
+      {submitted && mcCount > 0 && (
         <div className="mb-3 text-sm">
           <span
             className={
-              correctCount === questions.length
+              correctCount === mcCount
                 ? 'text-emerald-600 font-medium'
                 : correctCount > 0
                   ? 'text-amber-600 font-medium'
                   : 'text-rose-600 font-medium'
             }
           >
-            得分 {correctCount}/{questions.length}
+            得分 {correctCount}/{mcCount}
           </span>
         </div>
       )}
       <div className="space-y-3">
         {questions.map((q, qi) => {
           const userAns = answers[qi];
-          const correct = submitted && userAns && userAns === q.answer;
-          const wrong = submitted && userAns && userAns !== q.answer;
+          const gradable = isGradableMC(q);
+          const correct = gradable && submitted && userAns && userAns === q.answer;
+          const wrong = gradable && submitted && userAns && userAns !== q.answer;
           return (
             <div
               key={qi}
@@ -484,14 +489,21 @@ function PracticeSession({
                   })}
                 </div>
               ) : (
-                <input
-                  type="text"
-                  value={userAns || ''}
-                  disabled={submitted}
-                  onChange={(e) => onAnswer(qi, e.target.value)}
-                  placeholder="输入你的答案..."
-                  className="w-full px-3 py-2 rounded-md border border-slate-200 text-sm"
-                />
+                <div>
+                  <input
+                    type="text"
+                    value={userAns || ''}
+                    disabled={submitted}
+                    onChange={(e) => onAnswer(qi, e.target.value)}
+                    placeholder="输入你的答案..."
+                    className="w-full px-3 py-2 rounded-md border border-slate-200 text-sm"
+                  />
+                  {submitted && q.answer && (
+                    <div className="mt-1.5 text-sm">
+                      <span className="text-emerald-700 font-medium">参考答案: {q.answer}</span>
+                    </div>
+                  )}
+                </div>
               )}
               {submitted && q.explanation && (
                 <div className="mt-2 text-xs text-slate-600 bg-white/60 rounded-md p-2">

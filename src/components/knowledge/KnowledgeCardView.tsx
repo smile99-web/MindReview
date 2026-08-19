@@ -339,6 +339,8 @@ export function KnowledgeCardView({
         body: JSON.stringify({
           knowledgeNodeId: node.id,
           representationType: repType || undefined,
+          // 显式"重新生成"必须绕过服务端缓存（缓存只挡无意识的重复调用）
+          force: true,
         }),
       });
 
@@ -373,7 +375,8 @@ export function KnowledgeCardView({
             </Badge>
             <span className="text-xs text-slate-400">
               {getDifficultyLabel(node.difficulty)} · 认知负荷:{' '}
-              {'★'.repeat(node.cognitiveLoad)}
+              {/* repeat 必须钳制：LLM 脏数据（负数/超大）会 RangeError 崩渲染 */}
+              {'★'.repeat(Math.max(0, Math.min(5, Math.round(node.cognitiveLoad || 0))))}
             </span>
           </div>
         </CardHeader>

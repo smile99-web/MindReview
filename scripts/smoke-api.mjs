@@ -66,6 +66,8 @@ async function register(label) {
       username,
       password,
       name: `Smoke ${label.toUpperCase()}`,
+      // 注册已要求推荐码：由 SMOKE_INVITE_CODE 环境变量提供（服务端 CLI 生成）
+      ...(process.env.SMOKE_INVITE_CODE ? { inviteCode: process.env.SMOKE_INVITE_CODE } : {}),
     },
   });
 
@@ -75,6 +77,7 @@ async function register(label) {
 
   return {
     token: data.access_token,
+    refreshToken: data.refresh_token,
     user: data.user,
   };
 }
@@ -192,6 +195,82 @@ async function main() {
   await step('tutor history list is authenticated and scoped', async () => {
     const { data } = await request('/api/tutor/history?action=list', { token: userA.token });
     assert(Array.isArray(data?.sessions), 'tutor history list did not return sessions');
+  });
+
+  // ---- 2026-08 bug-fix regression cases ----
+
+  await step('unauthenticated API request returns 401', async () => {
+    await request('/api/review', { expected: [401] });
+  });
+
+  await step('malformed JSON body returns 400 not 500', async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${baseUrl}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: 'not-json',
+        signal: controller.signal,
+      });
+      assert(res.status === 400, `malformed JSON returned ${res.status} (expected 400)`);
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  await step('non-string login fields return 400 not 500', async () => {
+    await request('/api/auth/login', {
+      method: 'POST',
+      body: { username: 123, password: {} },
+      expected: [400],
+    });
+  });
+
+  await step('refresh token rotation invalidates old token', async () => {
+    assert(userA.refreshToken, 'user A missing refresh_token for rotation test');
+    // 第一次刷新：轮换出新 token
+    const first = await request('/api/auth/refresh', {
+      method: 'POST',
+      body: { refresh_token: userA.refreshToken },
+    });
+    assert(first.data?.access_token, 'refresh did not return new access_token');
+    assert(first.data?.refresh_token, 'refresh did not return new refresh_token');
+    // 旧 token 复用必须 401（盗用检测：P2025 分支曾把新 token 发给旧持有者）
+    await request('/api/auth/refresh', {
+      method: 'POST',
+      body: { refresh_token: userA.refreshToken },
+      expected: [401],
+    });
+    // 新 token 可用
+    const second = await request('/api/auth/refresh', {
+      method: 'POST',
+      body: { refresh_token: first.data.refresh_token },
+    });
+    assert(second.data?.access_token, 'rotated refresh_token is not usable');
+  });
+
+  await step('fake PDF rejected with 415 (magic bytes)', async () => {
+    const form = new FormData();
+    form.append('file', new Blob(['not a real pdf'], { type: 'application/pdf' }), 'fake.pdf');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${baseUrl}/api/textbook/upload`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${userA.token}` },
+        body: form,
+        signal: controller.signal,
+      });
+      assert(res.status === 415, `fake PDF upload returned ${res.status} (expected 415)`);
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  await step('search returns results array', async () => {
+    const { data } = await request('/api/search?q=%E5%8A%9B', { token: userA.token });
+    assert(Array.isArray(data?.results), 'search did not return results array');
   });
 
   console.log('API smoke tests completed.');

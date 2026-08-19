@@ -52,7 +52,7 @@ export default function Lab3DPage() {
       <div className="mb-6">
         <h1 className="text-[28px] font-bold tracking-tight text-slate-800">🧊 3D 实验室</h1>
         <p className="mt-1.5 text-[15px] text-slate-500">
-          初中 7~9 年级数学、物理、化学知识点的 3D 互动演示：拖动旋转、调节参数、跟着语音讲解一步步学
+          初中 7~9 年级数学、物理、化学知识点的 3D 互动演示：拖动旋转、调节参数看 📊 实时读数、跟着语音讲解一步步学
         </p>
       </div>
 

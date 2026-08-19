@@ -65,6 +65,10 @@ ssh "${SSH_OPTS[@]}" "$SERVER" "set -e && cd '$REMOTE_DIR' && \
       # Mac build 产物里 .next/standalone/MindReview/node_modules/{next,react,react-dom}
       # 是 pnpm symlink，tar 解压到同名 symlink 上会因为 'File exists' 退出，
       # 整条 && 链断开后 pm2 仍会被拉起（用 ; 分隔），导致 CSS/chunks 全部 404。
+      # 静态 chunk 先备份再清理：部署瞬间用户浏览器缓存的旧 HTML 仍引用
+      # 旧 hash chunk，删掉会让页面只剩无样式 HTML（2026-08-18 白屏事件）。
+      # 解压后合并回去（cp -rn 不覆盖新文件），让旧 HTML 在缓存期内继续可用。
+      cp -r .next/standalone/MindReview/.next/static /tmp/mr-static-prev 2>/dev/null || true; \
       rm -rf .next/standalone/MindReview/.next \
              .next/standalone/MindReview/node_modules \
              .next/standalone/.next \
@@ -80,6 +84,8 @@ ssh "${SSH_OPTS[@]}" "$SERVER" "set -e && cd '$REMOTE_DIR' && \
       # 缺了 cp 会因 No such file or directory 直接退出 — 见 2026-06-14 首页 CSS 404 事件）
       mkdir -p .next/standalone/MindReview/.next && \
       cp -r .next/static .next/standalone/MindReview/.next/static && \
+      # 合并上一版保留的 chunk（见上方注释）\
+      if [ -d /tmp/mr-static-prev ]; then cp -rn /tmp/mr-static-prev/. .next/standalone/MindReview/.next/static/ && rm -rf /tmp/mr-static-prev; fi; \
       echo \"   [vps] static chunks: \$(ls .next/standalone/MindReview/.next/static/chunks 2>/dev/null | wc -l)\" && \
       cp -r public .next/standalone/ && \
       # 把 @prisma/client 复制到符号链接指向的位置

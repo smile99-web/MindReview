@@ -3,7 +3,7 @@ import { jwtDecode } from "jwt-decode";
 // 应用挂在 /rm 子路径（next.config.ts basePath）。AUTH_API 作为
 // `${AUTH_API}/api/auth/*` 的前缀，默认带 basePath；跨域部署时才用
 // NEXT_PUBLIC_AUTH_API 覆盖。
-const AUTH_API = process.env.NEXT_PUBLIC_AUTH_API || "/rm";
+export const AUTH_API = process.env.NEXT_PUBLIC_AUTH_API || "/rm";
 
 interface User {
   id: string;
@@ -66,9 +66,12 @@ function clearTokens() {
 
 function redirectToLogin() {
   if (typeof window === "undefined") return;
-  const next = `${window.location.pathname}${window.location.search}`;
-  // basePath('/rm')：window.location 不带 next/link 的自动前缀，要显式补上
-  const target = next && next !== "/"
+  // window.location.pathname 在 basePath('/rm') 应用里包含 /rm 前缀，
+  // 而登录页的 router.push(next) 会自动再补一次 basePath —— 直接存
+  // pathname 会跳到 /rm/rm/...（404）。存 next 前先剥掉 /rm 前缀。
+  const raw = `${window.location.pathname}${window.location.search}`;
+  const next = raw.replace(/^\/rm(?=\/|$)/, "") || "/";
+  const target = next !== "/"
     ? `/rm/auth/login?next=${encodeURIComponent(next)}`
     : "/rm/auth/login";
   window.location.assign(target);
@@ -99,6 +102,73 @@ function isTokenExpired(token: string): boolean {
   }
 }
 
+// --- 刷新单飞（single-flight） ---
+// 旧实现里每个 authFetch 在 access token 过期后各自独立发 refresh 请求：
+// 面板一次并发 3-5 个调用 → 3-5 个并发 refresh → 第一个轮换成功，
+// 其余全部 P2025。服务端按盗用检测改为 401 后，必须有此单飞兜底：
+// 同 tab 内共享同一个 refresh Promise；跨 tab 则靠 401 后重读共享
+// localStorage（胜方 tab 已把新 token 写进去）再试一次。
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function postRefresh(refreshToken: string): Promise<Response> {
+  return fetch(`${AUTH_API}/api/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+}
+
+async function storeRefreshResponse(res: Response): Promise<boolean> {
+  const data = await res.json();
+  setTokens(data.access_token, data.refresh_token);
+  setUser(data.user);
+  return true;
+}
+
+function refreshTokens(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    const refresh = getRefreshToken();
+    if (!refresh) return false;
+    try {
+      const res = await postRefresh(refresh);
+      if (res.ok) return await storeRefreshResponse(res);
+
+      // 失败时先看重 token 是否已被其他 tab 轮换：是则用新 token 重试一次
+      const current = getRefreshToken();
+      if (current && current !== refresh) {
+        try {
+          const retry = await postRefresh(current);
+          if (retry.ok) return await storeRefreshResponse(retry);
+          // 新 token 也被明确拒绝（401/400）：凭证链已失效，清除重登
+          if (retry.status === 401 || retry.status === 400) {
+            clearTokens();
+            return false;
+          }
+        } catch {
+          // 重试网络失败：不清 token，按网络异常处理
+          return false;
+        }
+      }
+      // 服务端明确拒绝（401/400）：凭证确实失效，清除
+      if (res.status === 401 || res.status === 400) {
+        // 清除前再确认共享存储没被其他 tab 更新（避免误清新 token）
+        if (getRefreshToken() === refresh) clearTokens();
+      }
+      return false;
+    } catch {
+      // 网络层失败（断网/DNS/CORS 等 fetch 抛异常）：服务端并未拒绝刷新，
+      // 保留 token 不清除，返回 false 让调用方稍后重试
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
 export async function getValidToken(): Promise<string | null> {
   const access = getAccessToken();
   if (access && !isTokenExpired(access)) {
@@ -106,28 +176,9 @@ export async function getValidToken(): Promise<string | null> {
     return access;
   }
 
-  const refresh = getRefreshToken();
-  if (!refresh) return null;
-
-  try {
-    const res = await fetch(`${AUTH_API}/api/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refresh }),
-    });
-    if (!res.ok) {
-      clearTokens();
-      return null;
-    }
-    const data = await res.json();
-    setTokens(data.access_token, data.refresh_token);
-    setUser(data.user);
-    return data.access_token;
-  } catch {
-    // 网络层失败（断网/DNS/CORS 等 fetch 抛异常）：服务端并未拒绝刷新，
-    // 保留 token 不清除，返回 null 让调用方稍后重试（同 ensureFreshToken）
-    return null;
-  }
+  if (!getRefreshToken()) return null;
+  const ok = await refreshTokens();
+  return ok ? getAccessToken() : null;
 }
 
 /**
@@ -136,22 +187,7 @@ export async function getValidToken(): Promise<string | null> {
  * Returns true if a fresh access token was obtained.
  */
 export async function ensureFreshToken(): Promise<boolean> {
-  const refresh = getRefreshToken();
-  if (!refresh) return false;
-  try {
-    const res = await fetch(`${AUTH_API}/api/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refresh }),
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    setTokens(data.access_token, data.refresh_token);
-    setUser(data.user);
-    return true;
-  } catch {
-    return false;
-  }
+  return refreshTokens();
 }
 
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {

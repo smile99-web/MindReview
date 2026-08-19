@@ -214,7 +214,7 @@ function PracticeContent() {
   useEffect(() => { document.title = '练习 - 知图复习'; }, []);
 
   useEffect(() => {
-    authFetch('/api/knowledge?limit=100')
+    authFetch('/api/knowledge?limit=200')
       .then(res => res.json())
       .then((data: KnowledgeResponse) => setNodes(data.nodes || []))
       .catch(console.error);
@@ -1011,11 +1011,21 @@ function PracticeContent() {
                   size="sm"
                   onClick={async () => {
                     const text = questions.map((q) => q.stem || '').join('。');
-                    await authFetch('/api/tts', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ text, contentType: 'question' }),
-                    });
+                    try {
+                      const res = await authFetch('/api/tts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text, contentType: 'question' }),
+                      });
+                      // 响应里的 audioUrl 此前被丢弃——付了 TTS 费用却没播放
+                      const data = await res.json() as { audioUrl?: string };
+                      if (res.ok && data.audioUrl) {
+                        const audio = new Audio(data.audioUrl);
+                        void audio.play().catch(() => {});
+                      }
+                    } catch (err) {
+                      console.error(err);
+                    }
                   }}
                 >
                   朗读题目

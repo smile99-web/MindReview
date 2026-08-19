@@ -1,6 +1,7 @@
 "use client";
 
 import { useChat } from "./ChatProvider";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 /**
  * Left-side floating tab for opening the AI tutor chat panel.
@@ -8,6 +9,10 @@ import { useChat } from "./ChatProvider";
  */
 export function ChatLauncher() {
   const { open, toggleChat } = useChat();
+  const { user } = useAuth();
+  // 未登录时不渲染：登录页/首页上悬浮的"AI 老师"按钮会把未登录用户
+  // 引进一个必然 401 的聊天面板
+  if (!user) return null;
 
   return (
     <button

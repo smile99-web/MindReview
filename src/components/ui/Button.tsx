@@ -27,10 +27,13 @@ export function Button({
   loading = false,
   className,
   disabled,
+  type,
   ...props
 }: ButtonProps) {
   return (
     <button
+      // 默认 type="button"：放进 form 时不会意外触发表单提交
+      type={type ?? 'button'}
       className={cn(
         'inline-flex items-center justify-center gap-2 font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed',
         variantClasses[variant],

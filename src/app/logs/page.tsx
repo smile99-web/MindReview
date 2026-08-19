@@ -1,7 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/auth';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -39,16 +39,28 @@ interface AiLog {
   tokensUsed?: number | null;
 }
 
+interface UsageSummary {
+  month: string;
+  totalCalls: number;
+  totalMinutes: number;
+  byGenerator: Record<string, { success: number; failed: number; totalMs: number }>;
+  daily: Array<{ date: string; count: number }>;
+}
+
 export default function AILogsPage() {
   const [logs, setLogs] = useState<AiLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
+  // 请求序号：快速切 filter/page 时，慢的旧响应不得覆盖新响应
+  const fetchSeqRef = useRef(0);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const fetchLogs = useCallback(async (currentFilter: string, currentPage: number) => {
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     try {
       // UI 单选 → 后端 types 多值（AiGenerationLog.generatorType 实际是细粒度值，
@@ -61,6 +73,7 @@ export default function AILogsPage() {
         limit: String(PAGE_SIZE),
       });
       const res = await authFetch(`/api/ai?${params.toString()}`);
+      if (seq !== fetchSeqRef.current) return; // 已有更新的请求，丢弃过期响应
       if (res.ok) {
         const data = await res.json();
         setLogs(data.logs || []);
@@ -70,14 +83,25 @@ export default function AILogsPage() {
         setTotal(0);
       }
     } catch {
+      if (seq !== fetchSeqRef.current) return;
       setLogs([]);
       setTotal(0);
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => { document.title = 'AI生成记录 - 知图复习'; }, []);
+
+  // 本月用量面板（管理员接口，非管理员 403 时静默隐藏）
+  useEffect(() => {
+    let cancelled = false;
+    authFetch('/api/ai/usage')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (!cancelled && data) setUsage(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -149,6 +173,46 @@ export default function AILogsPage() {
         <h1 className="text-[28px] font-bold text-slate-800 tracking-tight">AI生成记录</h1>
         <p className="text-slate-500 mt-1.5 text-[15px]">查看所有AI生成任务的历史记录</p>
       </div>
+
+      {/* 本月用量面板 */}
+      {usage && (
+        <Card className="mb-6">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div>
+              <div className="text-[11px] text-slate-400">{usage.month} 月调用量</div>
+              <div className="text-xl font-bold text-slate-800 tabular-nums">{usage.totalCalls} 次</div>
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-400">累计耗时</div>
+              <div className="text-xl font-bold text-slate-800 tabular-nums">{usage.totalMinutes} 分钟</div>
+            </div>
+            <div className="flex flex-wrap gap-3 ml-auto text-xs text-slate-500">
+              {Object.entries(usage.byGenerator).map(([type, s]) => (
+                <span key={type} className="tabular-nums">
+                  <span className="text-slate-400">{getTypeLabel(type)}</span>{' '}
+                  {s.success + s.failed}
+                  {s.failed > 0 && <span className="text-rose-500">（败 {s.failed}）</span>}
+                </span>
+              ))}
+            </div>
+          </div>
+          {usage.daily.length > 0 && (
+            <div className="mt-3 flex items-end gap-1 h-10">
+              {usage.daily.map((d) => {
+                const max = Math.max(...usage.daily.map((x) => x.count), 1);
+                return (
+                  <div
+                    key={d.date}
+                    title={`${d.date}: ${d.count} 次`}
+                    className="flex-1 bg-indigo-200/70 rounded-sm min-h-[2px]"
+                    style={{ height: `${Math.max(4, (d.count / max) * 40)}px` }}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* 筛选 */}
       <div className="flex gap-2 mb-6">

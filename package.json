@@ -13,6 +13,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "node scripts/postbuild-standalone.mjs",
     "start": "next start",
     "lint": "eslint",
     "smoke:api": "node scripts/smoke-api.mjs",

@@ -207,9 +207,10 @@ export default function SubjectDetailPage() {
   const [learningPath, setLearningPath] = useState<LearningPath | null>(null);
   const [blockedNodes, setBlockedNodes] = useState<BlockedNode[]>([]);
   const [pathLoading, setPathLoading] = useState(false);
+  const [pathError, setPathError] = useState<string | null>(null);
   const [showPath, setShowPath] = useState(false);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (isCancelled?: () => boolean) => {
     setLoading(true);
     try {
       const [subjRes, chRes, nodeRes] = await Promise.all([
@@ -218,6 +219,13 @@ export default function SubjectDetailPage() {
         authFetch(`/api/knowledge?subjectId=${id}&limit=100`),
       ]);
 
+      // /subjects/A→B 切换时，A 的晚到响应不得覆盖 B 的数据
+      if (isCancelled?.()) return;
+      // 任一请求非 200（如 500）时 body 不是数组/列表：不查 ok 会把
+      // "服务器错误"误报成"学科不存在"
+      if (!subjRes.ok || !chRes.ok || !nodeRes.ok) {
+        throw new Error(`加载失败 (${[subjRes, chRes, nodeRes].find((r) => !r.ok)?.status})`);
+      }
       const subjects = await subjRes.json() as SubjectsResponseItem[];
       const currentSubject = subjects.find((s) => s.id === id);
       setSubject(currentSubject || null);
@@ -225,16 +233,20 @@ export default function SubjectDetailPage() {
       const knowledgeResult = await nodeRes.json() as KnowledgeResponse;
       setNodes(knowledgeResult.nodes || []);
     } catch (err) {
-      console.error(err);
+      if (!isCancelled?.()) console.error(err);
     } finally {
-      setLoading(false);
+      if (!isCancelled?.()) setLoading(false);
     }
   }, [id]);
 
   useEffect(() => {
+    let cancelled = false;
     queueMicrotask(() => {
-      void loadData();
+      void loadData(() => cancelled);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [loadData]);
 
   useEffect(() => {
@@ -281,16 +293,21 @@ export default function SubjectDetailPage() {
   const handleGeneratePath = async () => {
     setPathLoading(true);
     setShowPath(true);
+    setPathError(null);
     try {
       const res = await authFetch('/api/path/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subjectId: id, userId }),
       });
-      const data = await res.json() as GeneratePathResponse;
+      const data = await res.json() as GeneratePathResponse & { error?: string };
+      // 404/500 不能再被渲染成「暂无学习路径数据」
+      if (!res.ok) throw new Error(data.error || '生成失败');
       setLearningPath(data.path || null);
       setBlockedNodes(data.blockedNodes || []);
-    } catch { /* ignore */ }
+    } catch (err: unknown) {
+      setPathError(err instanceof Error ? err.message : '生成失败');
+    }
     setPathLoading(false);
   };
 
@@ -461,6 +478,8 @@ export default function SubjectDetailPage() {
               <div className="space-y-3">
                 {[1, 2, 3, 4].map(i => <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse" />)}
               </div>
+            ) : pathError ? (
+              <p className="text-sm text-rose-600">{pathError}</p>
             ) : learningPath ? (
               <div className="space-y-0">
                 {learningPath.steps?.map((step, i) => {

@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   try {
     const userId = getAuthenticatedUserId(request);
     if (!userId) {
-      return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ detail: 'Unauthorized', error: 'Unauthorized' }, { status: 401 });
     }
     const codes = await prisma.inviteCode.findMany({
       where: { createdById: userId },
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json({ codes });
   } catch {
-    return NextResponse.json({ detail: '服务器内部错误' }, { status: 500 });
+    return NextResponse.json({ detail: '服务器内部错误', error: '服务器内部错误' }, { status: 500 });
   }
 }
 
@@ -38,12 +38,12 @@ export async function POST(request: NextRequest) {
   try {
     const userId = getAuthenticatedUserId(request);
     if (!userId) {
-      return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ detail: 'Unauthorized', error: 'Unauthorized' }, { status: 401 });
     }
     const count = await prisma.inviteCode.count({ where: { createdById: userId } });
     if (count >= MAX_CODES_PER_USER) {
       return NextResponse.json(
-        { detail: `最多同时持有 ${MAX_CODES_PER_USER} 个推荐码，可先删除不用的` },
+        { detail: `最多同时持有 ${MAX_CODES_PER_USER} 个推荐码，可先删除不用的`, error: `最多同时持有 ${MAX_CODES_PER_USER} 个推荐码，可先删除不用的` },
         { status: 400 }
       );
     }
@@ -60,9 +60,9 @@ export async function POST(request: NextRequest) {
         throw err;
       }
     }
-    return NextResponse.json({ detail: '生成失败，请重试' }, { status: 500 });
+    return NextResponse.json({ detail: '生成失败，请重试', error: '生成失败，请重试' }, { status: 500 });
   } catch {
-    return NextResponse.json({ detail: '服务器内部错误' }, { status: 500 });
+    return NextResponse.json({ detail: '服务器内部错误', error: '服务器内部错误' }, { status: 500 });
   }
 }
 
@@ -72,18 +72,18 @@ export async function DELETE(request: NextRequest) {
   try {
     const userId = getAuthenticatedUserId(request);
     if (!userId) {
-      return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ detail: 'Unauthorized', error: 'Unauthorized' }, { status: 401 });
     }
     const id = new URL(request.url).searchParams.get('id');
     if (!id) {
-      return NextResponse.json({ detail: '缺少 id 参数' }, { status: 400 });
+      return NextResponse.json({ detail: '缺少 id 参数', error: '缺少 id 参数' }, { status: 400 });
     }
     const result = await prisma.inviteCode.deleteMany({ where: { id, createdById: userId } });
     if (result.count === 0) {
-      return NextResponse.json({ detail: '推荐码不存在' }, { status: 404 });
+      return NextResponse.json({ detail: '推荐码不存在', error: '推荐码不存在' }, { status: 404 });
     }
     return NextResponse.json({ ok: true });
   } catch {
-    return NextResponse.json({ detail: '服务器内部错误' }, { status: 500 });
+    return NextResponse.json({ detail: '服务器内部错误', error: '服务器内部错误' }, { status: 500 });
   }
 }

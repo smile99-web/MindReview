@@ -1,7 +1,8 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { analyzeMistake } from '@/lib/llm-client';
+import { fsrsInitial } from '@/lib/fsrs';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import type { Prisma } from '@prisma/client';
 
@@ -46,13 +47,16 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(mistakes);
   } catch (error: unknown) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: getErrorStatus(error) });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const subjectId = asString(body?.subjectId) || null;
     const knowledgeNodeId = asString(body?.knowledgeNodeId) || null;
     const questionText = asString(body?.questionText);
@@ -102,6 +106,11 @@ export async function POST(req: NextRequest) {
       };
     }
 
+    // fsrsInitial 提供统一的新错题 FSRS 初始状态（state:'new', stability:1,
+    // nextReviewAt=+1天）。此前不落这些字段：nextReviewAt=null 靠查询端
+    // "null 视为立即到期"兜底，与 practice/route.ts 手写初始状态两处口径
+    // 不统一，任何一处查询口径改动都会断（fsrs.ts 注释声明的用法）。
+    const fsrsInit = fsrsInitial();
     const mistake = await prisma.mistake.create({
       data: {
         userId,
@@ -112,11 +121,18 @@ export async function POST(req: NextRequest) {
         correctAnswer,
         mistakeType: analysis.mistakeType || 'conceptual',
         analysis: analysis.analysis || '',
+        state: fsrsInit.state,
+        stability: fsrsInit.stability,
+        difficulty: fsrsInit.difficulty,
+        reps: fsrsInit.reps,
+        lapses: fsrsInit.lapses,
+        lastReviewAt: fsrsInit.lastReviewAt,
+        nextReviewAt: fsrsInit.nextReviewAt,
       },
     });
 
     return NextResponse.json({ success: true, mistake, analysis });
   } catch (error: unknown) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: getErrorStatus(error) });
   }
 }

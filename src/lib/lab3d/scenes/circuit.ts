@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 import * as THREE from 'three';
 import type { Scene3DDefinition, SceneContext, SceneHandle } from '../types';
-import { addStageBasics, cylinderBetween, makeLabel, std } from '../three-utils';
+import { addStageBasics, cylinderBetween, disposeObject, makeLabel, std } from '../three-utils';
 
 // 矩形回路的四个角（x-z 平面，离地 y=1.2）
 const Y = 1.2;
@@ -45,6 +45,7 @@ export const circuitScene: Scene3DDefinition = {
   controls: [
     { kind: 'button', id: 'switch', label: '🔘 闭合 / 断开开关' },
     { kind: 'slider', id: 'voltage', label: '电压 U', min: 1.5, max: 9, step: 0.5, defaultValue: 3, unit: 'V' },
+    { kind: 'slider', id: 'r', label: '电阻 R', min: 1, max: 10, step: 0.5, defaultValue: 3, unit: 'Ω' },
   ],
   steps: [
     {
@@ -65,6 +66,7 @@ export const circuitScene: Scene3DDefinition = {
     let step = 0;
     let closed = false;
     let voltage = 3;
+    let r = 3;
     let flowT = 0;
 
     // 导线回路
@@ -147,8 +149,18 @@ export const circuitScene: Scene3DDefinition = {
     info.position.set(0, Y - 1.1, 0);
     ctx.scene.add(info);
 
+    const refreshInfo = () => {
+      const speedText = `U = ${voltage}V，R = ${r}Ω，I = ${(voltage / r).toFixed(2)}A`;
+      info.material.map?.dispose();
+      info.material.dispose();
+      const nl = makeLabel(speedText, { fontSize: 40, scale: 0.95, color: '#0f766e' });
+      info.material = nl.material;
+      info.scale.copy(nl.scale);
+    };
+
     const applyStep = () => {
       arrowLabel.visible = step >= 1;
+      if (step === 0) closed = false; // 回退到第1步时保持开关断开
       if (step === 1 && !closed) closed = true; // 第2步自动闭合
     };
 
@@ -159,22 +171,23 @@ export const circuitScene: Scene3DDefinition = {
       },
       setParam(id, value) {
         if (id === 'switch') closed = !closed;
-        if (id === 'voltage') {
-          voltage = Number(value);
-          const speedText = `U = ${voltage}V，I = ${(voltage / 3).toFixed(1)}A`;
-          info.material.map?.dispose();
-          info.material.dispose();
-          const nl = makeLabel(speedText, { fontSize: 40, scale: 0.95, color: '#0f766e' });
-          info.material = nl.material;
-          info.scale.copy(nl.scale);
-        }
+        if (id === 'voltage') voltage = Number(value);
+        if (id === 'r') r = Number(value);
+        if (id === 'voltage' || id === 'r') refreshInfo();
+      },
+      getReadouts() {
+        return [
+          { label: '电流 I', value: closed ? `${(voltage / r).toFixed(2)} A` : '0 A（断开）' },
+          { label: '电阻 R', value: `${r} Ω` },
+          { label: '电功率 P', value: closed ? `${((voltage * voltage) / r).toFixed(2)} W` : '0 W' },
+        ];
       },
       update(dt) {
         // 开关闸刀动画
         const targetAngle = closed ? 0 : -0.55;
         bladePivot.rotation.z = THREE.MathUtils.damp(bladePivot.rotation.z, targetAngle, 8, dt);
-        // 电子流动：欧姆定律 I = U/R，R 固定 3Ω
-        const current = closed ? voltage / 3 : 0;
+        // 电子流动：欧姆定律 I = U/R
+        const current = closed ? voltage / r : 0;
         flowT += dt * current * 0.06;
         electrons.forEach((m, i) => {
           loopPoint(i / N_E + flowT, tmp);
@@ -188,6 +201,7 @@ export const circuitScene: Scene3DDefinition = {
       },
       dispose() {
         ctx.scene.remove(battery, bulbGroup, switchGroup, arrowLabel, info);
+        [battery, bulbGroup, switchGroup, arrowLabel, info].forEach((o) => disposeObject(o));
         electrons.forEach((m) => ctx.scene.remove(m));
         eGeo.dispose();
         eMat.dispose();

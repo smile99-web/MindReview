@@ -40,7 +40,10 @@ function shuffle<T>(arr: T[]): T[] {
 export async function POST(req: NextRequest) {
   try {
     const userId = await resolveUserIdFromRequest(req);
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     if (body.action === 'create') return await createTask(body, userId);
     if (body.action === 'grade') return await gradeTask(body);
     return NextResponse.json({ error: 'action 必须是 create 或 grade' }, { status: 400 });
@@ -192,7 +195,12 @@ async function gradeTask(body: { token?: unknown; answers?: unknown }) {
         if (typeof j.i !== 'number') continue;
         const item = payload.items[j.i];
         if (!item) continue;
-        labelJudgements.set(item.edgeId, { ok: j.ok === true, comment: (j.comment || '').slice(0, 80) });
+        labelJudgements.set(item.edgeId, {
+          ok: j.ok === true,
+          // comment 必须判字符串：LLM 返回数字/对象时 (x||'').slice 抛
+          // TypeError，整批描述评判会被静默丢弃
+          comment: typeof j.comment === 'string' ? j.comment.slice(0, 80) : '',
+        });
       }
       labelGraded = true;
     } catch {

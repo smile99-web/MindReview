@@ -1,4 +1,5 @@
 import { getErrorMessage } from '@/lib/errors';
+import { rateLimit } from '@/lib/rate-limit';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { analyzeMistake, generateQuestions, gradeConstructedAnswer } from '@/lib/llm-client';
@@ -6,6 +7,7 @@ import { sm2 } from '@/lib/sm2';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
 import {
   getOrCreateUserKnowledgeProgress,
+  loadProgressByNodeId,
   updateUserKnowledgeProgress,
 } from '@/lib/user-knowledge-progress';
 import type { Prisma } from '@prisma/client';
@@ -235,11 +237,14 @@ async function gradePracticeAnswer(options: {
   );
 
   if (!shouldUseAiGrading(options.question.questionType)) {
+    // 客观题（选择/填空）忽略 selfQuality：规则判定结果才可信——
+    // 选择题答错却自评 5 分会按"完美回忆"排期，污染 SM-2 调度数据。
+    // 自评仅对 AI 判分题型（short_answer/variant）有意义（见下方分支）。
     return {
       isCorrect: ruleResult.isCorrect,
-      quality: qualityFromCorrectness(ruleResult.isCorrect, options.selfQuality),
+      quality: qualityFromCorrectness(ruleResult.isCorrect, null),
       feedback: null,
-      source: options.selfQuality !== null ? 'self' : 'rule',
+      source: 'rule',
     };
   }
 
@@ -285,7 +290,7 @@ export async function GET(req: NextRequest) {
       return handlePracticeHistory(await resolveUserIdFromRequest(req));
     }
 
-    await resolveUserIdFromRequest(req);
+    const practiceUserId = await resolveUserIdFromRequest(req);
 
     const knowledgeNodeId = searchParams.get('knowledgeNodeId');
     const icapLevelRaw = searchParams.get('icapLevel') || 'Active';
@@ -352,6 +357,23 @@ export async function GET(req: NextRequest) {
 
     // --- if insufficient, generate via LLM ---
     if (existingQuestions.length < count) {
+      // 限流：只有真正要调 LLM 出题才计数（题库命中不计），
+      // 掌握训练每轮 forceGenerate 一题，40 次/小时对正常使用足够。
+      const rl = rateLimit(`practice-gen:${practiceUserId}`, 40, 60 * 60 * 1000);
+      if (!rl.ok) {
+        if (existingQuestions.length > 0) {
+          return NextResponse.json({
+            questions: existingQuestions,
+            knowledgeNode: { id: knowledgeNode.id, title: knowledgeNode.title, summary: knowledgeNode.summary },
+            icapLevel,
+            total: existingQuestions.length,
+          });
+        }
+        return NextResponse.json(
+          { error: '出题太频繁了，请稍后再试' },
+          { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+        );
+      }
       const needed = forceGenerate ? count : count - existingQuestions.length;
       const questionTypeDesc = pickQuestionTypeForIcap(icapLevel);
 
@@ -435,11 +457,16 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as PracticeRequestBody;
+    const body = (await req.json().catch(() => null)) as PracticeRequestBody | null;
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
 
     // --- Mode 1: generate ---
     if (body.action === 'generate') {
-      return handleGenerateQuestion(body);
+      // 与 GET 出题分支同一威胁模型：付费 LLM 调用必须鉴权 + 限流
+      // （此前直接进 handler，GET 端 40 次/小时的配额可被 POST 绕过）
+      return handleGenerateQuestion(body, await resolveUserIdFromRequest(req));
     }
 
     // --- Mode 2: submit answer ---
@@ -478,10 +505,16 @@ async function handlePracticeRecommendations(uid: string) {
 
   const seen = new Set<string>();
   const recommendations = logs
-    .filter((log) => log.knowledgeNode && !seen.has(log.knowledgeNode.id))
+    // 去重必须发生在 filter 回调内（add 当场执行）：旧实现把 add 放在
+    // slice 后的 map 里，filter 跑完时 seen 仍为空 → 去重条件恒 true，
+    // 同一知识点可占满 12 条推荐
+    .filter((log) => {
+      if (!log.knowledgeNode || seen.has(log.knowledgeNode.id)) return false;
+      seen.add(log.knowledgeNode.id);
+      return true;
+    })
     .slice(0, 12)
     .map((log) => {
-      seen.add(log.knowledgeNode!.id);
       return {
         id: `review_low_quality_${log.knowledgeNode!.id}`,
         type: 'review_low_quality',
@@ -494,6 +527,14 @@ async function handlePracticeRecommendations(uid: string) {
         targetUrl: `/practice?nodeId=${encodeURIComponent(log.knowledgeNode!.id)}&icapLevel=Active`,
       };
     });
+
+  // 掌握度必须取自该用户的 UserKnowledgeProgress：KnowledgeNode.masteryLevel
+  // 是全局默认值（恒 0），直接展示会长期显示"未掌握"
+  const recNodeIds = recommendations.map((r) => r.nodeId);
+  const progressMap = await loadProgressByNodeId(uid, recNodeIds, prisma);
+  for (const rec of recommendations) {
+    rec.masteryLevel = progressMap.get(rec.nodeId)?.masteryLevel ?? rec.masteryLevel;
+  }
 
   return NextResponse.json({ recommendations });
 }
@@ -537,7 +578,7 @@ async function handlePracticeHistory(uid: string) {
 // POST sub-handlers
 // ---------------------------------------------------------------------------
 
-async function handleGenerateQuestion(body: PracticeRequestBody) {
+async function handleGenerateQuestion(body: PracticeRequestBody, uid: string) {
   const knowledgeNodeId = typeof body.knowledgeNodeId === 'string' ? body.knowledgeNodeId : '';
   const icapLevelRaw = typeof body.icapLevel === 'string' ? body.icapLevel : 'Active';
   // NaN/Infinity 会穿透 Math.min/max 得到 NaN，导致 LLM 调用拿到非法 count
@@ -580,6 +621,16 @@ async function handleGenerateQuestion(body: PracticeRequestBody) {
 
   if (!knowledgeNode) {
     return NextResponse.json({ error: 'KnowledgeNode not found' }, { status: 404 });
+  }
+
+  // 限流：与 GET 出题分支同额（40 次/小时）。放在校验之后——
+  // 无效请求（400/404）不烧配额
+  const rl = rateLimit(`practice-gen:${uid}`, 40, 60 * 60 * 1000);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: '出题太频繁了，请稍后再试' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+    );
   }
 
   const questionTypeDesc = pickQuestionTypeForIcap(icapLevel);

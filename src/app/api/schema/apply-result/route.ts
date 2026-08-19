@@ -1,4 +1,4 @@
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
@@ -39,6 +39,6 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ ok: true, id: attempt.id, score: attempt.score });
   } catch (error: unknown) {
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: getErrorStatus(error) });
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getErrorMessage } from '@/lib/errors';
+import { requireAdmin } from '@/lib/require-admin';
 
 const VALID_CARD_TYPES = ['summary', 'formula', 'diagram', 'timeline', 'template', 'mistake', 'worked_example'] as const;
 
@@ -50,7 +51,14 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    // 知识卡片挂在全站共享的 KnowledgeNode 上：写操作与 knowledge/[id]
+    // DELETE 同级，必须管理员（此前仅靠 proxy 单层，且无任何前端调用方）
+    const adminDenied = await requireAdmin(req);
+    if (adminDenied) return adminDenied;
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const { knowledgeNodeId, cardType, title, content, imageUrl, audioUrl, sortOrder } = body;
 
     if (!knowledgeNodeId || !cardType || !title) {

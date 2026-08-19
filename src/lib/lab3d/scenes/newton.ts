@@ -216,6 +216,20 @@ export const newtonScene: Scene3DDefinition = {
         }
         if (id === 'release') release();
       },
+      getReadouts() {
+        const surf = SURFACES[surface];
+        const drag = surf.decel === 0 ? '无（理想）' : surf.decel >= 2.5 ? '大' : surf.decel >= 1.2 ? '中' : '小';
+        const sliding = phase === 'flat' || phase === 'stopped';
+        return [
+          { label: '接触面', value: surf.name },
+          { label: '摩擦阻力', value: drag },
+          { label: '减速度 a', value: surf.decel === 0 ? '0（不减速）' : `${surf.decel.toFixed(1)} m/s²` },
+          {
+            label: '平面滑行距离',
+            value: sliding ? `${Math.max(x - RAMP_END_X, 0).toFixed(1)} m` : '—',
+          },
+        ];
+      },
       update(dt) {
         if (phase === 'ramp') {
           v += 1.9 * dt;

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { llmCall } from '@/lib/llm-client';
 import { generateImage } from '@/lib/image-client';
 import { getAuthenticatedUserId } from '@/lib/server-auth';
+import { rateLimit } from '@/lib/rate-limit';
 import type { Prisma } from '@prisma/client';
 
 const CHAT_TITLE_MAX_LEN = 30;
@@ -152,6 +153,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: `单条消息最多 ${MAX_USER_MESSAGE_LEN} 字` },
       { status: 400 },
+    );
+  }
+
+  // 限流：每次调用 1~2 次付费 LLM（+可选付费生图）。放在校验之后——
+  // 无效请求（400）不烧配额
+  const rl = rateLimit(`chat:${userId}`, 60, 60 * 60 * 1000);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: '对话太频繁了，请稍后再试' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
     );
   }
 

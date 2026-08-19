@@ -56,12 +56,11 @@ interface KnowledgeNodeOption {
 }
 
 function formatDate(dateStr: string): string {
-  try {
-    const d = new Date(dateStr);
-    return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
-  } catch {
-    return dateStr;
-  }
+  // new Date('garbage') 不抛异常而是得 Invalid Date：try/catch 无效，
+  // 会显示 "NaN年NaN月NaN日"
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 export default function SchemasPage() {
@@ -196,14 +195,14 @@ export default function SchemasPage() {
         throw new Error(data.error || `构建失败 (${res.status})`);
       }
       // 对照面板：学生的想法 vs AI 的关键洞见
-      const built = (data as { schema?: { title?: string; representationData?: { keyInsights?: unknown } } }).schema;
+      const built = (data as { schema?: { name?: string; title?: string; representationData?: { keyInsights?: unknown } } }).schema;
       const aiInsights = Array.isArray(built?.representationData?.keyInsights)
         ? (built!.representationData!.keyInsights as unknown[]).filter((x): x is string => typeof x === 'string')
         : [];
       setBuildCompare({
         mine: studentInsights.trim(),
         aiInsights,
-        schemaName: built?.title || schemaName.trim() || '新图式',
+        schemaName: built?.name || built?.title || schemaName.trim() || '新图式',
       });
       setSelectedNodeIds(new Set());
       setSchemaName('');

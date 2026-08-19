@@ -135,6 +135,8 @@ export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
   const [submitting, setSubmitting] = useState(false);
   const [completed, setCompleted] = useState(task.completed || false);
   const [selectedQuality, setSelectedQuality] = useState<number | null>(null);
+  // 用户实际点击的评分（用于按钮高亮）；selectedQuality 是提示扣减后的提交值
+  const [clickedQuality, setClickedQuality] = useState<number | null>(null);
   const [lastAttemptQuality, setLastAttemptQuality] = useState<number | null>(null);
   const [hintUsed, setHintUsed] = useState(false);
   const [hintRevealed, setHintRevealed] = useState(false);
@@ -160,6 +162,9 @@ export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
 
   const handleSubmitQuality = async (q: number) => {
     const adjustedQuality = hintUsed ? adjustQualityForHint(q, hintLevel) : q;
+    // 高亮必须标用户点的那颗按钮（q），不是扣减后的值（adjustedQuality）
+    // ——提交值正确但视觉反馈错位会让用户以为点错了按钮
+    setClickedQuality(q);
     setSelectedQuality(adjustedQuality);
     setLastAttemptQuality(adjustedQuality);
     setSubmitting(true);
@@ -350,7 +355,7 @@ export function ReviewTaskCard({ task, onComplete }: ReviewTaskCardProps) {
           <p className="text-sm font-medium text-slate-700 mb-3">回忆质量评分</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {QUALITY_OPTIONS.map((opt) => {
-              const isSelected = selectedQuality === opt.value;
+              const isSelected = clickedQuality === opt.value;
               return (
                 <button
                   key={opt.value}

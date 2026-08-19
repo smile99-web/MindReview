@@ -106,6 +106,13 @@ export function sm2(quality: number, previous: SM2Input["previous"]): SM2Result 
 
     // SM-2 难度系数更新 — 规范只在 q>=3 时更新 EF
     newEF = previous.easeFactor + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
+
+    // 规范 SM-2 的顺序是先更新 EF 再算 I(n) = I(n-1) × EF（用新 EF）：
+    // 此前用旧 EF，单次偏差 ≤0.14 倍
+    if (previous.repetitions >= 2) {
+      const cappedEF = Math.max(1.3, Number(newEF.toFixed(2)));
+      newInterval = Math.round(previous.intervalDays * cappedEF);
+    }
   } else {
     // 错误回忆 → 重置 reps 和 interval，EF 保持不变（canonical SuperMemo）
     // 之前的实现 -=(0.14+(3-q)*0.06) 是非规范的：lapse 时 EF 不应变化，
@@ -118,14 +125,24 @@ export function sm2(quality: number, previous: SM2Input["previous"]): SM2Result 
   newEF = Math.max(1.3, Number(newEF.toFixed(2)));
 
   // === 艾宾浩斯修正 ===
-  // 计算当前记忆强度
-  const strength = calcMemoryStrength(newEF, newReps, q);
+  // 记忆强度 S 锚定到"实际存活间隔"：距上次复习 gap 天后仍能答对（q≥3），
+  // 说明 S 足以支撑 gap 天。SM-2 排期的设计目标是到期日仍有 ~90% 保留率，
+  // 所以 S ≈ gap / -ln(0.9) ≈ gap × 9.49；同天连刷时 gap≈0，S 退回
+  // EF/reps 基础强度（临时突击不该给出低遗忘风险）。
+  // 旧实现 S 只看 EF/reps（恒为 2.5~6 天），interval 稍长 retention 就≈0，
+  // forgetRisk 恒显示 100%，且下方缩/延间隔分支永远不生效。
+  const dayMs = 24 * 60 * 60 * 1000;
+  const gapDays = previous.lastReviewAt
+    ? Math.max(0, (now.getTime() - new Date(previous.lastReviewAt).getTime()) / dayMs)
+    : 0;
+  const baseStrength = calcMemoryStrength(newEF, newReps, q);
+  const strength = q >= 3 ? Math.max(baseStrength, gapDays * 9.49) : baseStrength;
   // 预测在 newInterval 天后的保留率
   const retention = calcRetention(newInterval, strength);
   let forgetRisk = Math.round((1 - retention) * 100) / 100;
 
-  // 如果预测遗忘风险 > 20%，缩短间隔
-  // 如果预测遗忘风险 < 5%，可以适当延长
+  // 如果预测遗忘风险 > 25%，缩短间隔
+  // 如果预测遗忘风险 < 3%，可以适当延长
   if (forgetRisk > 0.25) {
     newInterval = Math.max(1, Math.floor(newInterval * 0.75));
   } else if (forgetRisk > 0.15) {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { llmCall } from '@/lib/llm-client';
 
 interface MistakeOption {
@@ -123,18 +123,36 @@ export async function POST(
       }
     } else {
       // Free-form. Trim + case-insensitive match. Accept close
-      // matches (>= 80% char overlap) as "partial".
+      // matches as "partial".
       const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
       isCorrect = norm(parsed.correctAnswer) === norm(userAnswer);
       if (isCorrect) matchExplanation = '你的答案与正确答案一致。';
       else {
-        // Looser match: at least 80% of correct chars appear in
-        // user answer. Avoids "0.5" vs "0.50" being marked wrong.
-        const correctChars = new Set(parsed.correctAnswer.replace(/\s+/g, ''));
-        const userChars = new Set(userAnswer.replace(/\s+/g, ''));
-        const overlap = [...correctChars].filter((c) => userChars.has(c)).length;
-        const partial = correctChars.size > 0 && overlap / correctChars.size >= 0.8;
-        if (partial) {
+        // 字符 bigram 的 Dice 相似度 ≥0.8 判基本一致（容忍 "0.5" vs "0.50"）。
+        // 旧实现只算"正确字符在用户答案里的覆盖率"，导致任何**包含**正确
+        // 答案字符的回答都算对（"13" 对 "3" 也判对）——集合必须双向约束。
+        const bigrams = (s: string): Set<string> => {
+          const clean = s.replace(/\s+/g, '');
+          if (clean.length <= 1) return new Set(clean ? [clean] : []);
+          const set = new Set<string>();
+          for (let i = 0; i < clean.length - 1; i++) set.add(clean.slice(i, i + 2));
+          return set;
+        };
+        const a = bigrams(parsed.correctAnswer);
+        const b = bigrams(userAnswer);
+        const inter = [...a].filter((g) => b.has(g)).length;
+        const dice = a.size + b.size > 0 ? (2 * inter) / (a.size + b.size) : 0;
+        // 包含正确答案且长度相近（≤1.6 倍）也判基本一致，但要防两个方向的误判：
+        // - 数值短答案："3" vs "13" 必须判错（纯数字答案阈值收紧到 ≥4 字符）
+        // - 文字答案："李白" vs "是李白" 应判对（≥2 字符即可包含判定）
+        const cleanCorrect = parsed.correctAnswer.replace(/\s+/g, '');
+        const cleanUser = userAnswer.replace(/\s+/g, '');
+        const minLenForContain = /^\d+(\.\d+)?$/.test(cleanCorrect) ? 4 : 2;
+        const contained =
+          cleanCorrect.length >= minLenForContain &&
+          cleanUser.includes(cleanCorrect) &&
+          cleanUser.length <= cleanCorrect.length * 1.6;
+        if (dice >= 0.8 || contained) {
           isCorrect = true;
           matchExplanation = '你的答案与正确答案基本一致（细微差异已忽略）。';
         } else {
@@ -198,7 +216,7 @@ ${parsed.options.length > 0
     console.error('[mistakes/check] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

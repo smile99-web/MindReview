@@ -41,6 +41,7 @@ export const buoyancyScene: Scene3DDefinition = {
       ],
       defaultValue: 'wood',
     },
+    { kind: 'slider', id: 'rho', label: '液体密度 ρ液', min: 600, max: 1600, step: 50, defaultValue: 1000, unit: 'kg/m³' },
     { kind: 'button', id: 'drop', label: '🫳 松手' },
   ],
   steps: [
@@ -71,6 +72,8 @@ export const buoyancyScene: Scene3DDefinition = {
     let phase: 'held' | 'fall' = 'held';
     let y = HOLD_Y;
     let vy = 0;
+    let rho = 1000; // 液体密度 kg/m³（水 = 1000）
+    let lastFrac = 0; // 当前浸没体积比例 V排/V
 
     // 水槽 + 水 + 溢水口
     const glassMat = std('#dbeafe', { transparent: true, opacity: 0.16, depthWrite: false });
@@ -194,10 +197,25 @@ export const buoyancyScene: Scene3DDefinition = {
           objKey = String(value) as ObjKey;
           resetObj();
         }
+        if (id === 'rho') {
+          rho = Number(value);
+        }
         if (id === 'drop' && phase === 'held') {
           phase = 'fall';
           vy = 0;
         }
+      },
+      getReadouts() {
+        const cfg = OBJS[objKey];
+        const rhoObj = (cfg.G / F_FULL) * 1000; // kg/m³（水中浸没浮力 F_FULL 反推）
+        const submerged = phase === 'fall' && lastFrac > 0.01;
+        const fB = F_FULL * (rho / 1000) * (submerged ? lastFrac : 1);
+        const state = Math.abs(rhoObj - rho) < 1e-6 ? '悬浮' : rhoObj < rho ? '漂浮' : '下沉';
+        return [
+          { label: '物体密度', value: `${(rhoObj / 1000).toFixed(2)} g/cm³` },
+          { label: submerged ? '浮力 F浮' : '浸没浮力', value: `${fB.toFixed(2)} N` },
+          { label: '状态', value: state },
+        ];
       },
       update(dt) {
         const cfg = OBJS[objKey];
@@ -206,7 +224,7 @@ export const buoyancyScene: Scene3DDefinition = {
         if (phase === 'fall') {
           const subBottom = y - half;
           const frac = THREE.MathUtils.clamp((WATER_Y - subBottom) / cfg.size, 0, 1);
-          const F = F_FULL * frac;
+          const F = F_FULL * (rho / 1000) * frac; // F浮 = ρ液·g·V排，F_FULL 为水（1000）时浸没浮力
           const a = ((F - cfg.G) / cfg.G) * G_EFF;
           vy += a * dt;
           vy *= 1 - Math.min(1.6 * frac * dt + 0.05 * dt, 0.5); // 水阻 + 空气阻
@@ -228,6 +246,7 @@ export const buoyancyScene: Scene3DDefinition = {
 
         // 排开液体高亮 + 量筒液面
         const frac = THREE.MathUtils.clamp((WATER_Y - (y - half)) / cfg.size, 0, 1);
+        lastFrac = frac;
         if (frac > 0.01) {
           const subH = frac * cfg.size;
           dispBox.visible = true;
@@ -251,7 +270,7 @@ export const buoyancyScene: Scene3DDefinition = {
           gArrow.set(tmpFrom.set(TANK_X - 0.55, y + 0.3, 0), tmpTo.set(TANK_X - 0.55, y + 0.3 - gLen, 0));
           gLab.position.set(TANK_X - 0.95, y + 0.3 - gLen, 0);
           if (frac > 0.01) {
-            const fLen = Math.max(F_FULL * frac * 0.7, 0.12);
+            const fLen = Math.max(F_FULL * (rho / 1000) * frac * 0.7, 0.12);
             fArrow.set(tmpFrom.set(TANK_X + 0.55, y - 0.3, 0), tmpTo.set(TANK_X + 0.55, y - 0.3 + fLen, 0));
             fLab.position.set(TANK_X + 1.05, y - 0.3 + fLen, 0);
           }

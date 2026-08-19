@@ -8,7 +8,6 @@ import { addStageBasics, disposeObject, makeArrow, makeLabel, std } from '../thr
 type SetupKey = 'fixed' | 'movable' | 'group';
 
 const BEAM_Y = 3.55;
-const G_N = 12; // 物重 12N
 const LIFT_H = 0.7; // 提升高度
 const SETUPS: Record<SetupKey, { n: number; name: string }> = {
   fixed: { n: 1, name: '定滑轮' },
@@ -37,6 +36,7 @@ export const pulleyScene: Scene3DDefinition = {
       ],
       defaultValue: 'movable',
     },
+    { kind: 'slider', id: 'g', label: '物重 G', min: 10, max: 100, step: 5, defaultValue: 12, unit: 'N' },
     { kind: 'button', id: 'lift', label: '⬆️ 匀速提升' },
   ],
   steps: [
@@ -64,6 +64,7 @@ export const pulleyScene: Scene3DDefinition = {
 
     let step = 0;
     let setup: SetupKey = 'movable';
+    let gN = 12; // 物重 G（N），可由滑块调节
     let liftDir: 1 | -1 = 1; // 1 提升 / -1 放下
     let liftT = 0; // 0 底部 … 1 顶部
     let moving = false;
@@ -138,7 +139,7 @@ export const pulleyScene: Scene3DDefinition = {
     const gArrow = makeArrow('#dc2626');
     const fArrow = makeArrow('#f59e0b');
     root.add(gArrow.group, fArrow.group);
-    const gLab = makeLabel(`G = ${G_N}N`, { fontSize: 36, scale: 0.8, color: '#b91c1c' });
+    const gLab = makeLabel('G = 12N', { fontSize: 36, scale: 0.8, color: '#b91c1c' });
     root.add(gLab);
     const fLab = makeLabel('', { fontSize: 36, scale: 0.8, color: '#b45309' });
     root.add(fLab);
@@ -188,10 +189,15 @@ export const pulleyScene: Scene3DDefinition = {
 
     const refreshInfo = () => {
       const n = SETUPS[setup].n;
-      setInfo(`${SETUPS[setup].name}：F = G ÷ ${n} = ${(G_N / n).toFixed(0)}N，s = ${n}h`);
+      setInfo(`${SETUPS[setup].name}：F = G ÷ ${n} = ${(gN / n).toFixed(0)}N，s = ${n}h`);
+      gLab.material.map?.dispose();
+      gLab.material.dispose();
+      const gl = makeLabel(`G = ${gN}N`, { fontSize: 36, scale: 0.8, color: '#b91c1c' });
+      gLab.material = gl.material;
+      gLab.scale.copy(gl.scale);
       fLab.material.map?.dispose();
       fLab.material.dispose();
-      const nl = makeLabel(`F = ${(G_N / n).toFixed(0)}N`, { fontSize: 36, scale: 0.8, color: '#b45309' });
+      const nl = makeLabel(`F = ${(gN / n).toFixed(0)}N`, { fontSize: 36, scale: 0.8, color: '#b45309' });
       fLab.material = nl.material;
       fLab.scale.copy(nl.scale);
     };
@@ -231,9 +237,21 @@ export const pulleyScene: Scene3DDefinition = {
           setup = String(value) as SetupKey;
           applySetup();
         }
+        if (id === 'g') {
+          gN = Number(value);
+          refreshInfo();
+        }
         if (id === 'lift' && !moving) {
           moving = true;
         }
+      },
+      getReadouts() {
+        const n = SETUPS[setup].n;
+        return [
+          { label: '绳子段数 n', value: `${n}` },
+          { label: '所需拉力 F=G/n', value: `${(gN / n).toFixed(1)} N` },
+          { label: '省力比例', value: n === 1 ? '不省力' : `省 ${((1 - 1 / n) * 100).toFixed(0)}%` },
+        ];
       },
       update(dt) {
         const n = SETUPS[setup].n;
@@ -300,7 +318,7 @@ export const pulleyScene: Scene3DDefinition = {
           tmpTo.set(load.position.x - 0.6, load.position.y - 1.1, 0),
         );
         gLab.position.set(load.position.x - 1.1, load.position.y - 0.7, 0);
-        const fLen = 0.25 + (G_N / n) * 0.08;
+        const fLen = 0.25 + Math.min((gN / n) * 0.08, 1.6); // 箭头长度随 F 增大，限幅防出镜
         if (setup === 'fixed') {
           fArrow.set(tmpFrom.set(0.3, hand.position.y + fLen, 0), tmpTo.set(0.3, hand.position.y, 0));
           fLab.position.set(0.75, hand.position.y + fLen + 0.2, 0);

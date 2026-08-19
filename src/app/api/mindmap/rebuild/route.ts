@@ -50,7 +50,10 @@ function edgeKey(fromId: string, toId: string, relationType: string): string {
 export async function POST(req: NextRequest) {
   try {
     await resolveUserIdFromRequest(req);
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     if (body.action === 'create') return await createTask(body);
     if (body.action === 'grade') return await gradeTask(body);
     return NextResponse.json({ error: 'action 必须是 create 或 grade' }, { status: 400 });

@@ -77,10 +77,20 @@ export default function MistakesLanding() {
   return (
     <div className="min-h-[calc(100vh-3.5rem)] bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 p-6">
       <div className="max-w-5xl mx-auto">
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">❌ 错题本</h1>
-        <p className="text-sm text-slate-500 mb-6">
-          按学科分类错题。重做时按艾宾浩斯曲线 + FSRS 重新调度 — 答对时暂时隐藏，下次到期时自动浮现。
-        </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800 mb-1">❌ 错题本</h1>
+            <p className="text-sm text-slate-500 mb-6">
+              按学科分类错题。重做时按艾宾浩斯曲线 + FSRS 重新调度 — 答对时暂时隐藏，下次到期时自动浮现。
+            </p>
+          </div>
+          <Link
+            href="/mistakes/print"
+            className="shrink-0 text-xs px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+          >
+            🖨 打印 / 导出
+          </Link>
+        </div>
 
         {/* Summary tiles */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
@@ -140,8 +150,11 @@ export default function MistakesLanding() {
                     </span>
                   </div>
                   <div className="text-sm text-slate-700 line-clamp-2">
-                    {d.questionText.replace(/\n/g, ' ').slice(0, 120)}
-                    {d.questionText.length > 120 ? '...' : ''}
+                    {/* 截断判断与截断对象必须同口径（都按压平换行后的文本） */}
+                    {(() => {
+                      const flat = d.questionText.replace(/\n/g, ' ');
+                      return flat.length > 120 ? `${flat.slice(0, 120)}...` : flat;
+                    })()}
                   </div>
                 </Link>
               ))}

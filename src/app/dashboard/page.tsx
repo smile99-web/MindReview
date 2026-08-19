@@ -1,7 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/auth';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Card, CardHeader } from '@/components/ui/Card';
@@ -58,6 +58,9 @@ export default function DashboardPage() {
   const [actionableSteps, setActionableSteps] = useState<ActionableStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  // /api/dashboard 成功返回才置 true——失败时 stats 保持全 0，
+  // 不能让「新用户诊断」面板把加载失败误判成新用户
+  const [statsLoaded, setStatsLoaded] = useState(false);
   const [diagnosticRunning, setDiagnosticRunning] = useState(false);
   const [diagnosticResult, setDiagnosticResult] = useState<{
     score: number;
@@ -74,19 +77,22 @@ export default function DashboardPage() {
     async function load() {
       try {
         const res = await authFetch('/api/dashboard');
-        const data = await res.json();
+        if (res.ok) {
+          const data = await res.json();
 
-        setSubjects(data.subjects || []);
-        setRecentNodes(data.recentNodes || []);
-        setDueTasks(data.dueTasks || []);
+          setSubjects(data.subjects || []);
+          setRecentNodes(data.recentNodes || []);
+          setDueTasks(data.dueTasks || []);
 
-        setStats({
-          totalNodes: data.stats?.totalNodes || 0,
-          reviewedToday: data.stats?.reviewedToday || 0,
-          pendingTasks: data.stats?.pendingTasks || 0,
-          totalMistakes: data.stats?.totalMistakes || 0,
-          totalReviewCount: data.stats?.totalReviewCount || 0,
-        });
+          setStats({
+            totalNodes: data.stats?.totalNodes || 0,
+            reviewedToday: data.stats?.reviewedToday || 0,
+            pendingTasks: data.stats?.pendingTasks || 0,
+            totalMistakes: data.stats?.totalMistakes || 0,
+            totalReviewCount: data.stats?.totalReviewCount || 0,
+          });
+          setStatsLoaded(true);
+        }
       } catch (err) {
         console.error('Dashboard load error:', err);
       } finally {
@@ -126,12 +132,12 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!userId) return;
     const dismissed = localStorage.getItem(`diagnostic_dismissed_${userId}`) === '1';
-    if (profileLoaded && stats.totalReviewCount === 0 && !diagnosticResult && !showDiagnostic && !dismissed) {
+    if (profileLoaded && statsLoaded && stats.totalReviewCount === 0 && !diagnosticResult && !showDiagnostic && !dismissed) {
       queueMicrotask(() => {
         setShowDiagnostic(true);
       });
     }
-  }, [profileLoaded, stats.totalReviewCount, diagnosticResult, showDiagnostic, userId]);
+  }, [profileLoaded, statsLoaded, stats.totalReviewCount, diagnosticResult, showDiagnostic, userId]);
 
   const handleRunDiagnostic = async () => {
     if (!userId || diagnosticRunning) return;
@@ -242,13 +248,16 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
-      <div className="mb-8">
-        <h1 className="text-[28px] font-bold text-slate-800 tracking-tight">
-          学习仪表盘
-        </h1>
-        <p className="text-slate-500 mt-1.5 text-[15px]">
-          欢迎回来，今天也要加油哦
-        </p>
+      <div className="mb-8 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-[28px] font-bold text-slate-800 tracking-tight">
+            学习仪表盘
+          </h1>
+          <p className="text-slate-500 mt-1.5 text-[15px]">
+            欢迎回来，今天也要加油哦
+          </p>
+        </div>
+        <ShareReportButton />
       </div>
 
       {/* 新手诊断 — Onboarding Diagnostic */}
@@ -552,7 +561,9 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-2 mt-1.5">
                   <MasteryBar level={task.knowledgeNode?.masteryLevel || 0} showLabel={false} />
                   <span className="text-[11px] text-amber-600 font-medium">
-                    {task.dueDate ? `截止: ${new Date(task.dueDate).toLocaleDateString('zh-CN')}` : '今日复习'}
+                    {task.dueDate && !Number.isNaN(new Date(task.dueDate).getTime())
+                      ? `截止: ${new Date(task.dueDate).toLocaleDateString('zh-CN')}`
+                      : '今日复习'}
                   </span>
                 </div>
               </Link>
@@ -580,5 +591,50 @@ export default function DashboardPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+/** 生成家长周报分享链接并复制到剪贴板 */
+function ShareReportButton() {
+  const [state, setState] = useState<'idle' | 'loading' | 'copied' | 'error'>('idle');
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 卸载时清理重置定时器
+  useEffect(() => () => {
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+  }, []);
+
+  const handleShare = async () => {
+    setState('loading');
+    try {
+      const res = await authFetch('/api/share', { method: 'POST' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.path) throw new Error(data?.error || '生成失败');
+      const url = `${window.location.origin}/rm${data.path}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        setState('copied');
+      } catch {
+        // 剪贴板不可用（HTTP 环境限制 clipboard API）：退化为弹窗展示链接
+        window.prompt('复制周报链接分享给家长：', url);
+        setState('copied');
+      }
+    } catch {
+      setState('error');
+    } finally {
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+      resetTimer.current = setTimeout(() => setState('idle'), 2500);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleShare}
+      disabled={state === 'loading'}
+      className="shrink-0 text-xs px-3 py-2 rounded-xl border border-indigo-200/70 text-indigo-600 hover:bg-indigo-50 transition-colors disabled:opacity-50"
+      title="生成只读周报链接，分享给家长"
+    >
+      {state === 'loading' ? '生成中…' : state === 'copied' ? '✓ 链接已复制' : state === 'error' ? '生成失败' : '📊 家长周报'}
+    </button>
   );
 }

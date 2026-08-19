@@ -8,6 +8,7 @@ import dynamic from 'next/dynamic';
 import { KnowledgeCardView } from '@/components/knowledge/KnowledgeCardView';
 import { LearningChecklist } from '@/components/knowledge/LearningChecklist';
 import { IcapPipeline } from '@/components/practice/IcapPipeline';
+import MasteryLoop from '@/components/practice/MasteryLoop';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -144,6 +145,17 @@ export default function KnowledgeCardPage() {
   const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { setKnowledgeContext } = useChat();
+
+  // 支持 ?tab=practice / ?tab=lab3d 深链（学习路径页的"练习"/"3D演示"按钮跳转过来）。
+  // 用 window.location 而不是 useSearchParams，避免给页面加 Suspense 边界；
+  // queueMicrotask 延迟 setState，与文件内其它 effect 的写法保持一致（lint 要求）。
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    if (tab === 'card' || tab === 'mindmap' || tab === 'practice' || tab === 'icap' || tab === 'lab3d') {
+      queueMicrotask(() => setActiveTab(tab));
+    }
+  }, []);
 
   const navigateToCard = useCallback((targetId?: string | null) => {
     if (!targetId || targetId === id) return;
@@ -652,6 +664,19 @@ export default function KnowledgeCardPage() {
             generatingImage={generatingImage}
             initialAudioUrl={audioUrl}
           />
+          {/* 学完立即练：思维导图 → 学 → 练 的闭环入口 */}
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-indigo-200/70 bg-gradient-to-r from-indigo-50/80 to-violet-50/80 px-5 py-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-slate-800">看完讲解了吗？马上练一练才真正学会</p>
+              <p className="mt-0.5 text-xs text-slate-500">答错立即讲解，连对 2 题即判定掌握</p>
+            </div>
+            <Button onClick={() => setActiveTab('practice')}>✏️ 去练习，直到掌握 →</Button>
+            {lab3dMatches.length > 0 && (
+              <Button variant="secondary" onClick={() => setActiveTab('lab3d')}>
+                🧊 看 3D 演示
+              </Button>
+            )}
+          </div>
           {imageUrl && (
             <Card className="mt-4">
               <div className="flex items-center justify-between mb-4">
@@ -787,6 +812,28 @@ export default function KnowledgeCardPage() {
 
       {activeTab === 'practice' && (
         <div className="space-y-4">
+          {/* 掌握训练：学 → 练 → 讲解 → 再练 → 直到掌握 */}
+          <MasteryLoop
+            key={`loop-${id}`}
+            nodeId={id}
+            nodeTitle={node.title}
+            nodeSummary={node.summary}
+            commonMistakes={node.commonMistakes}
+            hasLab3d={lab3dMatches.length > 0}
+            onGoLab3d={() => setActiveTab('lab3d')}
+            onPracticeCorrect={() => void markStep('practiced')}
+            nextNodeId={node.navigation?.next?.id ?? null}
+            nextNodeTitle={node.navigation?.next?.title ?? null}
+            subjectId={node.subjectId}
+          />
+
+          {/* 自由练习（题库多题）：折叠在掌握训练下方 */}
+          <details className="group rounded-2xl border border-slate-200/70 bg-white open:pb-1">
+            <summary className="cursor-pointer select-none px-5 py-3.5 text-sm font-semibold text-slate-600 transition hover:text-indigo-600">
+              📚 自由练习（题库整组练习，可选做）
+              <span className="ml-2 text-xs font-normal text-slate-400 group-open:hidden">点击展开</span>
+            </summary>
+            <div className="space-y-4 border-t border-slate-100 px-4 pt-4">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-slate-800 text-[15px]">练习题</h3>
             <Button size="sm" onClick={handleGenerateQuestions} loading={generatingQuestions}>
@@ -924,6 +971,8 @@ export default function KnowledgeCardPage() {
             );
             })
           )}
+            </div>
+          </details>
         </div>
       )}
 

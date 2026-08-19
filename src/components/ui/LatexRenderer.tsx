@@ -34,6 +34,9 @@ export function LatexRenderer({
         trust: false,
       });
     } catch {
+      // 先清空：latex 从合法变非法且 showRawOnError=false 时，容器会残留
+      // 上一次渲染的旧公式（静默展示错误数据）
+      el.textContent = '';
       if (showRawOnError) {
         el.textContent = latex;
       }

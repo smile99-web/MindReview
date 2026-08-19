@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import LearningPathView from '@/components/mindmap/LearningPathView';
 import { RELATION_LABELS, RELATION_COLORS } from '@/types';
 import type { RelationType } from '@/types';
 
@@ -64,9 +65,10 @@ function MindMapContent() {
   const chapterId = searchParams.get('chapterId');
 
   const [data, setData] = useState<{ nodes: MindMapNode[]; edges: MindMapEdge[] }>({ nodes: [], edges: [] });
+  // 学习路径=按年级推荐的串讲式学习（默认，解决"不知从哪开始"）；
   // 星空=进度仪表盘（看掌握度、导航）；命题视图=2D 关系列表（读命题）。
   // 学习科学研究：花哨 3D 无学习增益，命题（节点-连接词-节点）才是意义单元。
-  const [viewMode, setViewMode] = useState<'galaxy' | 'propositions'>('galaxy');
+  const [viewMode, setViewMode] = useState<'path' | 'galaxy' | 'propositions'>('path');
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('思维导图');
   const [showSchemas, setShowSchemas] = useState(false);
@@ -74,8 +76,20 @@ function MindMapContent() {
   const [subjectsLoading, setSubjectsLoading] = useState(false);
   const [relationGenerating, setRelationGenerating] = useState(false);
   const [relationMessage, setRelationMessage] = useState('');
+  // "补全导图关系"是管理操作（写全站共享图谱）：非管理员隐藏按钮，
+  // 而不是点了才收到 403
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  const loadData = useCallback(async (includeSchemas: boolean) => {
+  useEffect(() => {
+    let cancelled = false;
+    authFetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => { if (!cancelled && u?.isAdmin) setIsAdmin(true); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const loadData = useCallback(async (includeSchemas: boolean, isCancelled?: () => boolean) => {
     if (!subjectId && !chapterId) {
       setLoading(false);
       return;
@@ -89,6 +103,8 @@ function MindMapContent() {
 
       const res = await authFetch(`/api/mindmap?${params.toString()}`);
       const result = await res.json() as MindMapResponse;
+      // subjectId/chapterId/showSchemas 快速切换时，晚到的旧响应不得覆盖新数据
+      if (isCancelled?.()) return;
       const nodes = result.nodes || [];
       const edges = result.edges || [];
       setData({ nodes, edges });
@@ -99,33 +115,42 @@ function MindMapContent() {
             ? `${nodes[0].chapter?.title || '章节'} 思维导图`
             : `${nodes[0].subject?.name || '学科'} 思维导图`,
         );
+      } else {
+        // 切到空学科/章节时重置标题，避免残留上一个学科名
+        setTitle('思维导图');
       }
     } catch (err) {
-      console.error(err);
+      if (!isCancelled?.()) console.error(err);
     } finally {
-      setLoading(false);
+      if (!isCancelled?.()) setLoading(false);
     }
   }, [subjectId, chapterId]);
 
   useEffect(() => { document.title = '思维导图 - 知图复习'; }, []);
 
   useEffect(() => {
+    let cancelled = false;
     queueMicrotask(() => {
-      void loadData(showSchemas);
+      void loadData(showSchemas, () => cancelled);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [loadData, showSchemas]);
 
   // 无参数时加载学科列表
   useEffect(() => {
     if (!subjectId && !chapterId) {
+      let cancelled = false;
       queueMicrotask(() => {
         setSubjectsLoading(true);
         authFetch('/api/subjects')
-          .then(res => res.json())
-          .then(data => setSubjects(Array.isArray(data) ? data : data.subjects || []))
+          .then(res => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+          .then(data => { if (!cancelled) setSubjects(Array.isArray(data) ? data : data.subjects || []); })
           .catch(() => {})
-          .finally(() => setSubjectsLoading(false));
+          .finally(() => { if (!cancelled) setSubjectsLoading(false); });
       });
+      return () => { cancelled = true; };
     }
   }, [subjectId, chapterId]);
 
@@ -175,7 +200,8 @@ function MindMapContent() {
         <div>
           <h1 className="text-[28px] font-bold text-slate-800 tracking-tight">{title}</h1>
           <p className="text-slate-500 mt-1.5 text-[15px]">
-            掌握度仪表盘 · {data.nodes.length} 个知识点 · {data.edges.length} 条关系 · 星球越亮掌握越好 · 学会靠练不靠看：找茬 / 挖空 / 默画
+            按年级推荐学习路径 · 知识点关系串联 · 🧊 3D 演示助学 · 学完即练直到掌握
+            {viewMode !== 'path' && ` · ${data.nodes.length} 个知识点 · ${data.edges.length} 条关系`}
           </p>
         </div>
         <div className="flex gap-2 items-center">
@@ -218,9 +244,9 @@ function MindMapContent() {
           >
             🧩 默画
           </Button>
-          {/* 视图切换：星空（仪表盘）/ 命题（2D 关系列表） */}
+          {/* 视图切换：路径（按年级学习）/ 星空（仪表盘）/ 命题（2D 关系列表） */}
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-            {([['galaxy', '🌌 星空'], ['propositions', '📜 命题']] as const).map(([mode, label]) => (
+            {([['path', '🧭 路径'], ['galaxy', '🌌 星空'], ['propositions', '📜 命题']] as const).map(([mode, label]) => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
@@ -234,7 +260,7 @@ function MindMapContent() {
               </button>
             ))}
           </div>
-          {subjectId && (
+          {subjectId && isAdmin && (
             <Button
               variant="secondary"
               size="sm"
@@ -330,6 +356,8 @@ function MindMapContent() {
             </div>
           )}
         </div>
+      ) : viewMode === 'path' && subjectId ? (
+        <LearningPathView subjectId={subjectId} />
       ) : loading ? (
         <div className="h-[600px] bg-slate-100 rounded-2xl animate-pulse flex items-center justify-center">
           <p className="text-slate-400">加载中...</p>

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, getErrorStatus } from '@/lib/errors';
 import { resolveUserIdFromRequest } from '@/lib/user-context';
+import { rateLimit } from '@/lib/rate-limit';
 import { detectTransferOpportunities } from '@/lib/schema-builder';
 
 // POST /api/schema/transfer
@@ -16,10 +17,20 @@ import { detectTransferOpportunities } from '@/lib/schema-builder';
 // alongside the schema application exercise.
 export async function POST(req: NextRequest) {
   try {
-    // Auth gate — this route triggers an LLM call ($$$).
-    await resolveUserIdFromRequest(req);
+    // Auth gate + 限流：this route triggers an LLM call ($$$)
+    const userId = await resolveUserIdFromRequest(req);
+    const rl = rateLimit(`llm:${userId}`, 60, 60 * 60 * 1000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: 'AI 调用太频繁了，请稍后再试' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+      );
+    }
 
-    const body = (await req.json()) as { schemaNodeId?: unknown };
+    const body = (await req.json().catch(() => null)) as { schemaNodeId?: unknown } | null;
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: '请求体必须是 JSON 对象' }, { status: 400 });
+    }
     const schemaNodeId = typeof body.schemaNodeId === 'string' ? body.schemaNodeId.trim() : '';
     if (!schemaNodeId) {
       return NextResponse.json(
@@ -34,7 +45,7 @@ export async function POST(req: NextRequest) {
     console.error('[schema/transfer] Error:', error);
     return NextResponse.json(
       { error: getErrorMessage(error) },
-      { status: 500 },
+      { status: getErrorStatus(error) },
     );
   }
 }

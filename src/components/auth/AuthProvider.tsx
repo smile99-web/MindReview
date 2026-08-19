@@ -69,8 +69,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      await getValidToken();
-      const savedUser = getCurrentUser();
+      // getValidToken 返回 null 时（refresh 失败/凭证失效）不能照常
+      // setUser——否则本地 user 记录还在、token 已没了，页面处于
+      // "看似登录但所有请求都 401"的僵尸态
+      const token = await getValidToken();
+      const savedUser = token ? getCurrentUser() : null;
       if (!cancelled && savedUser) {
         setUser(savedUser);
       }
@@ -110,6 +113,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     apiLogout();
     setUser(null);
+    // 登出后必须离开受保护页：否则用户停留在 /dashboard 等页面，
+    // 数据仍渲染着，直到下次请求 401 才被踢走（proxy 的页面守卫
+    // 也只在导航时生效）
+    if (typeof window !== 'undefined') {
+      window.location.assign('/rm/');
+    }
   }, []);
 
   const getToken = useCallback(async () => {
